@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+/* ── 디자인 토큰 ────────────────────────────────────────────────────────
+   차트 색은 dataviz 레퍼런스 팔레트(검증된 기본값)를 그대로 씁니다.
+   다크 값은 밝은 값의 자동 반전이 아니라, 어두운 표면에 맞춰 따로 고른 단계입니다. */
+:root {
+  color-scheme: light;
+
+  --surface-0: #f7f7f5;
+  --surface-1: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e2e1dc;
+  --border-strong: #cfcec8;
+
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #85847e;
+
+  /* 카테고리 슬롯 (고정 순서, 순환 금지) */
+  --series-1: #2a78d6; /* blue   — 도달 */
+  --series-2: #eb6834; /* orange — 프로필 조회 */
+  --series-3: #1baf7a; /* aqua   — 참여 계정 */
+
+  /* 단일 계열 막대용 순차 램프 (ordinal 최소 대비 단계 이상) */
+  --seq-bar: #2a78d6;
+  --seq-bar-soft: #b7d3f6;
+
+  --status-good: #008300;
+  --status-warning: #eda100;
+  --status-critical: #e34948;
+
+  --accent: #4a3aa7;
+  --on-accent: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #242423;
+    --border: #333331;
+    --border-strong: #46463f;
+
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e85;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+
+    --seq-bar: #3987e5;
+    --seq-bar-soft: #184f95;
+
+    --status-good: #008300;
+    --status-warning: #c98500;
+    --status-critical: #e66767;
+
+    --accent: #9085e9;
+    --on-accent: #121211;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #242423;
+  --border: #333331;
+  --border-strong: #46463f;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8f8e85;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --seq-bar: #3987e5;
+  --seq-bar-soft: #184f95;
+  --status-good: #008300;
+  --status-warning: #c98500;
+  --status-critical: #e66767;
+  --accent: #9085e9;
+  --on-accent: #121211;
+}
+
+/* 토큰을 Tailwind 유틸리티(bg-surface-1, text-fg-2 …)로 노출 */
+@theme inline {
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-fg: var(--text-primary);
+  --color-fg-2: var(--text-secondary);
+  --color-fg-3: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-good: var(--status-good);
+  --color-warn: var(--status-warning);
+  --color-bad: var(--status-critical);
+  --color-s1: var(--series-1);
+  --color-s2: var(--series-2);
+  --color-s3: var(--series-3);
+  --color-seq: var(--seq-bar);
+  --color-seq-soft: var(--seq-bar-soft);
+}
+
+html,
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+}
+
+body {
+  font-family: ui-sans-serif, -apple-system, "Pretendard", "Apple SD Gothic Neo",
+    "Noto Sans KR", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 1;
+}
+
+/* 숫자는 표에서 자리가 흔들리지 않도록 등폭으로 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 큰 단독 숫자(히어로/스탯 타일)는 비례폭 숫자가 더 단정해 보입니다 */
+.pnum {
+  font-feature-settings: "tnum" 0;
+  font-variant-numeric: proportional-nums;
+}

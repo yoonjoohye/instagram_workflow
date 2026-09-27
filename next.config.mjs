@@ -1,0 +1,14 @@
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  images: { remotePatterns: [{ protocol: "https", hostname: "**" }] },
+  // 로컬 rewrite 프록시 기본 타임아웃(30초)이면 영상 생성·발행 대기 중에 끊깁니다.
+  experimental: { proxyTimeout: 180_000 },
+  async rewrites() {
+    // 프로덕션(Vercel)에서는 vercel.json 의 rewrite 가 처리합니다.
+    // 로컬에서는 별도로 띄운 uvicorn(8000) 으로 넘깁니다.
+    if (process.env.NODE_ENV === "production") return [];
+    return [{ source: "/api/py/:path*", destination: "http://127.0.0.1:8000/:path*" }];
+  },
+};
+
+export default nextConfig;

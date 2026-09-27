@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.env.local
+*.db
+.vercel
+.DS_Store
+
+# Next.js 빌드 산출물
+next-env.d.ts
+*.tsbuildinfo

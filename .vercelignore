@@ -1,0 +1,9 @@
+# 로컬 전용 파일은 배포 번들에 올리지 않습니다 (.env 의 시크릿 포함).
+.env
+.env.local
+.venv
+venv
+*.db
+node_modules
+.next
+__pycache__
