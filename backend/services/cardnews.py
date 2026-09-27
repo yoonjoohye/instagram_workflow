@@ -184,7 +184,7 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
 
 ━━ 1순위 · 절대 기준 (이미지, 이미지 속 글, 캡션 모두 여기에 맞춰. 어떤 것도 이걸 바꾸거나 무시하면 안 돼) ━━
 [주제] {prompt}
-[연출 방향] {style}
+[연출 방향] {style}{ref_rule}
 
 ━━ 2순위 · 사용자 확정 정보 (그대로 사용, 바꾸지 마) ━━
 {notes}
@@ -204,7 +204,7 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
   정보 정리형(체크리스트·단계별 안내·비교), 감성 사진/무드보드, 비포·애프터, 인용 한 줄 등. 특정 형식을 기본값처럼 쓰지 마.
 2) art_style: 모든 이미지에 똑같이 적용할 그림체를 영어로 구체적으로 (예: 'Korean Instagram webtoon, clean black line art, flat pastel colors, rounded chibi character' /
   'real photo with white hand-drawn iPad marker doodles and Korean handwriting' / 'natural film photography, warm grain').
-  연출 방향과 참고 이미지를 가장 크게 반영하고, 요청이 그림체면 실사로 바꾸지 마.
+  참고 이미지가 있으면 그 양식의 그림체·색·레이아웃을 그대로 적고, 없으면 연출 방향을 가장 크게 반영해. 요청이 그림체면 실사로 바꾸지 마.
 
 3) font: 서버가 글자를 얹는 장(overlay/panel/center)에 쓸 글씨체를 골라. 연출 방향에 글씨체 언급이 있으면 그대로 따르고, 없으면 형식에 맞게:
   {fonts}
@@ -310,8 +310,15 @@ def plan_cardnews(
         template=template,
         fonts=" / ".join(f"{k}({v['label']})" for k, v in FONTS.items()),
         refs=(
-            f"\n그 뒤에 첨부한 {len(references)}장은 연출 '참고 이미지'야. 슬라이드 사진으로 배정하지 말고(사진 번호 아님), "
-            "모든 visual 에 참고 이미지의 색감·조명·구도·분위기·스타일을 구체적으로 반영해."
+            f"\n(사진 뒤에 첨부한 마지막 {len(references)}장은 사진이 아니라 1순위의 [참고 이미지] 양식 템플릿이야. 사진 번호로 쓰지 마.)"
+            if references
+            else ""
+        ),
+        ref_rule=(
+            f"\n[참고 이미지 · 양식 템플릿] 첨부 마지막 {len(references)}장 — 이미지를 만들 때 가장 우선하는 기준이야. "
+            "모든 장을 이 양식과 똑같이 만들어: 레이아웃·구도, 제목/글자/말풍선/라벨이 놓이는 위치와 방식, 그림체·사진 톤, 색 구성, "
+            "글씨 느낌, 장식·테두리·여백. 내용만 이 게시물 주제에 맞게 바꿔 적절히 배치해. "
+            "참고 이미지 안에 글자가 들어간 디자인이면 해당 장은 layout 을 designed 로 하고, visual 에 참고 이미지의 어느 위치에 어떤 글이 들어가는지 그대로 적어."
             if references
             else ""
         ),
@@ -538,17 +545,28 @@ def render_visual(
         post_format=post_format,
         font=font,
     )
-    if references:
-        which = f"The last {len(references)} attached image(s)" if photo is not None else f"The {len(references)} attached image(s)"
-        prompt += (
-            f" {which} are STYLE REFERENCES only: match their color grading, lighting, mood and composition style, "
-            "but do not copy their subjects."
+    refs = references[:3]
+    if refs:
+        k = len(refs)
+        order = (
+            f"The first {k} attached image(s) are the TEMPLATE; the last attached image is the photo to use as content."
+            if photo is not None
+            else f"All {k} attached image(s) are the TEMPLATE."
         )
+        template_rule = (
+            "TEMPLATE REFERENCE (TOP PRIORITY, above everything below): "
+            f"{order} Make this image in exactly the same format as the template: reproduce its layout and composition, "
+            "where and how text areas / headlines / speech bubbles / labels are placed, its illustration or photo style, "
+            "color palette, typography feel, decorative elements, borders and spacing. Keep that design system identical, "
+            "and arrange this slide's own content and message into it appropriately. Do not copy the template's specific "
+            "subjects or words — only its format."
+        )
+        prompt = template_rule + "\n" + prompt
     parts: list[dict[str, Any]] = [{"text": prompt}]
+    for ref in refs:  # 템플릿을 먼저 첨부
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(ref, 1024))}})
     if photo is not None:
         parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(photo, 1280))}})
-    for ref in references[:3]:
-        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(ref, 640))}})
     try:
         return _image_call(parts, ASPECT[slide["role"]]), "gemini"
     except (GeminiError, OSError, ValueError) as exc:

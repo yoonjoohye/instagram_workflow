@@ -228,7 +228,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
                 onClick={() => refInput.current?.click()}
                 className="inline-flex h-14 items-center rounded-md border border-dashed border-line-strong px-3 text-[12px] text-fg-2 hover:bg-surface-2"
               >
-                + 참고 이미지 ({refs.length}/{MAX_REFS})
+                + 참고 이미지 · 양식 ({refs.length}/{MAX_REFS})
               </button>
             )}
             <input
@@ -244,7 +244,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             />
           </div>
           <p className="text-[12px] text-fg-3">
-            참고 이미지는 색감·조명·구도·분위기만 따라가요. 게시물 이미지로 들어가지는 않아요.
+            참고 이미지는 이미지를 만들 때 가장 우선하는 양식이에요 — 레이아웃·글자 배치·그림체·색을 똑같이 따라 내용만 바꿔 만들어요. (게시물 이미지로 그대로 들어가지는 않아요)
           </p>
         </div>
 
