@@ -7,7 +7,6 @@ import { IconSpark } from "./icons";
 import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
 
 const MAX_PHOTOS = 8; // 올릴 수 있는 사진 수 (게시물은 최대 10장까지 Gemini가 구성)
-const TONES = ["친근한", "전문적인", "감성적인", "유머러스한", "정보 전달형"];
 const MAX_REFS = 3;
 const DEFAULT_FORMAT = `[후킹 2줄]
 
@@ -53,7 +52,6 @@ async function uploadPhoto(file: File): Promise<string> {
 export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [prompt, setPrompt] = useState("");
-  const [tone, setTone] = useState("친근한");
   const [style, setStyle] = useState("");
   const [refs, setRefs] = useState<Photo[]>([]);
   const [format, setFormat] = useState("");
@@ -137,7 +135,6 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           upload_ids: ids,
           reference_ids: refIds,
           prompt: prompt.trim(),
-          tone,
           style,
           caption_format: format,
           research_notes: research.notes,
@@ -250,25 +247,6 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         </div>
         <p className="-mt-3 text-[12px] text-fg-3">사진은 선택이에요. Gemini가 컨셉에 맞는 사진만 골라 쓰고, 필요한 장면은 글 내용대로 새로 만들어요.</p>
 
-
-        <Field label="톤">
-          <div className="flex flex-wrap gap-1.5">
-            {TONES.map((t) => (
-              <button
-                key={t}
-                type="button"
-                disabled={busy}
-                onClick={() => setTone(t)}
-                className={cx(
-                  "rounded-full border px-3 py-1 text-[12px] font-medium",
-                  tone === t ? "border-accent bg-accent/10 text-fg" : "border-line-strong text-fg-2 hover:bg-surface-2",
-                )}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </Field>
 
         <div className="space-y-2">
           <Field

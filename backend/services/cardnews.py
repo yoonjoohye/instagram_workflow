@@ -181,7 +181,6 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
 
 주제/컨셉: {prompt}
 연출 방향 (최우선 — 반드시 지켜. 형식·그림체·구도·글자 표현을 이 요청대로 해): {style}
-톤: {tone}
 사용자 확정 정보(그대로 사용, 바꾸지 마): {notes}
 ※ 아래 캡션 양식 안에 적힌 사실(칸 밖 문장, '[추천인 정보: 코드 ABC123]'처럼 칸 이름 속 정보)도 모두 확정 정보야. 그대로 쓰고 바꾸지 마.
 
@@ -208,6 +207,7 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
   panel    = 위 이미지 + 아래 글 영역 (설명이 긴 정보형)
   center   = 이미지 위 가운데 큰 문장 (인용·강조)
   웹툰·손글씨 메모·포스터·인터뷰 형식이면 designed 를, 깔끔한 정보 정리형이면 overlay/panel/center 를 주로 써.
+- 글의 말투는 주제·컨셉과 연출 방향에서 드러나는 느낌을 따라.
 - title 20자, body 80자, image_text 는 줄당 16자 이내로 짧게. cta 는 꼭 필요할 때만(12자), 아니면 빈 문자열.
 - visual: 이미지 AI 에게 줄 영어 지시 2~4문장. 이 장의 장면·등장인물·소품·구도·연출을 art_style 로 구체적으로.
   designed 면 글자가 어디에 어떤 모양으로 들어가는지(말풍선 위치, 손글씨 위치, 화살표가 가리키는 대상 등)도 적어.
@@ -261,7 +261,7 @@ def plan_cardnews(
     photos: list[bytes],
     *,
     prompt: str,
-    tone: str,
+    tone: str = "",  # (사용 안 함) 말투는 주제·연출 방향을 따름
     style: str,
     caption_format: str,
     notes: str = "",
@@ -276,7 +276,6 @@ def plan_cardnews(
     text = _PLAN_PROMPT.format(
         n=n,
         prompt=prompt,
-        tone=tone or "친근한",
         notes=notes.strip() or "없음",
         style=style.strip() or "(없음 — 컨셉에 맞게 네가 판단)",
         research=research_notes.strip() or "(조사 자료 없음)",

@@ -84,7 +84,7 @@ class Source(BaseModel):
 class PlanIn(BaseModel):
     upload_ids: list[str] = Field(default_factory=list, max_length=svc.MAX_PHOTOS)  # 없으면 전부 새로 생성
     prompt: str = Field(min_length=2, max_length=2000)
-    tone: str = Field(default="친근한", max_length=64)
+    tone: str = Field(default="", max_length=64)  # (사용 안 함) 예전 요청 호환용
     style: str = Field(default="", max_length=300)  # 연출 방향 (선택)
     caption_format: str = Field(default="", max_length=2000)
     notes: str = Field(default="", max_length=3000)
@@ -129,7 +129,6 @@ def plan(body: PlanIn, account: Account = Depends(current_account), db: Session 
         [b.data for b in blobs],
         references=[r.data for r in refs],
         prompt=body.prompt,
-        tone=body.tone,
         style=body.style,
         caption_format=body.caption_format,
         notes=body.notes,
@@ -140,7 +139,7 @@ def plan(body: PlanIn, account: Account = Depends(current_account), db: Session 
         account_id=account.id,
         prompt=body.prompt,
         media_kind="CAROUSEL" if len(slides) > 1 else "IMAGE",
-        tone=body.tone,
+        tone="",
         status="generating",
         provider=f"studio/{engine}",
         error=warning,
