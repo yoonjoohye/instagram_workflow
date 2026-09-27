@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import current_account, graph_for
-from ..models import Account, AutoReplyRule, InsightSnapshot, KnownVisitor
+from ..models import Account, AutoReplyRule, InsightSnapshot
 from ..schemas import CommentsToggle
 from ..security import encrypt
 from ..services import insights as svc
@@ -84,7 +84,7 @@ def overview(
         "trends": {m: trend(m) for m in svc.DAILY_METRICS},
         "series": series,
         "note": "Instagram Graph API 는 프로필을 조회한 '개별 계정'을 제공하지 않습니다. "
-        "집계 수치만 제공되며, 식별 가능한 계정은 /visitors 의 댓글·멘션 작성자입니다. "
+        "집계 수치만 제공됩니다. "
         "도달 계정 합계는 기간 내 고유 계정 수라 일자별 도달의 합보다 작을 수 있습니다.",
     }
 
@@ -222,88 +222,6 @@ def post_detail(media_id: str, account: Account = Depends(current_account)) -> d
             raise HTTPException(exc.status, str(exc)) from exc
 
 
-@router.get("/mentions")
-def mentions(account: Account = Depends(current_account)) -> dict:
-    """나를 태그한 게시물."""
-    with graph_for(account) as client:
-        return {"data": svc.tagged_media(client, account.ig_user_id)}
-
-
-@router.get("/dm-contacts")
-def dm_contacts(account: Account = Depends(current_account)) -> dict:
-    """DM 을 주고받은 상대 (팔로우 여부·팔로워 수·인증 여부)."""
-    with graph_for(account) as client:
-        rows = svc.dm_contacts(client, own_id=account.ig_user_id, own_username=account.username)
-    return {
-        "data": rows,
-        "note": "상대가 먼저 DM 을 보낸 대화만 조회됩니다. Meta 앱이 개발 모드면 앱 역할이 있는 계정만 보입니다.",
-    }
-
-
-@router.get("/visitors")
-def visitors(
-    account: Account = Depends(current_account),
-    db: Session = Depends(get_db),
-    refresh: bool = Query(default=True),
-) -> dict:
-    """식별 가능한 방문자 = 댓글/멘션을 남긴 계정."""
-    if refresh:
-        with graph_for(account) as client:
-            try:
-                rows = svc.interacting_accounts(client, account.ig_user_id)
-            except GraphError as exc:
-                raise HTTPException(exc.status, str(exc)) from exc
-        _persist_visitors(db, account, rows)
-
-    stored = db.scalars(
-        select(KnownVisitor)
-        .where(KnownVisitor.account_id == account.id)
-        .order_by(desc(KnownVisitor.interactions), desc(KnownVisitor.last_seen_at))
-        .limit(200)
-    ).all()
-
-    return {
-        "data": [
-            {
-                "username": v.ig_username,
-                "source": v.source,
-                "interactions": v.interactions,
-                "last_text": v.last_text,
-                "last_media_id": v.last_media_id,
-                "last_seen_at": v.last_seen_at.isoformat() if v.last_seen_at else None,
-                "profile_url": f"https://www.instagram.com/{v.ig_username}/",
-            }
-            for v in stored
-        ],
-        "note": "Meta 개인정보 정책상 '프로필을 본 계정'은 API 로 제공되지 않습니다. "
-        "여기 목록은 댓글·멘션으로 흔적을 남긴 계정입니다.",
-    }
-
-
-def _persist_visitors(db: Session, account: Account, rows: list[dict]) -> None:
-    for row in rows:
-        visitor = db.scalar(
-            select(KnownVisitor).where(
-                KnownVisitor.account_id == account.id,
-                KnownVisitor.ig_username == row["username"],
-            )
-        )
-        if visitor is None:
-            visitor = KnownVisitor(account_id=account.id, ig_username=row["username"])
-            db.add(visitor)
-        visitor.source = row["source"]
-        visitor.interactions = row["interactions"]
-        visitor.last_text = (row.get("last_text") or "")[:500]
-        visitor.last_media_id = row.get("last_media_id", "")
-        seen = row.get("last_seen_at")
-        if seen:
-            try:
-                visitor.last_seen_at = dt.datetime.fromisoformat(seen.replace("+0000", "+00:00"))
-            except ValueError:
-                pass
-    db.commit()
-
-
 @router.get("/posts")
 def posts(
     limit: int = Query(default=12, ge=1, le=50),
@@ -390,7 +308,6 @@ def cron_sync(request: Request, db: Session = Depends(get_db)) -> dict:
                 _persist_reach(db, account, series)
                 _backfill_day_totals(db, account, client, days=30, limit=10)
                 sentiment_svc.sync(db, account, client, media_limit=12)
-                _persist_visitors(db, account, svc.interacting_accounts(client, account.ig_user_id))
             synced += 1
         except Exception as exc:  # 한 계정 실패가 전체를 막지 않도록
             failed.append({"account": account.username, "error": str(exc)})

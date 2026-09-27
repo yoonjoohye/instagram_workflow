@@ -299,3 +299,34 @@ export function Dialog({
     </div>
   );
 }
+
+/** 켜짐/꺼짐 스위치. 현재 상태는 스위치 모양과 aria-checked 로 전달됩니다. */
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  label,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cx(
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        checked ? "bg-accent" : "bg-line-strong",
+      )}
+    >
+      <span className={cx("absolute left-0.5 size-4 rounded-full bg-surface-1 shadow transition-transform", checked && "translate-x-4")} />
+    </button>
+  );
+}

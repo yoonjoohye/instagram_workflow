@@ -26,6 +26,8 @@ from .meta_graph import GraphClient, GraphError
 log = logging.getLogger(__name__)
 
 LABELS = ("positive", "neutral", "negative")
+# 댓글이 이 개수 이상인 게시물만 감정 분석합니다 (적은 표본으로는 비율이 의미가 없고 비용만 듭니다).
+MIN_COMMENTS = 30
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 BATCH_SIZE = 40
 
@@ -208,7 +210,10 @@ def store(
 
 def sync(db: Session, account: Account, client: GraphClient, *, media_limit: int = 12) -> dict[str, int]:
     """최근 게시물들의 댓글을 모아 새 댓글만 분류합니다."""
-    medias = [m for m in recent_media(client, account.ig_user_id, limit=media_limit) if m.get("comments_count")]
+    medias = [
+        m for m in recent_media(client, account.ig_user_id, limit=media_limit)
+        if int(m.get("comments_count") or 0) >= MIN_COMMENTS
+    ]
 
     def fetch(media: dict[str, Any]) -> list[dict[str, Any]]:
         try:
@@ -233,11 +238,14 @@ def sync(db: Session, account: Account, client: GraphClient, *, media_limit: int
 def sync_media(db: Session, account: Account, client: GraphClient, media_id: str) -> dict[str, int]:
     """게시물 하나의 댓글만 모아 새 댓글을 분류합니다."""
     media = client.get(media_id, {"fields": "id,caption,comments_count"})
+    count = int(media.get("comments_count") or 0)
+    if count < MIN_COMMENTS:
+        return {"comments_seen": 0, "comments_count": count, "classified": 0, "skipped": True}
     comments = client.get(
         f"{media_id}/comments", {"fields": "id,username,text,timestamp", "limit": 100}
     ).get("data", [])
     added = store(db, account, media_id, comments, caption=media.get("caption") or "")
-    return {"comments_seen": len(comments), "comments_count": int(media.get("comments_count") or 0), "classified": added}
+    return {"comments_seen": len(comments), "comments_count": count, "classified": added, "skipped": False}
 
 
 def counts_for(db: Session, account: Account, media_id: str) -> dict[str, int]:

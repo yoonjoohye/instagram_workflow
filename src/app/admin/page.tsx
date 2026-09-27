@@ -8,7 +8,7 @@ import { IconRefresh } from "@/components/icons";
 import { Avatar, Button, Card, Notice, PageHeader, Segmented, Skeleton } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { fmtInt, fmtRelative, METRIC_HINT, METRIC_LABEL, postKind } from "@/lib/format";
-import type { AudienceDetail, Breakdowns, IgPost, ListOf, MetricKey, Overview, SentimentOverview, Visitor } from "@/lib/types";
+import type { AudienceDetail, Breakdowns, IgPost, ListOf, MetricKey, Overview, SentimentOverview } from "@/lib/types";
 import { AudienceDetailCard, ContentTypeCard, EngagementCard, FollowSplitCard, OnlineHoursCard } from "@/components/insightCards";
 import { SentimentBar } from "@/components/sentiment";
 
@@ -27,14 +27,12 @@ export default function DashboardPage() {
   const [days, setDays] = useState(30);
   const overview = useApi<Overview>(`/insights/overview?days=${days}`);
   const posts = useApi<ListOf<IgPost>>("/posts?limit=12");
-  const visitors = useApi<ListOf<Visitor>>("/visitors?refresh=false");
   const breakdowns = useApi<Breakdowns>(`/insights/breakdowns?days=${days}`);
   const audience = useApi<AudienceDetail>("/insights/audience-detail");
 
   const refreshAll = () => {
     overview.reload();
     posts.reload();
-    visitors.reload();
     breakdowns.reload();
     audience.reload();
   };
@@ -88,7 +86,7 @@ export default function DashboardPage() {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <TopPostsCard posts={posts.data?.data} loading={posts.loading && !posts.data} error={posts.error?.message} />
-        <RecentVisitorsCard visitors={visitors.data?.data} loading={visitors.loading && !visitors.data} />
+        <SentimentCard />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -100,9 +98,6 @@ export default function DashboardPage() {
         <OnlineHoursCard data={audience.data} loading={audience.loading && !audience.data} />
       </div>
 
-      <div className="mt-6">
-        <SentimentCard />
-      </div>
 
       {overview.data?.note && <p className="mt-6 text-[12px] leading-relaxed text-fg-3">{overview.data.note}</p>}
     </>
@@ -280,53 +275,6 @@ function TopPostsCard({ posts, loading, error }: { posts?: IgPost[]; loading: bo
   );
 }
 
-function RecentVisitorsCard({ visitors, loading }: { visitors?: Visitor[]; loading: boolean }) {
-  const rows = (visitors ?? []).slice(0, 6);
-  return (
-    <Card
-      title="반응한 계정"
-      subtitle="댓글·멘션으로 확인된 계정 (상호작용 많은 순)"
-      action={
-        <Link href="/admin/visitors" className="text-[13px] text-fg-3 hover:text-fg">
-          전체 보기 →
-        </Link>
-      }
-    >
-      {loading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }, (_, i) => (
-            <Skeleton key={i} className="h-10" />
-          ))}
-        </div>
-      ) : rows.length === 0 ? (
-        <p className="py-6 text-center text-sm text-fg-3">
-          아직 수집된 계정이 없습니다.{" "}
-          <Link href="/admin/visitors" className="underline">
-            지금 동기화
-          </Link>
-        </p>
-      ) : (
-        <ul className="divide-y divide-line">
-          {rows.map((v) => (
-            <li key={v.username} className="flex items-center gap-3 py-2.5">
-              <Avatar name={v.username} size={32} />
-              <div className="min-w-0 flex-1">
-                <a href={v.profile_url} target="_blank" rel="noreferrer" className="text-[13px] font-medium hover:underline">
-                  @{v.username}
-                </a>
-                <p className="truncate text-[12px] text-fg-3">{v.last_text || "—"}</p>
-              </div>
-              <div className="text-right">
-                <p className="tnum text-[13px] font-medium">{fmtInt(v.interactions)}회</p>
-                <p className="text-[11px] text-fg-3">{fmtRelative(v.last_seen_at)}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  );
-}
 
 function SentimentCard() {
   const overview = useApi<SentimentOverview>("/sentiment/overview");
@@ -337,7 +285,7 @@ function SentimentCard() {
       title="댓글 반응"
       subtitle={
         overview.data
-          ? `분석된 댓글 ${fmtInt(n)}개 · ${overview.data.engine === "gemini" ? `Gemini(${overview.data.model})` : "키워드·이모지 규칙"}로 분류`
+          ? `댓글 ${overview.data.min_comments}개 이상인 게시물만 분석 · 분석된 댓글 ${fmtInt(n)}개 · ${overview.data.engine === "gemini" ? `Gemini(${overview.data.model})` : "키워드·이모지 규칙"}로 분류`
           : "긍정 · 보통 · 부정"
       }
       action={
@@ -352,7 +300,7 @@ function SentimentCard() {
         <Notice tone="bad">{overview.error.message}</Notice>
       ) : !t || n === 0 ? (
         <p className="py-6 text-center text-sm text-fg-3">
-          아직 분석된 댓글이 없습니다.{" "}
+          댓글이 30개 이상인 게시물만 분석합니다. 아직 분석된 댓글이 없습니다.{" "}
           <Link href="/admin/posts" className="underline">
             게시물 성과
           </Link>

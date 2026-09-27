@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { LOGIN_URL, useApi } from "@/lib/api";
 import type { Health, Me } from "@/lib/types";
-import { IconChart, IconInstagram, IconSpark, IconUsers } from "@/components/icons";
+import { IconChart, IconInstagram, IconReply, IconSpark } from "@/components/icons";
 import { Notice, Spinner } from "@/components/ui";
 
 const FEATURES = [
   {
     icon: IconSpark,
-    title: "프롬프트 한 줄로 제작",
-    body: "사진·영상·배경음악·캡션과 해시태그까지 한 번에 생성하고, 검수 후 바로 게시합니다.",
+    title: "내 사진으로 카드뉴스",
+    body: "사진을 올리면 Gemini가 표지·내용·결론 카드와 캡션·해시태그를 만들고, 검수 후 바로 게시합니다.",
   },
   {
     icon: IconChart,
@@ -18,9 +18,9 @@ const FEATURES = [
     body: "도달, 프로필 조회, 참여 계정을 일자별로 추적하고 게시물별 성과를 비교합니다.",
   },
   {
-    icon: IconUsers,
-    title: "반응한 계정 확인",
-    body: "댓글과 멘션을 남긴 계정을 모아 누가 콘텐츠에 반응하는지 보여줍니다.",
+    icon: IconReply,
+    title: "댓글 자동 응답",
+    body: "새 댓글에 고정 답글을 달고, 팔로우 여부에 따라 다른 DM을 자동으로 보냅니다.",
   },
 ];
 
@@ -45,7 +45,7 @@ export default function Home() {
           쓰면, 만들어지고, 올라갑니다.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-fg-2 sm:text-lg">
-          Instagram 계정을 연결하고 프롬프트를 입력하세요. 콘텐츠 제작부터 게시, 성과 분석까지 한곳에서 끝납니다.
+          Instagram 계정을 연결하고 사진과 주제만 올리세요. 카드뉴스 제작부터 게시, 댓글 자동 응답, 성과 분석까지 한곳에서 끝납니다.
         </p>
 
         <div className="mt-8 flex flex-wrap items-center gap-3">

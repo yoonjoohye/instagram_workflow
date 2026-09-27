@@ -120,29 +120,6 @@ class InsightSnapshot(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class KnownVisitor(Base):
-    """프로필과 실제로 상호작용한 계정(댓글/멘션 작성자).
-
-    Meta 는 '누가 내 프로필을 봤는지'를 제공하지 않습니다(개인정보 정책).
-    확인 가능한 최대치는 이렇게 흔적을 남긴 계정입니다.
-    """
-
-    __tablename__ = "known_visitors"
-    __table_args__ = (
-        UniqueConstraint("account_id", "ig_username", name="uq_visitor_account_username"),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
-
-    ig_username: Mapped[str] = mapped_column(String(128))
-    source: Mapped[str] = mapped_column(String(32), default="comment")  # comment | mention
-    interactions: Mapped[int] = mapped_column(Integer, default=1)
-    last_text: Mapped[str] = mapped_column(Text, default="")
-    last_media_id: Mapped[str] = mapped_column(String(64), default="")
-    last_seen_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
 class AutoReplyRule(Base):
     """게시물 하나에 대한 댓글 자동 응답 규칙.
 

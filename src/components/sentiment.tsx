@@ -6,6 +6,9 @@ import { fmtInt, fmtRelative } from "@/lib/format";
 import type { IgPost, ListOf, Sentiment, SentimentComment, SentimentCounts } from "@/lib/types";
 import { Badge, cx, Dialog, Empty, Notice, Segmented, Skeleton } from "./ui";
 
+/** 댓글이 이 개수 이상인 게시물만 감정 분석합니다 (백엔드 MIN_COMMENTS 와 같은 값). */
+export const MIN_COMMENTS = 30;
+
 // 발산형: 긍정(파랑) ↔ 보통(회색) ↔ 부정(빨강). 막대 순서도 이 순서로 고정합니다.
 export const SENTIMENTS: { key: Sentiment; label: string; color: string }[] = [
   { key: "positive", label: "긍정", color: "var(--sent-pos)" },
@@ -93,7 +96,7 @@ export function SentimentDialog({ post, onClose }: { post: IgPost; onClose: () =
         <Notice tone="bad">{comments.error.message}</Notice>
       ) : rows.length === 0 ? (
         <Empty title={filter === "all" ? "분석된 댓글이 없습니다" : "해당하는 댓글이 없습니다"}>
-          {filter === "all" && "게시물 상세의 '댓글 분석'을 눌러 댓글을 분류하세요."}
+          {filter === "all" && `댓글이 ${MIN_COMMENTS}개 이상인 게시물만 분석합니다. 게시물 상세의 '댓글 분석'을 눌러 주세요.`}
         </Empty>
       ) : (
         <ul className="divide-y divide-line">

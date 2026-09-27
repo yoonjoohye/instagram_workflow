@@ -79,13 +79,16 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> dict:
                     log.exception("comment webhook failed")
                     db.rollback()
                     results.append("error")
-                try:  # 새 댓글은 들어오는 즉시 감정도 분류해 둡니다.
-                    sentiment.store(
-                        db,
-                        account,
-                        str((value.get("media") or {}).get("id") or ""),
-                        [{**value, "username": (value.get("from") or {}).get("username", "")}],
-                    )
+                try:  # 댓글 30개 이상인 게시물의 새 댓글만 들어오는 즉시 감정을 분류합니다.
+                    media_id = str((value.get("media") or {}).get("id") or "")
+                    count = int(client.get(media_id, {"fields": "comments_count"}).get("comments_count") or 0) if media_id else 0
+                    if count >= sentiment.MIN_COMMENTS:
+                        sentiment.store(
+                            db,
+                            account,
+                            media_id,
+                            [{**value, "username": (value.get("from") or {}).get("username", "")}],
+                        )
                 except Exception:  # noqa: BLE001
                     log.exception("sentiment on webhook failed")
                     db.rollback()

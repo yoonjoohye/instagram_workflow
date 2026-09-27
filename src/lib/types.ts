@@ -1,7 +1,6 @@
 // 백엔드(FastAPI) 응답 형태. backend/routers/* 와 1:1 로 맞춥니다.
 
 export type MediaKind = "IMAGE" | "CAROUSEL" | "REELS" | "STORIES";
-export type AspectRatio = "1:1" | "4:5" | "9:16" | "16:9";
 export type JobStatus = "draft" | "generating" | "ready" | "publishing" | "published" | "failed";
 
 export type Me = {
@@ -22,8 +21,7 @@ export type Health = {
   ok: boolean;
   meta_configured: boolean;
   auth_mode: "instagram" | "facebook";
-  media_engine: string;
-  caption_engine: "claude" | "template";
+  ai_engine: "gemini" | "basic";
   public_base_url: string;
   redirect_uri: string;
 };
@@ -53,17 +51,6 @@ export type Job = {
   permalink: string;
   published_at: string | null;
   created_at: string;
-};
-
-export type GenerateInput = {
-  prompt: string;
-  media_kind: MediaKind;
-  count: number;
-  aspect_ratio: AspectRatio;
-  tone: string;
-  language: string;
-  with_music: boolean;
-  style: string;
 };
 
 export type Quota = { used: number; total: number; remaining: number };
@@ -98,16 +85,6 @@ export type Audience = {
   demographics: Record<Breakdown, { label: string; value: number }[]>;
   empty: boolean;
   note: string;
-};
-
-export type Visitor = {
-  username: string;
-  source: "comment" | "mention";
-  interactions: number;
-  last_text: string;
-  last_media_id: string;
-  last_seen_at: string | null;
-  profile_url: string;
 };
 
 export type IgPost = {
@@ -192,7 +169,7 @@ export type AutoReplyLog = {
 export type Sentiment = "positive" | "neutral" | "negative";
 export type SentimentCounts = Record<Sentiment, number>;
 
-export type SentimentEngine = { engine: "gemini" | "rules"; model: string; last_error: string };
+export type SentimentEngine = { engine: "gemini" | "rules"; model: string; last_error: string; min_comments: number };
 
 export type SentimentOverview = SentimentEngine & { totals: SentimentCounts };
 
@@ -202,6 +179,7 @@ export type SentimentMediaSync = SentimentEngine & {
   comments_seen: number;
   comments_count: number;
   classified: number;
+  skipped: boolean;
   counts: SentimentCounts;
 };
 
@@ -247,26 +225,3 @@ export type PostDetailData = {
   comments: { id: string; username: string; text: string; timestamp: string; like_count: number; reply_count: number }[];
 };
 
-export type TaggedMedia = {
-  id: string;
-  username: string;
-  caption?: string;
-  media_type?: string;
-  media_url?: string;
-  permalink: string;
-  timestamp: string;
-  like_count?: number;
-  comments_count?: number;
-};
-
-export type DmContact = {
-  id: string;
-  username?: string;
-  name?: string;
-  profile_pic?: string;
-  follower_count?: number;
-  is_user_follow_business?: boolean;
-  is_business_follow_user?: boolean;
-  is_verified_user?: boolean;
-  last_message_at?: string;
-};

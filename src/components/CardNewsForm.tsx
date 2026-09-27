@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, toApiError, useApi } from "@/lib/api";
+import { api, toApiError } from "@/lib/api";
 import type { Job } from "@/lib/types";
 import { IconSpark } from "./icons";
 import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
@@ -40,7 +40,6 @@ async function uploadPhoto(file: File): Promise<string> {
 }
 
 export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
-  const engine = useApi<{ media_engine: string }>("/workflow/engine");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [prompt, setPrompt] = useState("");
   const [tone, setTone] = useState("친근한");
@@ -127,7 +126,7 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
       subtitle={
         <span className="inline-flex flex-wrap items-center gap-1.5">
           표지 → 내용 → 결론 슬라이드와 캡션을 Gemini가 만들어요
-          {engine.data && <Badge tone="accent">Gemini</Badge>}
+          <Badge tone="accent">Gemini</Badge>
         </span>
       }
       className="h-fit"

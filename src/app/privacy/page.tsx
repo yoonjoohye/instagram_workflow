@@ -11,8 +11,8 @@ export default function PrivacyPage() {
   return (
     <LegalPage title="개인정보처리방침">
       <p>
-        {SERVICE_NAME}(이하 &lsquo;서비스&rsquo;)는 Instagram 프로페셔널(비즈니스·크리에이터) 계정 운영자가 콘텐츠를 만들고 게시하며, 게시물
-        성과를 확인하고 댓글에 자동으로 응답할 수 있도록 돕는 도구입니다. 서비스는 이용자의 개인정보를 중요하게 여기며, 서비스 제공에 필요한
+        {SERVICE_NAME}(이하 &lsquo;서비스&rsquo;)는 Instagram 프로페셔널(비즈니스·크리에이터) 계정 운영자가 자신의 사진으로 카드뉴스를 만들어
+        게시하고, 게시물 성과를 확인하며, 댓글에 자동으로 응답할 수 있도록 돕는 도구입니다. 서비스는 이용자의 개인정보를 중요하게 여기며, 서비스 제공에 필요한
         최소한의 정보만 처리합니다.
       </p>
 
@@ -38,8 +38,10 @@ export default function PrivacyPage() {
             </tr>
             <tr>
               <td>콘텐츠</td>
-              <td>이용자가 입력한 프롬프트, 생성된 이미지·영상·음악의 주소, 캡션·해시태그, 게시 결과(게시물 ID·링크)</td>
-              <td>이용자 입력, 생성 엔진</td>
+              <td>
+                이용자가 업로드한 사진, 이를 편집·합성한 카드 이미지, 입력한 주제·캡션 형식, 생성된 캡션·해시태그, 게시 결과(게시물 ID·링크)
+              </td>
+              <td>이용자 업로드, 서비스·Gemini 가 생성</td>
             </tr>
             <tr>
               <td>인사이트</td>
@@ -74,7 +76,8 @@ export default function PrivacyPage() {
 
       <Section title="2. 이용 목적">
         <ul>
-          <li>이용자 계정으로 콘텐츠를 생성·게시하고 발행 한도를 확인</li>
+          <li>이용자가 올린 사진으로 카드뉴스와 캡션을 만들고, 이용자 계정으로 게시하며 발행 한도를 확인</li>
+          <li>게시를 위해 카드 이미지를 추측할 수 없는 공개 주소로 제공 (Instagram 이 이 주소에서 이미지를 가져감)</li>
           <li>게시물·계정 성과를 대시보드로 보여주고 일자별 기록을 보관</li>
           <li>이용자가 켠 경우에 한해, 새 댓글에 고정 문구로 답글을 달고 댓글 작성자에게 DM 을 보내며 팔로우 여부에 따라 다른 안내를 전송</li>
           <li>댓글의 긍정·보통·부정 분류와 통계 제공</li>
@@ -89,11 +92,8 @@ export default function PrivacyPage() {
             <b>Meta Platforms</b> — Instagram 로그인, 게시, 인사이트·댓글 조회, 답글·DM 전송 (이용자의 요청을 수행하기 위한 API 호출)
           </li>
           <li>
-            <b>Google (Gemini API)</b> — 댓글 감정 분류. 댓글 본문과 게시물 캡션 일부가 분류를 위해 전송됩니다. 설정되지 않은 경우 서버 안에서 규칙으로
-            분류하며 외부로 전송하지 않습니다.
-          </li>
-          <li>
-            <b>콘텐츠 생성 엔진</b>(Higgsfield, Anthropic Claude 등, 설정된 경우) — 이용자가 입력한 프롬프트로 이미지·영상·음악·캡션을 생성
+            <b>Google (Gemini API)</b> — 카드뉴스 구성과 사진 AI 편집을 위해 업로드한 사진과 입력한 주제가, 댓글 감정 분류를 위해 댓글 본문과 게시물
+            캡션 일부가 전송됩니다. 설정되지 않은 경우 서버 안에서 처리하며 외부로 전송하지 않습니다.
           </li>
           <li>
             <b>Vercel</b>(호스팅), <b>Neon</b>(데이터베이스) — 서비스 운영을 위한 인프라
@@ -106,6 +106,7 @@ export default function PrivacyPage() {
         <ul>
           <li>이용자가 연결을 해제하거나 데이터 삭제를 요청하면 해당 계정과 관련된 모든 정보를 즉시 삭제합니다.</li>
           <li>연결을 유지하는 동안에는 서비스 제공을 위해 보관하며, Meta 가 제공하지 않는 과거 인사이트 기록도 이용자가 삭제할 때까지 보관합니다.</li>
+          <li>업로드한 사진과 카드 이미지는 작업 기록과 함께 보관되며, 연결 해제·데이터 삭제 시 함께 삭제됩니다.</li>
           <li>삭제 요청 처리 확인을 위해 확인 코드와 처리 시각만 남기며, 여기에는 개인을 식별할 수 있는 정보가 포함되지 않습니다.</li>
         </ul>
       </Section>
@@ -140,11 +141,12 @@ export default function PrivacyPage() {
 
       <Section title="English summary">
         <p>
-          {SERVICE_NAME} helps Instagram professional account owners create and publish content, view post insights, and optionally auto-reply to new
-          comments. We process only what the service needs: the connected account&apos;s profile and an encrypted access token; prompts and generated
-          content; aggregate insights provided by the Instagram Graph API; comments on the user&apos;s own posts; and, when a user has messaged the
+          {SERVICE_NAME} helps Instagram professional account owners turn their own photos into card-news carousels and publish them, view post insights, and optionally auto-reply to new
+          comments. We process only what the service needs: the connected account&apos;s profile and an encrypted access token; uploaded photos, the edited card images (served at unguessable public URLs so Instagram can fetch them for publishing), topics and
+          generated captions; aggregate insights provided by the Instagram Graph API; comments on the user&apos;s own posts; and, when a user has messaged the
           account, that sender&apos;s username, name, profile picture, follower count and follow status, used only to send the reply the account owner
-          configured. Comment text may be sent to Google Gemini for sentiment classification. We never receive or store the identities of people who
+          configured. Uploaded photos and topics are sent to Google Gemini to design and edit the cards, and comment text may be sent to Gemini for sentiment
+          classification. We never receive or store the identities of people who
           viewed or liked a post, we do not sell data, and we do not use it for advertising. Users can delete all their data at any time via
           &ldquo;연결 해제 및 데이터 삭제&rdquo; in the app, by removing the app in Instagram settings (handled by our data deletion callback), or by
           contacting us — see <Link href="/data-deletion">Data Deletion Instructions</Link>.

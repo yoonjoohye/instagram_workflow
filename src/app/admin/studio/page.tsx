@@ -7,20 +7,13 @@ import { useMe } from "@/components/AdminShell";
 import { CardNewsForm } from "@/components/CardNewsForm";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconMusic, IconSpark } from "@/components/icons";
-import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Segmented, Skeleton, Spinner, StatusDot } from "@/components/ui";
+import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
 import { mediaSrc, composeCaption, fmtDateTime, KIND_LABEL, parseHashtags, STATUS_LABEL } from "@/lib/format";
-import type { AspectRatio, Asset, AutoReplyInput, AutoReplyRule, GenerateInput, Job, MediaKind, Quota } from "@/lib/types";
+import type { Asset, AutoReplyInput, AutoReplyRule, Job, Quota } from "@/lib/types";
 import { statusTone } from "@/lib/status";
 
-const KINDS: { value: MediaKind; hint: string; ratio: AspectRatio }[] = [
-  { value: "IMAGE", hint: "피드 사진 1장", ratio: "4:5" },
-  { value: "CAROUSEL", hint: "여러 장 슬라이드", ratio: "4:5" },
-  { value: "REELS", hint: "세로 영상", ratio: "9:16" },
-  { value: "STORIES", hint: "24시간 노출", ratio: "9:16" },
-];
 
-const TONES = ["친근한", "전문적인", "감성적인", "유머러스한", "미니멀한"];
 const CAPTION_LIMIT = 2200; // Instagram 캡션 최대 길이
 const HASHTAG_LIMIT = 30; // 게시물당 해시태그 최대 개수
 
@@ -55,11 +48,6 @@ function Studio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
-  const [mode, setMode] = useState<"ai" | "cardnews">("cardnews");
-  useEffect(() => {
-    if (job?.provider.startsWith("cardnews")) setMode("cardnews");
-  }, [job?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const onCreated = (j: Job) => {
     setJob(j);
     router.replace(`/admin/studio?job=${j.id}`, { scroll: false });
@@ -69,7 +57,7 @@ function Studio() {
     <>
       <PageHeader
         title="만들기"
-        description="프롬프트를 입력하면 사진·영상·음악·캡션을 만들고, 검수 후 Instagram 에 게시합니다."
+        description="내 사진을 올리면 Gemini가 표지·내용·결론 카드뉴스와 캡션을 만들고, 검수 후 Instagram 에 게시합니다."
         action={
           job && (
             <Button variant="secondary" size="sm" onClick={() => router.push("/admin/studio")}>
@@ -86,262 +74,10 @@ function Studio() {
         </div>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <div className="space-y-3">
-          <Segmented
-            ariaLabel="만들기 방식"
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: "ai", label: "AI로 생성" },
-              { value: "cardnews", label: "내 사진으로 카드뉴스" },
-            ]}
-          />
-          {mode === "ai" ? <GenerateForm onCreated={onCreated} seed={job} /> : <CardNewsForm onCreated={onCreated} />}
-        </div>
+        <CardNewsForm onCreated={onCreated} />
         {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}
       </div>
     </>
-  );
-}
-
-// ───────────────────────────────────────────────────────────── 생성 폼
-
-function GenerateForm({ onCreated, seed }: { onCreated: (j: Job) => void; seed: Job | null }) {
-  const engine = useApi<{ media_engine: string }>("/workflow/engine");
-  const [form, setForm] = useState<GenerateInput>({
-    prompt: "",
-    media_kind: "IMAGE",
-    count: 3,
-    aspect_ratio: "4:5",
-    tone: "친근한",
-    language: "ko",
-    with_music: false,
-    style: "",
-  });
-  const [busy, setBusy] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [error, setError] = useState<string>();
-
-  // 기존 작업을 열면 같은 설정으로 다시 만들 수 있게 폼을 채워둡니다.
-  useEffect(() => {
-    if (!seed) return;
-    setForm((f) => ({
-      ...f,
-      prompt: seed.prompt,
-      media_kind: seed.media_kind,
-      tone: seed.tone,
-      language: seed.language,
-      with_music: seed.with_music,
-    }));
-  }, [seed?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!busy) return;
-    const started = Date.now();
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
-    return () => clearInterval(t);
-  }, [busy]);
-
-  const set = <K extends keyof GenerateInput>(k: K, v: GenerateInput[K]) => setForm((f) => ({ ...f, [k]: v }));
-
-  const pickKind = (kind: MediaKind) =>
-    setForm((f) => ({ ...f, media_kind: kind, aspect_ratio: KINDS.find((k) => k.value === kind)!.ratio }));
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (form.prompt.trim().length < 2) {
-      setError("프롬프트를 2자 이상 입력하세요.");
-      return;
-    }
-    setBusy(true);
-    setElapsed(0);
-    setError(undefined);
-    try {
-      const job = await api<Job>("/workflow/generate", {
-        method: "POST",
-        json: { ...form, prompt: form.prompt.trim(), count: form.media_kind === "CAROUSEL" ? form.count : 1 },
-      });
-      onCreated(job);
-    } catch (err) {
-      setError(toApiError(err).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const needsVideo = form.media_kind === "REELS";
-
-  return (
-    <Card
-      title="프롬프트"
-      subtitle={
-        engine.data && (
-          <span className="inline-flex items-center gap-1.5">
-            생성 엔진 <Badge tone={engine.data.media_engine === "mock" ? "warn" : "accent"}>{engine.data.media_engine}</Badge>
-            {engine.data.media_engine === "mock" && "· 샘플 미디어로 동작 중"}
-          </span>
-        )
-      }
-      className="h-fit"
-    >
-      <form onSubmit={submit} className="space-y-5">
-        <Field label="무엇을 올릴까요?" htmlFor="prompt">
-          <textarea
-            id="prompt"
-            rows={5}
-            maxLength={2000}
-            value={form.prompt}
-            onChange={(e) => set("prompt", e.target.value)}
-            placeholder="예) 비 오는 날 창가에서 마시는 따뜻한 라떼, 아늑한 카페 분위기. 신메뉴 '흑임자 라떼' 출시 홍보"
-            className={cx(inputClass, "resize-y leading-relaxed")}
-            disabled={busy}
-          />
-        </Field>
-
-        <Field label="게시 형식">
-          <div className="grid grid-cols-2 gap-2">
-            {KINDS.map((k) => (
-              <button
-                key={k.value}
-                type="button"
-                disabled={busy}
-                onClick={() => pickKind(k.value)}
-                aria-pressed={form.media_kind === k.value}
-                className={cx(
-                  "rounded-lg border px-3 py-2 text-left transition-colors",
-                  form.media_kind === k.value
-                    ? "border-accent bg-accent/8"
-                    : "border-line-strong hover:bg-surface-2",
-                )}
-              >
-                <span className="block text-[13px] font-semibold">{KIND_LABEL[k.value]}</span>
-                <span className="block text-[12px] text-fg-3">{k.hint}</span>
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="비율">
-            <select
-              value={form.aspect_ratio}
-              onChange={(e) => set("aspect_ratio", e.target.value as AspectRatio)}
-              className={inputClass}
-              disabled={busy}
-            >
-              <option value="4:5">4:5 세로 (피드 권장)</option>
-              <option value="1:1">1:1 정사각</option>
-              <option value="9:16">9:16 풀스크린</option>
-              <option value="16:9">16:9 가로</option>
-            </select>
-          </Field>
-          {form.media_kind === "CAROUSEL" ? (
-            <Field label="장수">
-              <input
-                type="number"
-                min={2}
-                max={10}
-                value={form.count}
-                onChange={(e) => set("count", Math.min(10, Math.max(2, Number(e.target.value) || 2)))}
-                className={inputClass}
-                disabled={busy}
-              />
-            </Field>
-          ) : (
-            <Field label="캡션 언어">
-              <select value={form.language} onChange={(e) => set("language", e.target.value)} className={inputClass} disabled={busy}>
-                <option value="ko">한국어</option>
-                <option value="en">English</option>
-                <option value="ja">日本語</option>
-              </select>
-            </Field>
-          )}
-        </div>
-
-        {form.media_kind === "CAROUSEL" && (
-          <Field label="캡션 언어">
-            <select value={form.language} onChange={(e) => set("language", e.target.value)} className={inputClass} disabled={busy}>
-              <option value="ko">한국어</option>
-              <option value="en">English</option>
-              <option value="ja">日本語</option>
-            </select>
-          </Field>
-        )}
-
-        <Field label="캡션 톤">
-          <div className="flex flex-wrap gap-1.5">
-            {TONES.map((t) => (
-              <button
-                key={t}
-                type="button"
-                disabled={busy}
-                onClick={() => set("tone", t)}
-                className={cx(
-                  "rounded-full border px-3 py-1 text-[12px] font-medium",
-                  form.tone === t ? "border-accent bg-accent/10 text-fg" : "border-line-strong text-fg-2 hover:bg-surface-2",
-                )}
-              >
-                {t}
-              </button>
-            ))}
-            <input
-              value={TONES.includes(form.tone) ? "" : form.tone}
-              onChange={(e) => set("tone", e.target.value || "친근한")}
-              placeholder="직접 입력"
-              maxLength={64}
-              className="w-24 rounded-full border border-line-strong bg-surface-1 px-3 py-1 text-[12px] focus:border-accent focus:outline-none"
-              disabled={busy}
-            />
-          </div>
-        </Field>
-
-        <Field label="스타일 (선택)" htmlFor="style" hint="예) 필름 사진 톤, 파스텔, 미니멀 제품 촬영">
-          <input
-            id="style"
-            value={form.style}
-            maxLength={200}
-            onChange={(e) => set("style", e.target.value)}
-            className={inputClass}
-            disabled={busy}
-          />
-        </Field>
-
-        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-line px-3 py-2.5 hover:bg-surface-2">
-          <input
-            type="checkbox"
-            checked={form.with_music}
-            onChange={(e) => set("with_music", e.target.checked)}
-            className="mt-0.5 size-4 accent-[var(--accent)]"
-            disabled={busy}
-          />
-          <span>
-            <span className="flex items-center gap-1.5 text-[13px] font-medium">
-              <IconMusic /> 어울리는 배경음악 생성
-            </span>
-            <span className="block text-[12px] text-fg-3">
-              {needsVideo || form.media_kind === "STORIES"
-                ? "영상에 믹싱할 음악 트랙을 함께 만듭니다."
-                : "사진 게시물에는 API 로 음악을 붙일 수 없어 참고용 트랙만 생성됩니다."}
-            </span>
-          </span>
-        </label>
-
-        {error && <Notice tone="bad">{error}</Notice>}
-
-        <Button type="submit" variant="primary" className="w-full" loading={busy}>
-          {busy ? `생성 중… ${elapsed}초` : (
-            <>
-              <IconSpark width={16} height={16} /> 콘텐츠 생성
-            </>
-          )}
-        </Button>
-        {busy && (
-          <p className="text-center text-[12px] text-fg-3">
-            {needsVideo ? "영상 생성은 1분 이상 걸릴 수 있습니다." : "보통 10~30초 정도 걸립니다."} 창을 닫지 마세요.
-          </p>
-        )}
-      </form>
-    </Card>
   );
 }
 

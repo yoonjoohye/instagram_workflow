@@ -27,16 +27,6 @@ class Settings(BaseSettings):
     instagram_app_id: str = ""
     instagram_app_secret: str = ""
 
-    higgsfield_api_key_id: str = ""
-    higgsfield_api_key_secret: str = ""
-    higgsfield_base_url: str = "https://api.higgsfield.ai"
-    higgsfield_image_path: str = "/v1/higgsfield-ai/soul/v2/standard"
-    higgsfield_video_path: str = "/v1/higgsfield-ai/dop/v2/turbo"
-    higgsfield_audio_path: str = "/v1/higgsfield-ai/audio/v1/music"
-
-    anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-5"
-
     cron_secret: str = ""
 
     # 댓글 감정 분석(긍정/보통/부정). 비워두면 한국어 키워드·이모지 규칙으로 분류합니다.
@@ -91,11 +81,6 @@ class Settings(BaseSettings):
     def meta_configured(self) -> bool:
         """현재 로그인 방식에 필요한 앱 자격증명이 갖춰졌는지."""
         return self.auth_mode == "instagram" or bool(self.meta_app_id and self.meta_app_secret)
-
-    @property
-    def higgsfield_configured(self) -> bool:
-        return bool(self.higgsfield_api_key_id and self.higgsfield_api_key_secret)
-
 
 @lru_cache
 def get_settings() -> Settings:

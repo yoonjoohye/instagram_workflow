@@ -6,7 +6,7 @@ import { createContext, Suspense, useContext, useState, type ReactNode } from "r
 import { api, LOGIN_URL, useApi } from "@/lib/api";
 import { fmtCompact } from "@/lib/format";
 import type { Me } from "@/lib/types";
-import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark, IconUsers } from "./icons";
+import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark } from "./icons";
 import { Avatar, cx, Notice, Spinner } from "./ui";
 
 const MeContext = createContext<{ me: Me; refreshMe: () => void } | null>(null);
@@ -22,7 +22,6 @@ const NAV = [
   { href: "/admin/studio", label: "만들기", icon: IconSpark },
   { href: "/admin/jobs", label: "작업함", icon: IconInbox },
   { href: "/admin/posts", label: "게시물 성과", icon: IconGrid },
-  { href: "/admin/visitors", label: "반응한 계정", icon: IconUsers },
   { href: "/admin/autoreply", label: "자동 응답", icon: IconReply },
 ];
 

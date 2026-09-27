@@ -11,18 +11,19 @@ from ..config import settings
 from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, AutoReplyRule, GenerationJob
-from ..schemas import GenerateIn, JobPatch, PublishIn
+from ..schemas import JobPatch, PublishIn
 from ..services import publishing
-from ..services.generation import (
-    GenerationRequest,
-    active_engine_name,
-    compose_caption,
-    generate_caption,
-    generate_media,
-)
 from ..services.meta_graph import GraphError
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
+
+
+def compose_caption(caption: str, hashtags: list[str]) -> str:
+    """Instagram 에 실제로 올라갈 최종 문자열 (본문 + 빈 줄 + 해시태그)."""
+    body = caption.strip()
+    if not hashtags:
+        return body
+    return f"{body}\n\n" + " ".join(f"#{t.lstrip('#')}" for t in hashtags)
 
 
 def _job_dict(job: GenerationJob) -> dict:
@@ -45,68 +46,6 @@ def _job_dict(job: GenerationJob) -> dict:
         "published_at": job.published_at.isoformat() if job.published_at else None,
         "created_at": job.created_at.isoformat(),
     }
-
-
-@router.get("/engine")
-def engine_status(account: Account = Depends(current_account)) -> dict:
-    return {"media_engine": active_engine_name()}
-
-
-@router.post("/generate", status_code=status.HTTP_201_CREATED)
-def generate(
-    body: GenerateIn,
-    account: Account = Depends(current_account),
-    db: Session = Depends(get_db),
-) -> dict:
-    """한 번의 프롬프트로 미디어 + (선택)음악 + 캡션을 만들어 초안 job 을 남깁니다."""
-    count = 2 if body.media_kind == "CAROUSEL" and body.count < 2 else body.count
-    if body.media_kind == "CAROUSEL" and count > 10:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "캐러셀은 최대 10장까지입니다.")
-    if body.media_kind in {"IMAGE", "REELS", "STORIES"}:
-        count = 1
-
-    job = GenerationJob(
-        account_id=account.id,
-        prompt=body.prompt,
-        media_kind=body.media_kind,
-        tone=body.tone,
-        language=body.language,
-        with_music=int(body.with_music),
-        status="generating",
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-
-    try:
-        assets, engine, warning = generate_media(
-            GenerationRequest(
-                prompt=body.prompt,
-                media_kind=body.media_kind,
-                count=count,
-                aspect_ratio=body.aspect_ratio,
-                with_music=body.with_music,
-                style=body.style,
-            )
-        )
-        written = generate_caption(
-            body.prompt, tone=body.tone, language=body.language, media_kind=body.media_kind
-        )
-    except Exception as exc:  # 생성 실패를 job 에 남겨 UI 에서 보이게 합니다.
-        job.status = "failed"
-        job.error = str(exc)
-        db.commit()
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"생성 실패: {exc}") from exc
-
-    job.assets = [a.to_dict() for a in assets]
-    job.provider = engine
-    job.caption = written["caption"]
-    job.hashtags = written["hashtags"]
-    job.error = warning
-    job.status = "ready"
-    db.commit()
-    db.refresh(job)
-    return _job_dict(job)
 
 
 @router.get("/jobs")

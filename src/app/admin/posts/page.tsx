@@ -5,8 +5,8 @@ import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import { BarList } from "@/components/charts";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconRefresh, IconReply, IconSpark } from "@/components/icons";
-import { SentimentBar, SentimentDialog } from "@/components/sentiment";
-import { Badge, Button, Card, cx, Dialog, Empty, Notice, PageHeader, Segmented, Skeleton, Spinner } from "@/components/ui";
+import { MIN_COMMENTS, SentimentBar, SentimentDialog } from "@/components/sentiment";
+import { Badge, Button, Card, cx, Dialog, Empty, Notice, PageHeader, Segmented, Skeleton, Spinner, Switch } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
 import { dimLabel, fmtCompact, fmtDuration, fmtInt, fmtPct, fmtRelative, postKind } from "@/lib/format";
 import type { AutoReplyInput, AutoReplyRule, IgPost, Job, ListOf, PostDetailData, SentimentMediaSync } from "@/lib/types";
@@ -326,11 +326,8 @@ function Posts() {
       )}
 
       <p className="mt-4 text-[12px] leading-relaxed text-fg-3">
-        도달은 게시물을 본 고유 계정 수입니다. Instagram 은 게시물을 본 개별 계정 목록을 제공하지 않으므로, 계정 단위로는{" "}
-        <a href="/admin/visitors" className="underline">
-          반응한 계정
-        </a>
-        에서 댓글·멘션을 남긴 사용자만 확인할 수 있습니다. 스토리는 게시 후 24시간이 지나면 인사이트가 사라집니다.
+        도달은 게시물을 본 고유 계정 수입니다. Instagram 은 게시물을 본 개별 계정 목록을 제공하지 않습니다. 스토리는 게시 후 24시간이
+        지나면 인사이트가 사라집니다.
       </p>
     </>
   );
@@ -519,7 +516,9 @@ function PostDetail({
             ? `Gemini 호출 실패로 규칙 기반 분류 (${r.last_error})`
             : `Gemini로 분류`
           : "키워드·이모지 규칙으로 분류";
-      if (r.comments_count > 0 && r.comments_seen === 0) {
+      if (r.skipped) {
+        setResult({ tone: "warn", text: `댓글이 ${MIN_COMMENTS}개 이상인 게시물만 분석합니다. (현재 ${r.comments_count}개)` });
+      } else if (r.comments_count > 0 && r.comments_seen === 0) {
         setResult({
           tone: "warn",
           text: `댓글 ${r.comments_count}개가 있지만 조회되지 않았습니다. Meta 앱이 개발 모드라 다른 사용자의 댓글이 제공되지 않거나, 내 계정 댓글만 있는 경우입니다.`,
@@ -553,7 +552,7 @@ function PostDetail({
                 댓글 {analyzed}개 보기 →
               </button>
             )}
-            {!!post.comments_count && (
+            {(post.comments_count ?? 0) >= MIN_COMMENTS && (
               <Button size="sm" onClick={analyze} loading={analyzing}>
                 {analyzed > 0 ? "새 댓글 분석" : "댓글 분석"}
               </Button>
@@ -565,7 +564,9 @@ function PostDetail({
             <SentimentBar counts={post.sentiment} height={10} showLabels />
           ) : (
             <p className="text-[12px] text-fg-3">
-              {post.comments_count ? "아직 분석 전입니다. '댓글 분석'을 눌러 주세요." : "댓글이 없습니다."}
+              {(post.comments_count ?? 0) >= MIN_COMMENTS
+                ? "아직 분석 전입니다. '댓글 분석'을 눌러 주세요."
+                : `댓글이 ${MIN_COMMENTS}개 이상인 게시물만 긍정·보통·부정을 분석합니다. (현재 ${post.comments_count ?? 0}개)`}
             </p>
           )}
         </div>
@@ -581,19 +582,15 @@ function PostDetail({
         <h3 className="text-[13px] font-semibold">관리</h3>
         <dl className="mt-3 space-y-2.5 text-[13px]">
           <div className="flex items-center justify-between gap-3">
-            <dt className="text-fg-2">댓글 허용</dt>
-            <dd>
-              <button
-                onClick={onToggleComments}
-                disabled={toggling}
-                className={cx(
-                  "inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-[12px] font-medium",
-                  commentsOn ? "border-line-strong text-fg-2 hover:bg-surface-2" : "border-warn/50 bg-warn/10 text-fg",
-                )}
-              >
-                {toggling && <Spinner className="size-3" />}
-                {commentsOn ? "켜짐 · 끄기" : "꺼짐 · 켜기"}
-              </button>
+            <dt className="text-fg-2">
+              댓글 허용
+              <span className={cx("ml-1.5 text-[12px] font-medium", commentsOn ? "text-fg" : "text-fg-3")}>
+                {commentsOn ? "켜짐" : "꺼짐 — 새 댓글을 달 수 없음"}
+              </span>
+            </dt>
+            <dd className="flex items-center gap-2">
+              {toggling && <Spinner className="size-3 text-fg-3" />}
+              <Switch checked={commentsOn} onChange={onToggleComments} disabled={toggling} label="댓글 허용" />
             </dd>
           </div>
           <div className="flex items-center justify-between gap-3">

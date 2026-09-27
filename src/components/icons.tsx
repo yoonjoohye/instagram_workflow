@@ -39,13 +39,6 @@ export const IconGrid = (p: P) => (
     <rect x="14" y="14" width="7" height="7" rx="1.5" />
   </svg>
 );
-export const IconUsers = (p: P) => (
-  <svg {...base} {...p}>
-    <circle cx="9" cy="8" r="3.5" />
-    <path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5" />
-    <path d="M16 4.5a3.5 3.5 0 010 7M18 14.8c1.9.7 3.1 2.5 3.5 5.2" />
-  </svg>
-);
 export const IconLogout = (p: P) => (
   <svg {...base} {...p}>
     <path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11" />

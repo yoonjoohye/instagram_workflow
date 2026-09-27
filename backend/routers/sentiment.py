@@ -32,6 +32,7 @@ def sync(
 
 def _engine() -> dict:
     return {
+        "min_comments": svc.MIN_COMMENTS,
         "engine": "gemini" if settings.gemini_api_key else "rules",
         "model": settings.gemini_model if settings.gemini_api_key else "",
         "last_error": svc.last_error if settings.gemini_api_key else "",

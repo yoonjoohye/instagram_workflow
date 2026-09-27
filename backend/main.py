@@ -9,7 +9,6 @@ from starlette.requests import Request
 from .config import settings
 from .db import init_db
 from .routers import auth, autoreply, cardnews, insights, sentiment, webhooks, workflow
-from .services.generation import active_engine_name
 from .services.meta_graph import GraphError
 
 
@@ -40,8 +39,8 @@ def health() -> dict:
         "ok": True,
         "meta_configured": settings.meta_configured,
         "auth_mode": settings.auth_mode,
-        "media_engine": active_engine_name(),
-        "caption_engine": "claude" if settings.anthropic_api_key else "template",
+        # 카드뉴스 구성·사진 편집과 댓글 감정 분석에 쓰는 엔진
+        "ai_engine": "gemini" if settings.gemini_api_key else "basic",
         "public_base_url": settings.public_base_url,
         "redirect_uri": settings.redirect_uri,
     }
