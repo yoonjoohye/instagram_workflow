@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import current_account, graph_for
-from ..models import Account, GenerationJob
+from ..models import Account, AutoReplyRule, GenerationJob
 from ..schemas import GenerateIn, JobPatch, PublishIn
 from ..services import publishing
 from ..services.generation import (
@@ -253,6 +253,10 @@ def publish_job(
     job.permalink = result.get("permalink", "")
     job.published_at = dt.datetime.now(dt.timezone.utc)
     job.status = "published"
+    # 게시 전에 만들어 둔 자동 응답 규칙을 실제 게시물에 연결합니다.
+    rule = db.scalar(select(AutoReplyRule).where(AutoReplyRule.job_id == job.id))
+    if rule is not None:
+        rule.ig_media_id = job.ig_media_id
     db.commit()
     db.refresh(job)
     return _job_dict(job)

@@ -25,6 +25,7 @@ SCOPES = [
     "instagram_content_publish",
     "instagram_manage_insights",
     "instagram_manage_comments",
+    "instagram_manage_messages",
     "pages_show_list",
     "pages_read_engagement",
     "business_management",
@@ -36,6 +37,8 @@ IG_SCOPES = [
     "instagram_business_content_publish",
     "instagram_business_manage_insights",
     "instagram_business_manage_comments",
+    # 댓글 작성자에게 DM, 팔로우 여부 확인(자동 응답)
+    "instagram_business_manage_messages",
 ]
 
 IG_AUTHORIZE_URL = "https://www.instagram.com/oauth/authorize"
@@ -199,3 +202,32 @@ class GraphClient:
                 "followers_count,follows_count,media_count"
             },
         )
+
+    # ── 댓글 자동 응답 / DM ─────────────────────────────────────────────
+    def reply_to_comment(self, comment_id: str, message: str) -> dict[str, Any]:
+        """댓글에 공개 답글."""
+        return self.post(f"{comment_id}/replies", {"message": message})
+
+    def send_private_reply(self, comment_id: str, text: str) -> dict[str, Any]:
+        """댓글 작성자에게 비공개 DM. 댓글당 1통, 댓글 작성 후 7일 이내, 텍스트만."""
+        return self._post_json("me/messages", {"recipient": {"comment_id": comment_id}, "message": {"text": text}})
+
+    def send_message(self, igsid: str, text: str) -> dict[str, Any]:
+        """상대가 먼저 보낸 메시지에 대한 답장 (24시간 이내)."""
+        return self._post_json("me/messages", {"recipient": {"id": igsid}, "message": {"text": text}})
+
+    def messaging_profile(self, igsid: str) -> dict[str, Any]:
+        """DM 을 보낸 사용자의 프로필. 상대가 먼저 메시지를 보내야 조회 가능(Meta 정책)."""
+        return self.get(igsid, {"fields": "username,name,is_user_follow_business"})
+
+    def subscribe_webhooks(self, fields: str = "comments,messages") -> dict[str, Any]:
+        """이 계정의 이벤트를 앱 Webhook 으로 받도록 구독 (Instagram 로그인 방식)."""
+        return self.post("me/subscribed_apps", {"subscribed_fields": fields})
+
+    def _post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        resp = self._client.post(
+            f"/{path.lstrip('/')}",
+            params={"access_token": self.access_token} if self.access_token else None,
+            json=body,
+        )
+        return _raise_for_graph(resp)

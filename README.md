@@ -16,6 +16,7 @@ Instagram 계정을 연결하고 프롬프트를 입력하면 사진·영상·�
 | `/admin/jobs` | 생성·게시 작업 기록 |
 | `/admin/posts` | 게시물별 성과(도달·조회·좋아요·저장·공유·참여율) |
 | `/admin/visitors` | 댓글·멘션을 남긴 계정 |
+| `/admin/autoreply` | 댓글 자동 응답 — 연결 상태, 게시물별 규칙, 처리 기록 |
 
 > Meta 는 개인정보 정책상 **프로필·게시물을 본 개별 계정을 API 로 제공하지 않습니다.** 대시보드는 도달 같은 집계 수치와, 댓글·멘션으로 식별되는 계정만 보여줍니다.
 
@@ -47,6 +48,21 @@ Higgsfield·Anthropic 키가 없으면 목업 미디어와 템플릿 캡션으�
 5. 재배포합니다. `vercel.json` 의 cron 이 매일 03:00(UTC)에 인사이트 스냅샷을 적재하고 Instagram 토큰(60일)을 연장합니다.
 
 > Facebook 로그인 방식을 쓰려면 `INSTAGRAM_APP_*` 대신 `META_APP_ID` / `META_APP_SECRET` 을 넣고, Facebook 로그인 for Business 의 유효한 OAuth 리디렉션 URI 에 같은 콜백 주소를 등록합니다. 이 방식은 Instagram 계정이 Facebook 페이지에 연결되어 있어야 합니다.
+
+## 댓글 자동 응답 (팔로워 전용 링크)
+
+스튜디오의 게시물 화면에서 설정합니다. 게시 전에 저장해 두면 게시되는 순간부터 동작합니다.
+
+1. 키워드가 포함된 댓글 → 공개 답글 + 댓글 작성자에게 DM("이 메시지에 답장하면 링크를 드려요")
+2. 사용자가 DM 에 답장 → 팔로워면 링크, 아니면 팔로우 안내 (팔로우 후 다시 답장하면 링크)
+
+Meta 정책상 댓글 작성자에게 보내는 DM 은 댓글당 1통·텍스트만 가능하고, 팔로우 여부는 상대가 먼저 DM 을 보낸 뒤에만 조회할 수 있어서 두 단계입니다.
+
+필요한 설정
+- `WEBHOOK_VERIFY_TOKEN` 환경변수
+- Meta 앱 → Webhooks: 콜백 URL `https://<project>.vercel.app/api/py/webhooks/instagram`, 인증 토큰, 구독 필드 `comments`, `messages`
+- 권한 `instagram_business_manage_messages` (기능 추가 전에 로그인했다면 다시 로그인)
+- **Meta 앱이 라이브 상태여야** Webhook 이 실제로 전달되고, 다른 사용자의 댓글·DM 이 들어옵니다 (앱 검수 필요).
 
 ## Instagram 계정 조건
 

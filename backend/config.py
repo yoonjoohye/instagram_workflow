@@ -39,6 +39,9 @@ class Settings(BaseSettings):
 
     cron_secret: str = ""
 
+    # Meta Webhooks 구독 시 '인증 토큰' 칸에 넣는 값과 같아야 합니다 (아무 임의 문자열).
+    webhook_verify_token: str = ""
+
     @model_validator(mode="after")
     def _vercel_defaults(self) -> "Settings":
         # PUBLIC_BASE_URL 을 따로 안 넣었다면 Vercel 이 주입하는 프로덕션 도메인을 씁니다.
@@ -62,6 +65,16 @@ class Settings(BaseSettings):
     @property
     def oauth_dialog(self) -> str:
         return f"https://www.facebook.com/{self.meta_api_version}/dialog/oauth"
+
+    @property
+    def webhook_secret(self) -> str:
+        """현재 로그인 방식의 앱 시크릿 — Webhook 서명(X-Hub-Signature-256) 검증에 씁니다.
+        (APP_SECRET 은 토큰 암호화용 마스터 시크릿으로 별개입니다.)"""
+        return self.instagram_app_secret if self.auth_mode == "instagram" else self.meta_app_secret
+
+    @property
+    def webhook_url(self) -> str:
+        return f"{self.public_base_url.rstrip('/')}/api/py/webhooks/instagram"
 
     @property
     def redirect_uri(self) -> str:

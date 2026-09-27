@@ -182,6 +182,14 @@ def callback(
 
     account = _upsert_account(db, linked)
 
+    if settings.auth_mode == "instagram":
+        # 댓글·DM 자동 응답용 Webhook 구독. 실패해도(권한·앱 모드) 로그인은 계속합니다.
+        try:
+            with GraphClient(linked.token) as client:
+                client.subscribe_webhooks()
+        except GraphError:
+            pass
+
     resp = RedirectResponse(_admin_url(connected="1"))
     resp.delete_cookie(OAUTH_STATE_COOKIE)
     resp.set_cookie(

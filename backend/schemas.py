@@ -27,3 +27,17 @@ class JobPatch(BaseModel):
 class PublishIn(BaseModel):
     job_id: int
     share_to_feed: bool = True
+
+
+class AutoReplyIn(BaseModel):
+    enabled: bool = True
+    keywords: str = Field(default="", max_length=500)
+    public_reply: str = Field(default="", max_length=2200)
+    dm_prompt: str = Field(default="", max_length=1000)
+    link_url: str = Field(default="", max_length=2000)
+    link_message: str = Field(default="", max_length=1000)
+    not_following_message: str = Field(default="", max_length=1000)
+
+
+class AutoReplyToggle(BaseModel):
+    enabled: bool

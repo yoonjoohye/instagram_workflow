@@ -139,3 +139,44 @@ export type IgPost = {
 };
 
 export type ListOf<T> = { data: T[]; note?: string };
+
+export type AutoReplyRule = {
+  id: number | null;
+  exists: boolean;
+  job_id: number | null;
+  ig_media_id: string;
+  enabled: boolean;
+  keywords: string;
+  public_reply: string;
+  dm_prompt: string;
+  link_url: string;
+  link_message: string;
+  not_following_message: string;
+  post?: { prompt: string; status: JobStatus; permalink: string; thumbnail_url: string };
+};
+
+export type AutoReplyInput = Omit<AutoReplyRule, "id" | "exists" | "job_id" | "ig_media_id" | "post">;
+
+export type AutoReplyStatus = {
+  auth_mode: "instagram" | "facebook";
+  webhook_url: string;
+  verify_token_set: boolean;
+  app_secret_set: boolean;
+  messages_permission: boolean;
+  comments_permission: boolean;
+};
+
+export type AutoReplyLogStatus = "replied" | "dm_sent" | "awaiting_follow" | "link_sent" | "skipped" | "failed";
+
+export type AutoReplyLog = {
+  id: number;
+  rule_id: number | null;
+  comment_id: string;
+  ig_media_id: string;
+  commenter_username: string;
+  comment_text: string;
+  status: AutoReplyLogStatus;
+  error: string;
+  created_at: string;
+  updated_at: string;
+};

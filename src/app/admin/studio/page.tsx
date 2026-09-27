@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useMe } from "@/components/AdminShell";
+import { AutoReplyCard } from "@/components/AutoReplyCard";
 import { IconExternal, IconMusic, IconSpark } from "@/components/icons";
 import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Segmented, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
@@ -537,6 +538,8 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
           {error && <Notice tone="bad">{error}</Notice>}
         </div>
       </Card>
+
+      <AutoReplyCard jobId={job.id} published={job.status === "published"} />
     </div>
   );
 }

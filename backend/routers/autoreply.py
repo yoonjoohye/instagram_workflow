@@ -1,0 +1,184 @@
+"""댓글 자동 응답 규칙 관리 + 처리 기록 + 설정 상태."""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import desc, select
+from sqlalchemy.orm import Session
+
+from ..config import settings
+from ..db import get_db
+from ..deps import current_account, graph_for
+from ..models import Account, AutoReplyRule, CommentReply, GenerationJob
+from ..schemas import AutoReplyIn, AutoReplyToggle
+from ..services.autoreply import DEFAULTS
+from ..services.meta_graph import GraphError
+
+router = APIRouter(prefix="/autoreply", tags=["autoreply"])
+
+
+def _rule_dict(rule: AutoReplyRule | None, job: GenerationJob | None = None) -> dict:
+    base = {
+        "id": rule.id if rule else None,
+        "exists": rule is not None,
+        "job_id": rule.job_id if rule else (job.id if job else None),
+        "ig_media_id": rule.ig_media_id if rule else (job.ig_media_id if job else ""),
+        "enabled": bool(rule.enabled) if rule else True,
+        "keywords": rule.keywords if rule else "",
+        "public_reply": rule.public_reply if rule else DEFAULTS["public_reply"],
+        "dm_prompt": rule.dm_prompt if rule else DEFAULTS["dm_prompt"],
+        "link_url": rule.link_url if rule else "",
+        "link_message": rule.link_message if rule else DEFAULTS["link_message"],
+        "not_following_message": rule.not_following_message
+        if rule
+        else DEFAULTS["not_following_message"],
+    }
+    if job is not None:
+        visual = next((a for a in (job.assets or []) if a.get("type") != "audio"), None)
+        base["post"] = {
+            "prompt": job.prompt,
+            "status": job.status,
+            "permalink": job.permalink,
+            "thumbnail_url": (visual or {}).get("thumbnail_url") or (visual or {}).get("url", ""),
+        }
+    return base
+
+
+def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
+    job = db.get(GenerationJob, job_id)
+    if not job or job.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "작업을 찾을 수 없습니다.")
+    return job
+
+
+@router.get("/status")
+def setup_status(account: Account = Depends(current_account)) -> dict:
+    """자동 응답이 실제로 동작하기 위한 준비 상태 (UI 체크리스트용)."""
+    scopes = set(account.granted_scopes.split(",")) if account.granted_scopes else set()
+    return {
+        "auth_mode": settings.auth_mode,
+        "webhook_url": settings.webhook_url,
+        "verify_token_set": bool(settings.webhook_verify_token),
+        "app_secret_set": bool(settings.webhook_secret),
+        "messages_permission": bool(
+            scopes & {"instagram_business_manage_messages", "instagram_manage_messages"}
+        ),
+        "comments_permission": bool(
+            scopes & {"instagram_business_manage_comments", "instagram_manage_comments"}
+        ),
+    }
+
+
+@router.post("/subscribe")
+def subscribe(account: Account = Depends(current_account)) -> dict:
+    """이 계정의 댓글·DM 이벤트를 앱 Webhook 으로 받도록 구독합니다."""
+    if settings.auth_mode != "instagram":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Facebook 로그인 방식은 Meta 앱 대시보드에서 페이지 구독을 설정하세요.",
+        )
+    with graph_for(account) as client:
+        try:
+            return client.subscribe_webhooks()
+        except GraphError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+
+@router.get("/rules")
+def list_rules(account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    rules = db.scalars(
+        select(AutoReplyRule)
+        .where(AutoReplyRule.account_id == account.id)
+        .order_by(desc(AutoReplyRule.updated_at))
+    ).all()
+    return {"data": [_rule_dict(r, db.get(GenerationJob, r.job_id) if r.job_id else None) for r in rules]}
+
+
+@router.get("/jobs/{job_id}")
+def get_job_rule(
+    job_id: int, account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> dict:
+    job = _own_job(db, account, job_id)
+    rule = db.scalar(select(AutoReplyRule).where(AutoReplyRule.job_id == job.id))
+    return _rule_dict(rule, job)
+
+
+@router.put("/jobs/{job_id}")
+def save_job_rule(
+    job_id: int,
+    body: AutoReplyIn,
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+) -> dict:
+    job = _own_job(db, account, job_id)
+    rule = db.scalar(select(AutoReplyRule).where(AutoReplyRule.job_id == job.id))
+    if rule is None:
+        rule = AutoReplyRule(account_id=account.id, job_id=job.id)
+        db.add(rule)
+    # 게시 전이면 비어 있고, 게시되면 workflow.publish 가 채웁니다.
+    rule.ig_media_id = job.ig_media_id or ""
+    rule.enabled = int(body.enabled)
+    rule.keywords = ",".join(k.strip() for k in body.keywords.split(",") if k.strip())
+    rule.public_reply = body.public_reply
+    rule.dm_prompt = body.dm_prompt
+    rule.link_url = body.link_url.strip()
+    rule.link_message = body.link_message
+    rule.not_following_message = body.not_following_message
+    db.commit()
+    db.refresh(rule)
+    return _rule_dict(rule, job)
+
+
+@router.patch("/rules/{rule_id}")
+def toggle_rule(
+    rule_id: int,
+    body: AutoReplyToggle,
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+) -> dict:
+    rule = db.get(AutoReplyRule, rule_id)
+    if not rule or rule.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "규칙을 찾을 수 없습니다.")
+    rule.enabled = int(body.enabled)
+    db.commit()
+    return _rule_dict(rule, db.get(GenerationJob, rule.job_id) if rule.job_id else None)
+
+
+@router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+def delete_rule(
+    rule_id: int, account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> Response:
+    rule = db.get(AutoReplyRule, rule_id)
+    if not rule or rule.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "규칙을 찾을 수 없습니다.")
+    db.delete(rule)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/logs")
+def logs(
+    limit: int = 50, account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> dict:
+    rows = db.scalars(
+        select(CommentReply)
+        .where(CommentReply.account_id == account.id)
+        .order_by(desc(CommentReply.updated_at))
+        .limit(min(limit, 200))
+    ).all()
+    return {
+        "data": [
+            {
+                "id": r.id,
+                "rule_id": r.rule_id,
+                "comment_id": r.comment_id,
+                "ig_media_id": r.ig_media_id,
+                "commenter_username": r.commenter_username,
+                "comment_text": r.comment_text,
+                "status": r.status,
+                "error": r.error,
+                "created_at": r.created_at.isoformat(),
+                "updated_at": r.updated_at.isoformat(),
+            }
+            for r in rows
+        ]
+    }

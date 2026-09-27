@@ -139,3 +139,61 @@ class KnownVisitor(Base):
     last_text: Mapped[str] = mapped_column(Text, default="")
     last_media_id: Mapped[str] = mapped_column(String(64), default="")
     last_seen_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AutoReplyRule(Base):
+    """게시물 하나에 대한 댓글 자동 응답 규칙.
+
+    댓글(키워드 일치) → 공개 답글 + 비공개 DM("답장하면 링크를 드려요")
+    → 사용자가 DM 에 답장 → 팔로워면 링크, 아니면 팔로우 안내.
+    팔로우 여부는 상대가 먼저 DM 을 보내야만 조회할 수 있어서(Meta 정책) 이 두 단계 흐름입니다.
+    """
+
+    __tablename__ = "auto_reply_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="CASCADE"), unique=True
+    )
+    ig_media_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+
+    enabled: Mapped[int] = mapped_column(Integer, default=1)
+    keywords: Mapped[str] = mapped_column(Text, default="")  # 쉼표 구분, 비우면 모든 댓글
+    public_reply: Mapped[str] = mapped_column(Text, default="")  # 비우면 공개 답글 생략
+    dm_prompt: Mapped[str] = mapped_column(Text, default="")
+    link_url: Mapped[str] = mapped_column(Text, default="")
+    link_message: Mapped[str] = mapped_column(Text, default="")
+    not_following_message: Mapped[str] = mapped_column(Text, default="")
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class CommentReply(Base):
+    """자동 응답 처리 기록. comment_id 가 유니크라 같은 댓글에 두 번 답하지 않습니다.
+
+    status: replied(공개 답글만) | dm_sent(링크 요청 대기) | awaiting_follow | link_sent | skipped | failed
+    """
+
+    __tablename__ = "comment_replies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("auto_reply_rules.id", ondelete="SET NULL"), index=True
+    )
+    comment_id: Mapped[str] = mapped_column(String(64), unique=True)
+    ig_media_id: Mapped[str] = mapped_column(String(64), default="")
+    commenter_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    commenter_username: Mapped[str] = mapped_column(String(128), default="")
+    comment_text: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(24), default="replied")
+    error: Mapped[str] = mapped_column(Text, default="")
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

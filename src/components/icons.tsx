@@ -75,3 +75,9 @@ export const IconInstagram = (p: P) => (
     <circle cx="17.5" cy="6.5" r="0.8" fill="currentColor" />
   </svg>
 );
+export const IconReply = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z" />
+    <path d="M9 11l-2 2 2 2M7 13h6a2 2 0 002-2v-1" />
+  </svg>
+);
