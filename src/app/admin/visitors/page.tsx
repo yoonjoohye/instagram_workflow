@@ -5,7 +5,7 @@ import { IconExternal, IconRefresh } from "@/components/icons";
 import { Avatar, Badge, Button, Card, Empty, inputClass, Notice, PageHeader, Segmented, Skeleton } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { fmtInt, fmtRelative } from "@/lib/format";
-import type { ListOf, Visitor } from "@/lib/types";
+import type { DmContact, ListOf, TaggedMedia, Visitor } from "@/lib/types";
 
 type Source = "all" | "comment" | "mention";
 
@@ -150,6 +150,93 @@ export default function VisitorsPage() {
           </div>
         )}
       </Card>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <MentionsCard />
+        <DmContactsCard />
+      </div>
     </>
+  );
+}
+
+function MentionsCard() {
+  const mentions = useApi<ListOf<TaggedMedia>>("/mentions");
+  const rows = mentions.data?.data ?? [];
+  return (
+    <Card title="나를 태그한 게시물" subtitle="다른 계정이 게시물에서 나를 태그한 경우">
+      {mentions.loading && !mentions.data ? (
+        <Skeleton className="h-24" />
+      ) : mentions.error ? (
+        <Notice tone="bad">{mentions.error.message}</Notice>
+      ) : rows.length === 0 ? (
+        <Empty title="아직 태그된 게시물이 없습니다" />
+      ) : (
+        <ul className="divide-y divide-line">
+          {rows.map((m) => (
+            <li key={m.id} className="flex items-center gap-3 py-2.5">
+              {m.media_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={m.media_url} alt="" className="size-10 shrink-0 rounded-md object-cover" loading="lazy" />
+              ) : (
+                <span className="size-10 shrink-0 rounded-md bg-surface-2" />
+              )}
+              <div className="min-w-0 flex-1">
+                <a href={`https://www.instagram.com/${m.username}/`} target="_blank" rel="noreferrer" className="text-[13px] font-medium hover:underline">
+                  @{m.username}
+                </a>
+                <p className="truncate text-[12px] text-fg-3">{m.caption || "(캡션 없음)"}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <a href={m.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] text-fg-2 hover:underline">
+                  게시물 <IconExternal width={12} height={12} />
+                </a>
+                <p className="text-[11px] text-fg-3">{fmtRelative(m.timestamp)}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function DmContactsCard() {
+  const contacts = useApi<ListOf<DmContact>>("/dm-contacts");
+  const rows = contacts.data?.data ?? [];
+  return (
+    <Card title="DM 대화 상대" subtitle="나에게 DM을 보낸 계정 — 팔로우 여부까지 확인됩니다">
+      {contacts.loading && !contacts.data ? (
+        <Skeleton className="h-24" />
+      ) : contacts.error ? (
+        <Notice tone="bad">{contacts.error.message}</Notice>
+      ) : rows.length === 0 ? (
+        <Empty title="조회된 대화가 없습니다">{contacts.data?.note}</Empty>
+      ) : (
+        <ul className="divide-y divide-line">
+          {rows.map((c) => (
+            <li key={c.id} className="flex items-center gap-3 py-2.5">
+              <Avatar src={c.profile_pic} name={c.username || c.name || "?"} size={36} />
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-1 text-[13px] font-medium">
+                  <a href={`https://www.instagram.com/${c.username}/`} target="_blank" rel="noreferrer" className="truncate hover:underline">
+                    @{c.username || "알 수 없음"}
+                  </a>
+                  {c.is_verified_user && <Badge tone="accent">인증</Badge>}
+                </p>
+                <p className="truncate text-[12px] text-fg-3">
+                  {c.name} · 팔로워 {fmtInt(c.follower_count ?? null)}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <Badge tone={c.is_user_follow_business ? "good" : "neutral"}>
+                  {c.is_user_follow_business ? "나를 팔로우" : "팔로우 안 함"}
+                </Badge>
+                {c.is_business_follow_user && <span className="text-[11px] text-fg-3">내가 팔로우 중</span>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

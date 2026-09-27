@@ -184,6 +184,62 @@ def audience(account: Account = Depends(current_account)) -> dict:
     }
 
 
+@router.get("/insights/breakdowns")
+def breakdowns(
+    days: int = Query(default=30, ge=7, le=90),
+    account: Account = Depends(current_account),
+) -> dict:
+    """팔로워/비팔로워, 콘텐츠 유형별, 반응 상세, 팔로우·언팔로우, 프로필 링크 탭."""
+    with graph_for(account) as client:
+        data = svc.account_breakdowns(client, account.ig_user_id, days=days)
+    return {"range_days": days, **data}
+
+
+@router.get("/insights/audience-detail")
+def audience_detail(account: Account = Depends(current_account)) -> dict:
+    """팔로워 · 도달한 사람 · 반응한 사람의 연령/성별/도시/국가 + 팔로워 접속 시간대."""
+    with graph_for(account) as client:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_demo = pool.submit(svc.audience_all, client, account.ig_user_id)
+            f_online = pool.submit(svc.online_followers, client, account.ig_user_id)
+            demographics, online = f_demo.result(), f_online.result()
+    empty = {who: all(not rows for rows in groups.values()) for who, groups in demographics.items()}
+    return {
+        "demographics": demographics,
+        "empty": empty,
+        "online_followers": online,
+        "note": "팔로워 100명 미만이거나 해당 기간 도달·반응이 적으면 Meta 가 인구통계를 제공하지 않습니다.",
+    }
+
+
+@router.get("/posts/{media_id}/detail")
+def post_detail(media_id: str, account: Account = Depends(current_account)) -> dict:
+    """게시물 상세 지표: 프로필 방문·팔로우·프로필 활동, 릴스 시청, 스토리 탐색, 댓글(좋아요·답글 수)."""
+    with graph_for(account) as client:
+        try:
+            return svc.media_detail(client, media_id)
+        except GraphError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+
+@router.get("/mentions")
+def mentions(account: Account = Depends(current_account)) -> dict:
+    """나를 태그한 게시물."""
+    with graph_for(account) as client:
+        return {"data": svc.tagged_media(client, account.ig_user_id)}
+
+
+@router.get("/dm-contacts")
+def dm_contacts(account: Account = Depends(current_account)) -> dict:
+    """DM 을 주고받은 상대 (팔로우 여부·팔로워 수·인증 여부)."""
+    with graph_for(account) as client:
+        rows = svc.dm_contacts(client, own_id=account.ig_user_id, own_username=account.username)
+    return {
+        "data": rows,
+        "note": "상대가 먼저 DM 을 보낸 대화만 조회됩니다. Meta 앱이 개발 모드면 앱 역할이 있는 계정만 보입니다.",
+    }
+
+
 @router.get("/visitors")
 def visitors(
     account: Account = Depends(current_account),

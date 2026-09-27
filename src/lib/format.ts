@@ -90,3 +90,45 @@ export function parseHashtags(input: string): string[] {
     .map((t) => t.replace(/^#+/, "").trim())
     .filter(Boolean);
 }
+
+/** Instagram API 의 분류 값(dimension) → 화면 라벨 */
+export const DIM_LABEL: Record<string, string> = {
+  FOLLOWER: "팔로워",
+  NON_FOLLOWER: "비팔로워",
+  POST: "게시물(사진)",
+  CAROUSEL_CONTAINER: "캐러셀",
+  REEL: "릴스",
+  STORY: "스토리",
+  AD: "광고",
+  IGTV: "IGTV",
+  LIVE: "라이브",
+  BOOK_NOW: "예약",
+  CALL: "전화",
+  DIRECTION: "길찾기",
+  EMAIL: "이메일",
+  INSTANT_EXPERIENCE: "인스턴트 경험",
+  TEXT: "문자",
+  UNDEFINED: "기타",
+  BIO_LINK_CLICKED: "프로필 링크",
+  OTHER: "기타",
+  SWIPE_FORWARD: "다음 계정으로 넘김",
+  TAP_BACK: "뒤로",
+  TAP_EXIT: "나가기",
+  TAP_FORWARD: "다음으로",
+  F: "여성",
+  M: "남성",
+  U: "미상",
+};
+
+export const dimLabel = (key: string) => DIM_LABEL[key] ?? key;
+
+/** 초 → "1분 5초" / 밀리초 입력도 처리 */
+export function fmtDuration(value: number | null | undefined, unit: "s" | "ms" = "ms") {
+  if (value == null) return "—";
+  const total = Math.round(unit === "ms" ? value / 1000 : value);
+  if (total < 60) return `${total}초`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m < 60) return s ? `${m}분 ${s}초` : `${m}분`;
+  return `${Math.floor(m / 60)}시간 ${m % 60}분`;
+}

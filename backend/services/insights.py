@@ -248,3 +248,278 @@ def interacting_accounts(
     rows = list(found.values())
     rows.sort(key=lambda r: (r["interactions"], r["last_seen_at"]), reverse=True)
     return rows
+
+
+# ── 세부 분석: 나눠 보기(breakdown) · 인구통계 · 게시물 상세 · 태그 · DM ─────────
+# 전부 집계 수치입니다. 게시물을 '본' 개별 계정은 어떤 API 로도 제공되지 않습니다.
+
+def breakdown_totals(
+    client: GraphClient, ig_user_id: str, metric: str, breakdown: str, *, since: int, until: int
+) -> list[dict[str, Any]]:
+    """[{key, value}] — 지원 안 되거나 데이터가 없으면 빈 목록."""
+    try:
+        data = client.get(
+            f"{ig_user_id}/insights",
+            {
+                "metric": metric,
+                "period": "day",
+                "metric_type": "total_value",
+                "breakdown": breakdown,
+                "since": since,
+                "until": until,
+            },
+        )
+    except GraphError:
+        return []
+    rows: list[dict[str, Any]] = []
+    for entry in data.get("data", []):
+        for bd in (entry.get("total_value") or {}).get("breakdowns", []):
+            for r in bd.get("results", []):
+                dims = r.get("dimension_values") or ["UNKNOWN"]
+                rows.append({"key": dims[0], "value": int(r.get("value") or 0)})
+    rows.sort(key=lambda r: r["value"], reverse=True)
+    return rows
+
+
+def _single_totals(client: GraphClient, ig_user_id: str, metrics: list[str], *, since: int, until: int) -> dict[str, int | None]:
+    """지표별로 따로 요청해 하나가 미지원이어도 나머지는 받습니다."""
+
+    def one(metric: str) -> tuple[str, int | None]:
+        try:
+            data = client.get(
+                f"{ig_user_id}/insights",
+                {"metric": metric, "period": "day", "metric_type": "total_value", "since": since, "until": until},
+            )
+        except GraphError:
+            return metric, None
+        rows = data.get("data", [])
+        return metric, int((rows[0].get("total_value") or {}).get("value") or 0) if rows else None
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return dict(pool.map(one, metrics))
+
+
+BREAKDOWN_SPECS = {
+    "reach_by_follow": ("reach", "follow_type"),
+    "views_by_follow": ("views", "follow_type"),
+    "reach_by_type": ("reach", "media_product_type"),
+    "views_by_type": ("views", "media_product_type"),
+    "interactions_by_type": ("total_interactions", "media_product_type"),
+    "follows_unfollows": ("follows_and_unfollows", "follow_type"),
+    "link_taps": ("profile_links_taps", "contact_button_type"),
+}
+INTERACTION_METRICS = ["likes", "comments", "saves", "shares", "replies"]
+
+
+def account_breakdowns(client: GraphClient, ig_user_id: str, *, days: int) -> dict[str, Any]:
+    since, until = _day_range(days)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {
+            key: pool.submit(breakdown_totals, client, ig_user_id, metric, bd, since=since, until=until)
+            for key, (metric, bd) in BREAKDOWN_SPECS.items()
+        }
+        interactions = pool.submit(_single_totals, client, ig_user_id, INTERACTION_METRICS, since=since, until=until)
+        out: dict[str, Any] = {key: f.result() for key, f in futures.items()}
+        out["interactions"] = interactions.result()
+    return out
+
+
+AUDIENCE_METRICS = {
+    "follower": "follower_demographics",
+    "reached": "reached_audience_demographics",
+    "engaged": "engaged_audience_demographics",
+}
+
+
+def _demographic(client: GraphClient, ig_user_id: str, metric: str, breakdown: str, timeframe: str) -> list[dict[str, Any]]:
+    try:
+        data = client.get(
+            f"{ig_user_id}/insights",
+            {
+                "metric": metric,
+                "period": "lifetime",
+                "metric_type": "total_value",
+                "breakdown": breakdown,
+                "timeframe": timeframe,
+            },
+        )
+    except GraphError:
+        return []
+    rows: list[dict[str, Any]] = []
+    for entry in data.get("data", []):
+        for bd in (entry.get("total_value") or {}).get("breakdowns", []):
+            for r in bd.get("results", []):
+                dims = r.get("dimension_values") or []
+                rows.append({"label": dims[0] if dims else "기타", "value": int(r.get("value") or 0)})
+    rows.sort(key=lambda r: r["value"], reverse=True)
+    return rows[:20]
+
+
+def audience_all(client: GraphClient, ig_user_id: str, *, timeframe: str = "this_month") -> dict[str, dict[str, list]]:
+    """{팔로워|도달|반응: {age|gender|city|country: [{label, value}]}} — 모수가 적으면 비어 있습니다."""
+    jobs = [(who, metric, bd) for who, metric in AUDIENCE_METRICS.items() for bd in DEMOGRAPHIC_BREAKDOWNS]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda j: _demographic(client, ig_user_id, j[1], j[2], timeframe), jobs))
+    out: dict[str, dict[str, list]] = {who: {} for who in AUDIENCE_METRICS}
+    for (who, _, bd), rows in zip(jobs, results):
+        out[who][bd] = rows
+    return out
+
+
+def online_followers(client: GraphClient, ig_user_id: str) -> list[float]:
+    """시간대(0~23시)별 팔로워 평균 접속 수. 데이터가 없으면 빈 목록."""
+    since, until = _day_range(7)
+    try:
+        data = client.get(
+            f"{ig_user_id}/insights",
+            {"metric": "online_followers", "period": "lifetime", "since": since, "until": until},
+        )
+    except GraphError:
+        return []
+    days = [v.get("value") for row in data.get("data", []) for v in row.get("values", []) if isinstance(v.get("value"), dict)]
+    days = [d for d in days if d]
+    if not days:
+        return []
+    return [round(sum(int(d.get(str(h), 0) or 0) for d in days) / len(days), 1) for h in range(24)]
+
+
+# 게시물 유형별 상세 지표 (문서: instagram-media/insights)
+_DETAIL_METRICS = {
+    "FEED": ["reach", "views", "likes", "comments", "saved", "shares", "total_interactions", "profile_visits", "follows", "profile_activity"],
+    "REELS": ["reach", "views", "likes", "comments", "saved", "shares", "total_interactions", "ig_reels_avg_watch_time", "ig_reels_video_view_total_time", "reels_skip_rate"],
+    "STORY": ["reach", "views", "total_interactions", "follows", "profile_visits", "profile_activity", "link_clicks", "navigation", "replies"],
+}
+
+
+def _media_metrics(client: GraphClient, media_id: str, metrics: list[str]) -> dict[str, Any]:
+    """한 번에 요청하고, 미지원 지표가 섞여 실패하면 지표별로 나눠 다시 받습니다."""
+
+    def parse(data: dict[str, Any]) -> dict[str, Any]:
+        return {r["name"]: (r.get("values") or [{}])[0].get("value", 0) for r in data.get("data", [])}
+
+    try:
+        return parse(client.get(f"{media_id}/insights", {"metric": ",".join(metrics)}))
+    except GraphError:
+        pass
+
+    def one(metric: str) -> dict[str, Any]:
+        try:
+            return parse(client.get(f"{media_id}/insights", {"metric": metric}))
+        except GraphError:
+            return {}
+
+    out: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for part in pool.map(one, metrics):
+            out.update(part)
+    return out
+
+
+def _media_breakdown(client: GraphClient, media_id: str, metric: str, breakdown: str) -> list[dict[str, Any]]:
+    try:
+        data = client.get(f"{media_id}/insights", {"metric": metric, "breakdown": breakdown})
+    except GraphError:
+        return []
+    rows = []
+    for entry in data.get("data", []):
+        for bd in (entry.get("total_value") or {}).get("breakdowns", []):
+            for r in bd.get("results", []):
+                dims = r.get("dimension_values") or ["OTHER"]
+                rows.append({"key": dims[0], "value": int(r.get("value") or 0)})
+    return sorted(rows, key=lambda r: r["value"], reverse=True)
+
+
+def media_detail(client: GraphClient, media_id: str) -> dict[str, Any]:
+    media = client.get(
+        media_id,
+        {"fields": "id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count"},
+    )
+    product = (media.get("media_product_type") or "FEED").upper()
+    kind = "REELS" if product == "REELS" else "STORY" if product == "STORY" else "FEED"
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_metrics = pool.submit(_media_metrics, client, media_id, _DETAIL_METRICS[kind])
+        f_activity = (
+            pool.submit(_media_breakdown, client, media_id, "profile_activity", "action_type")
+            if kind in ("FEED", "STORY")
+            else None
+        )
+        f_nav = (
+            pool.submit(_media_breakdown, client, media_id, "navigation", "story_navigation_action_type")
+            if kind == "STORY"
+            else None
+        )
+        f_comments = pool.submit(
+            lambda: client.get(
+                f"{media_id}/comments",
+                {"fields": "id,username,text,timestamp,like_count,replies{id}", "limit": 50},
+            ).get("data", [])
+            if media.get("comments_count")
+            else []
+        )
+        metrics = f_metrics.result()
+        try:
+            comments = f_comments.result()
+        except GraphError:
+            comments = []
+    return {
+        "id": media_id,
+        "kind": kind,
+        "metrics": metrics,
+        "profile_activity": f_activity.result() if f_activity else [],
+        "navigation": f_nav.result() if f_nav else [],
+        "comments": [
+            {
+                "id": c.get("id"),
+                "username": c.get("username", ""),
+                "text": c.get("text", ""),
+                "timestamp": c.get("timestamp"),
+                "like_count": c.get("like_count", 0),
+                "reply_count": len((c.get("replies") or {}).get("data", [])),
+            }
+            for c in comments
+        ],
+    }
+
+
+def tagged_media(client: GraphClient, ig_user_id: str, *, limit: int = 30) -> list[dict[str, Any]]:
+    """나를 태그한 게시물 (작성자·캡션·링크)."""
+    try:
+        data = client.get(
+            f"{ig_user_id}/tags",
+            {"fields": "id,username,caption,media_type,media_url,permalink,timestamp,like_count,comments_count", "limit": limit},
+        )
+    except GraphError:
+        return []
+    return data.get("data", [])
+
+
+def dm_contacts(client: GraphClient, *, own_id: str, own_username: str, limit: int = 20) -> list[dict[str, Any]]:
+    """DM 을 주고받은 상대의 프로필. 상대가 먼저 DM 을 보낸 경우에만 조회됩니다(Meta 정책)."""
+    try:
+        data = client.get(
+            "me/conversations", {"platform": "instagram", "fields": "id,updated_time,participants", "limit": limit}
+        )
+    except GraphError:
+        return []
+    people: dict[str, str] = {}
+    for conv in data.get("data", []):
+        for p in (conv.get("participants") or {}).get("data", []):
+            pid = str(p.get("id") or "")
+            if pid and pid != own_id and p.get("username") != own_username:
+                people.setdefault(pid, conv.get("updated_time") or "")
+
+    def profile(item: tuple[str, str]) -> dict[str, Any] | None:
+        pid, updated = item
+        try:
+            prof = client.get(
+                pid,
+                {"fields": "name,username,profile_pic,follower_count,is_user_follow_business,is_business_follow_user,is_verified_user"},
+            )
+        except GraphError:
+            return None
+        return {"id": pid, "last_message_at": updated, **prof}
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        rows = [r for r in pool.map(profile, list(people.items())) if r]
+    rows.sort(key=lambda r: r.get("last_message_at") or "", reverse=True)
+    return rows

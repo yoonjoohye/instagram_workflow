@@ -8,7 +8,8 @@ import { IconRefresh } from "@/components/icons";
 import { Avatar, Button, Card, Notice, PageHeader, Segmented, Skeleton } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { fmtInt, fmtRelative, METRIC_HINT, METRIC_LABEL, postKind } from "@/lib/format";
-import type { Audience, Breakdown, IgPost, ListOf, MetricKey, Overview, SentimentOverview, Visitor } from "@/lib/types";
+import type { AudienceDetail, Breakdowns, IgPost, ListOf, MetricKey, Overview, SentimentOverview, Visitor } from "@/lib/types";
+import { AudienceDetailCard, ContentTypeCard, EngagementCard, FollowSplitCard, OnlineHoursCard } from "@/components/insightCards";
 import { SentimentBar } from "@/components/sentiment";
 
 const TILE_METRICS: MetricKey[] = ["reach", "profile_views", "accounts_engaged", "total_interactions", "website_clicks"];
@@ -20,14 +21,6 @@ const CHART_METRICS: { key: MetricKey; color: string }[] = [
   { key: "accounts_engaged", color: "var(--series-3)" },
 ];
 
-const BREAKDOWNS: { value: Breakdown; label: string }[] = [
-  { value: "country", label: "국가" },
-  { value: "city", label: "도시" },
-  { value: "age", label: "연령" },
-  { value: "gender", label: "성별" },
-];
-
-const GENDER_LABEL: Record<string, string> = { F: "여성", M: "남성", U: "미상" };
 
 export default function DashboardPage() {
   const { me } = useMe();
@@ -35,11 +28,15 @@ export default function DashboardPage() {
   const overview = useApi<Overview>(`/insights/overview?days=${days}`);
   const posts = useApi<ListOf<IgPost>>("/posts?limit=12");
   const visitors = useApi<ListOf<Visitor>>("/visitors?refresh=false");
+  const breakdowns = useApi<Breakdowns>(`/insights/breakdowns?days=${days}`);
+  const audience = useApi<AudienceDetail>("/insights/audience-detail");
 
   const refreshAll = () => {
     overview.reload();
     posts.reload();
     visitors.reload();
+    breakdowns.reload();
+    audience.reload();
   };
 
   return (
@@ -81,12 +78,29 @@ export default function DashboardPage() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <FollowSplitCard data={breakdowns.data} loading={breakdowns.loading && !breakdowns.data} />
+        <ContentTypeCard data={breakdowns.data} loading={breakdowns.loading && !breakdowns.data} />
+      </div>
+
+      <div className="mt-6">
+        <EngagementCard data={breakdowns.data} loading={breakdowns.loading && !breakdowns.data} />
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <TopPostsCard posts={posts.data?.data} loading={posts.loading && !posts.data} error={posts.error?.message} />
         <RecentVisitorsCard visitors={visitors.data?.data} loading={visitors.loading && !visitors.data} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <AudienceCard />
+        <AudienceDetailCard
+          data={audience.data}
+          loading={audience.loading && !audience.data}
+          error={audience.error?.message}
+        />
+        <OnlineHoursCard data={audience.data} loading={audience.loading && !audience.data} />
+      </div>
+
+      <div className="mt-6">
         <SentimentCard />
       </div>
 
@@ -309,40 +323,6 @@ function RecentVisitorsCard({ visitors, loading }: { visitors?: Visitor[]; loadi
             </li>
           ))}
         </ul>
-      )}
-    </Card>
-  );
-}
-
-function AudienceCard() {
-  const audience = useApi<Audience>("/insights/audience");
-  const [breakdown, setBreakdown] = useState<Breakdown>("country");
-  const rows = audience.data?.demographics[breakdown] ?? [];
-
-  return (
-    <Card
-      title="팔로워 분포"
-      subtitle="이번 달 기준 팔로워 인구통계 (상위 10개)"
-      action={<Segmented size="sm" ariaLabel="분류" value={breakdown} onChange={setBreakdown} options={BREAKDOWNS} />}
-    >
-      {audience.loading && !audience.data ? (
-        <div className="space-y-2">
-          {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} className="h-5" />
-          ))}
-        </div>
-      ) : audience.error ? (
-        <Notice tone="bad">{audience.error.message}</Notice>
-      ) : audience.data?.empty ? (
-        <p className="py-6 text-center text-sm text-fg-3">{audience.data.note || "인구통계 데이터가 없습니다."}</p>
-      ) : (
-        <BarList
-          rows={rows.slice(0, 10).map((r) => ({
-            key: r.label,
-            value: r.value,
-            label: breakdown === "gender" ? (GENDER_LABEL[r.label] ?? r.label) : r.label,
-          }))}
-        />
       )}
     </Card>
   );

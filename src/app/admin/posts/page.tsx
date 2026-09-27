@@ -2,13 +2,14 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
+import { BarList } from "@/components/charts";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconRefresh, IconReply, IconSpark } from "@/components/icons";
 import { SentimentBar, SentimentDialog } from "@/components/sentiment";
 import { Badge, Button, Card, cx, Dialog, Empty, Notice, PageHeader, Segmented, Skeleton, Spinner } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
-import { fmtCompact, fmtInt, fmtPct, fmtRelative, postKind } from "@/lib/format";
-import type { AutoReplyInput, AutoReplyRule, IgPost, Job, ListOf, SentimentMediaSync } from "@/lib/types";
+import { dimLabel, fmtCompact, fmtDuration, fmtInt, fmtPct, fmtRelative, postKind } from "@/lib/format";
+import type { AutoReplyInput, AutoReplyRule, IgPost, Job, ListOf, PostDetailData, SentimentMediaSync } from "@/lib/types";
 
 type SortKey = "timestamp" | "reach" | "views" | "likes" | "comments" | "saved" | "shares" | "rate";
 
@@ -542,6 +543,7 @@ function PostDetail({
 
   return (
     <div className="grid gap-3 md:grid-cols-2">
+      <PostMetrics post={post} />
       <section className="rounded-lg border border-line bg-surface-1 p-4">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-[13px] font-semibold">댓글 반응</h3>
@@ -629,5 +631,109 @@ function PostDetail({
         </dl>
       </section>
     </div>
+  );
+}
+
+// 게시물 유형별로 보여줄 상세 지표 (값이 없는 지표는 자동으로 숨깁니다)
+const DETAIL_TILES: Record<PostDetailData["kind"], { key: string; label: string; fmt?: (v: number) => string }[]> = {
+  FEED: [
+    { key: "reach", label: "도달" },
+    { key: "views", label: "조회" },
+    { key: "profile_visits", label: "프로필 방문" },
+    { key: "follows", label: "팔로우" },
+    { key: "saved", label: "저장" },
+    { key: "shares", label: "공유" },
+  ],
+  REELS: [
+    { key: "views", label: "재생" },
+    { key: "reach", label: "도달" },
+    { key: "ig_reels_avg_watch_time", label: "평균 시청 시간", fmt: (v) => fmtDuration(v, "ms") },
+    { key: "ig_reels_video_view_total_time", label: "총 시청 시간", fmt: (v) => fmtDuration(v, "ms") },
+    { key: "reels_skip_rate", label: "3초 내 넘김", fmt: (v) => fmtPct(v) },
+    { key: "shares", label: "공유" },
+  ],
+  STORY: [
+    { key: "reach", label: "도달" },
+    { key: "views", label: "조회" },
+    { key: "link_clicks", label: "링크 클릭" },
+    { key: "replies", label: "답장" },
+    { key: "profile_visits", label: "프로필 방문" },
+    { key: "follows", label: "팔로우" },
+  ],
+};
+
+/** 펼쳤을 때 불러오는 게시물 상세 지표 */
+function PostMetrics({ post }: { post: IgPost }) {
+  const detail = useApi<PostDetailData>(`/posts/${post.id}/detail`);
+  const d = detail.data;
+  const reach = d?.metrics.reach ?? 0;
+  const followRate = d && reach ? ((d.metrics.follows ?? 0) / reach) * 100 : null;
+  const visitRate = d && reach ? ((d.metrics.profile_visits ?? 0) / reach) * 100 : null;
+  const topComments = [...(d?.comments ?? [])].sort((a, b) => b.like_count - a.like_count).slice(0, 3);
+
+  return (
+    <section className="rounded-lg border border-line bg-surface-1 p-4 md:col-span-2">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-[13px] font-semibold">상세 지표</h3>
+        {d && d.kind !== "REELS" && reach > 0 && (
+          <span className="tnum text-[12px] text-fg-3">
+            본 사람 중 프로필 방문 {fmtPct(visitRate)} · 팔로우 {fmtPct(followRate)}
+          </span>
+        )}
+      </div>
+      {detail.loading && !d ? (
+        <Skeleton className="mt-3 h-16" />
+      ) : detail.error ? (
+        <p className="mt-3 text-[12px] text-bad">{detail.error.message}</p>
+      ) : d ? (
+        <div className="mt-3 space-y-4">
+          <dl className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+            {DETAIL_TILES[d.kind]
+              .filter((t) => d.metrics[t.key] != null)
+              .map((t) => (
+                <div key={t.key} className="rounded-md bg-surface-2 px-3 py-2">
+                  <dt className="text-[11px] text-fg-3">{t.label}</dt>
+                  <dd className="pnum text-[15px] font-semibold">{t.fmt ? t.fmt(d.metrics[t.key]) : fmtCompact(d.metrics[t.key])}</dd>
+                </div>
+              ))}
+          </dl>
+
+          {(d.profile_activity.length > 0 || d.navigation.length > 0) && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {d.profile_activity.length > 0 && (
+                <div>
+                  <p className="mb-2 text-[12px] font-medium text-fg-2">프로필에서 한 행동</p>
+                  <BarList labelWidth={96} rows={d.profile_activity.map((r) => ({ key: r.key, label: dimLabel(r.key), value: r.value }))} />
+                </div>
+              )}
+              {d.navigation.length > 0 && (
+                <div>
+                  <p className="mb-2 text-[12px] font-medium text-fg-2">스토리 넘기기</p>
+                  <BarList labelWidth={120} rows={d.navigation.map((r) => ({ key: r.key, label: dimLabel(r.key), value: r.value }))} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {topComments.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-[12px] font-medium text-fg-2">좋아요 많은 댓글</p>
+              <ul className="space-y-1.5">
+                {topComments.map((c) => (
+                  <li key={c.id} className="flex items-baseline justify-between gap-3 text-[13px]">
+                    <span className="min-w-0 truncate">
+                      <span className="font-medium">@{c.username}</span> <span className="text-fg-2">{c.text}</span>
+                    </span>
+                    <span className="tnum shrink-0 text-[12px] text-fg-3">
+                      ♥ {c.like_count} · 답글 {c.reply_count}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </section>
   );
 }

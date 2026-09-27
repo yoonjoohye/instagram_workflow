@@ -214,3 +214,59 @@ export type SentimentComment = {
   classified_by: "gemini" | "rules";
   commented_at: string | null;
 };
+
+export type KeyValue = { key: string; value: number };
+
+export type Breakdowns = {
+  range_days: number;
+  reach_by_follow: KeyValue[];
+  views_by_follow: KeyValue[];
+  reach_by_type: KeyValue[];
+  views_by_type: KeyValue[];
+  interactions_by_type: KeyValue[];
+  follows_unfollows: KeyValue[];
+  link_taps: KeyValue[];
+  interactions: Record<"likes" | "comments" | "saves" | "shares" | "replies", number | null>;
+};
+
+export type AudienceGroup = "follower" | "reached" | "engaged";
+
+export type AudienceDetail = {
+  demographics: Record<AudienceGroup, Record<Breakdown, { label: string; value: number }[]>>;
+  empty: Record<AudienceGroup, boolean>;
+  online_followers: number[];
+  note: string;
+};
+
+export type PostDetailData = {
+  id: string;
+  kind: "FEED" | "REELS" | "STORY";
+  metrics: Record<string, number>;
+  profile_activity: KeyValue[];
+  navigation: KeyValue[];
+  comments: { id: string; username: string; text: string; timestamp: string; like_count: number; reply_count: number }[];
+};
+
+export type TaggedMedia = {
+  id: string;
+  username: string;
+  caption?: string;
+  media_type?: string;
+  media_url?: string;
+  permalink: string;
+  timestamp: string;
+  like_count?: number;
+  comments_count?: number;
+};
+
+export type DmContact = {
+  id: string;
+  username?: string;
+  name?: string;
+  profile_pic?: string;
+  follower_count?: number;
+  is_user_follow_business?: boolean;
+  is_business_follow_user?: boolean;
+  is_verified_user?: boolean;
+  last_message_at?: string;
+};
