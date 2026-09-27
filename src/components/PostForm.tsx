@@ -8,11 +8,10 @@ import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
 
 const MAX_PHOTOS = 8; // 올릴 수 있는 사진 수 (게시물은 최대 10장까지 Gemini가 구성)
 const MAX_REFS = 3;
-const DEFAULT_FORMAT = `[후킹 2줄]
-
-[핵심 정보 3~5줄, 줄마다 이모지로 시작]
-
-[저장·공유를 유도하는 마무리 한 줄]`;
+const FORMAT_PLACEHOLDER = `비워 두면 주제·연출에 맞게 알아서 써요.
+예) 짧고 감성적으로, 장소 이름 넣어서
+예) [후킹 2줄]
+[핵심 정보 3~5줄, 줄마다 이모지로 시작]`;
 const FORMAT_EXAMPLE = `[후킹 3줄]
 
 [스탈링 뱅크 설명]
@@ -344,7 +343,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             }}
           />
         </div>
-        <p className="-mt-3 text-[12px] text-fg-3">사진은 선택이에요. Gemini가 컨셉에 맞는 사진만 골라 쓰고, 필요한 장면은 글 내용대로 새로 만들어요.</p>
+        <p className="-mt-3 text-[12px] text-fg-3">사진은 선택이에요. Gemini가 컨셉에 맞는 사진만 골라 쓰고, 필요한 장면은 글 내용대로 새로 만들어요. &lsquo;두 사진을 합쳐 한 장 짜리로&rsquo;처럼 쓰면 여러 사진을 한 이미지로 합쳐요.</p>
 
 
         <Field
@@ -352,7 +351,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           htmlFor="cn-format"
           hint={
             <>
-              [ ] 칸은 Gemini가 채우고, 칸 밖 글자·줄바꿈은 그대로 들어가요. &lsquo;[후킹 3줄]&rsquo;처럼 줄 수를 쓰면 딱 맞춰요.
+              [ ] 칸이 없으면 캡션 요청으로 읽고 Gemini가 새로 써요. [ ] 칸이 있으면 양식으로 보고 칸만 채우며, 칸 밖 글자·줄바꿈은 그대로 들어가요. &lsquo;[후킹 3줄]&rsquo;처럼 줄 수를 쓰면 딱 맞춰요.
               추천인 코드·링크·가격처럼 Gemini가 모르는 정보는 칸 밖에 그대로 쓰거나 칸 안에 적어 주세요
               (예: {"[추천인 정보: 코드 ABC123]"}) — 바꾸지 않고 그대로 써요. 해시태그는 맨 뒤에 자동으로 붙어요.{" "}
               <button type="button" className="underline" onClick={() => setFormat(FORMAT_EXAMPLE)} disabled={busy}>
@@ -366,7 +365,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             rows={7}
             value={format}
             onChange={(e) => setFormat(e.target.value)}
-            placeholder={DEFAULT_FORMAT}
+            placeholder={FORMAT_PLACEHOLDER}
             className={cx(inputClass, "resize-y font-mono text-[12px]")}
             disabled={busy}
           />

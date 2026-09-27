@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,33 @@ def _gemini(
     return data
 
 
+TEXT_FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-lite-latest")
+_TRANSIENT = ("high demand", "overloaded", "unavailable", "try again", "quota", "exhausted", "rate", "deadline", "timed out", "연결 실패", "not found", "no longer available", "not supported")
+
+
+def _text_call(parts: list[dict[str, Any]], generation_config: dict[str, Any], *, tools=None, budget: float = 55.0) -> dict:
+    """구성·조사용 텍스트 호출. 혼잡·한도 오류면 다른 텍스트 모델로 다시 시도합니다 (Vercel 60초 안에서)."""
+    models = list(dict.fromkeys((settings.gemini_text_model, *TEXT_FALLBACK_MODELS)))
+    deadline = time.monotonic() + budget
+    last: Exception | None = None
+    for model in models:
+        remaining = deadline - time.monotonic()
+        if remaining < 8:
+            break
+        try:
+            return _gemini(model, parts, generation_config, tools=tools, timeout=remaining)
+        except GeminiError as exc:
+            last = exc
+            log.warning("gemini text %s failed: %s", model, exc)
+            if not any(k in str(exc).lower() for k in _TRANSIENT):
+                break
+    raise GeminiError(str(last or "Gemini 시간 초과"))
+
+
+def is_busy(exc: Exception) -> bool:
+    return any(k in str(exc).lower() for k in ("high demand", "overloaded", "unavailable", "try again", "rate limit", "quota", "exhausted"))
+
+
 def _parts_of(data: dict) -> list[dict[str, Any]]:
     try:
         return data["candidates"][0]["content"]["parts"]
@@ -129,7 +157,7 @@ def research(prompt: str, notes: str, style: str = "") -> tuple[dict[str, Any], 
     """(조사 결과 {notes, sources}, 경고). 검색이 안 되면 빈 결과로 계속 진행합니다."""
     parts = [{"text": _RESEARCH_PROMPT.format(prompt=prompt, notes=notes.strip() or "없음", style=style.strip() or "없음")}]
     try:
-        data = _gemini(settings.gemini_text_model, parts, {"temperature": 0.2}, tools=[{"googleSearch": {}}], timeout=55.0)
+        data = _text_call(parts, {"temperature": 0.2}, tools=[{"googleSearch": {}}])
         text = _text_of(data)
         chunks = ((data.get("candidates") or [{}])[0].get("groundingMetadata") or {}).get("groundingChunks") or []
         sources, seen = [], set()
@@ -213,7 +241,10 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
 
 슬라이드 규칙
 - slides 는 1~{max_slides}장. 형식과 컨셉에 필요한 만큼만. 1장이면 단일 게시물이 돼.
-- 첨부 사진은 컨셉에 맞는 것만 골라 써 (웹툰처럼 그림체면 사진을 그 그림체로 다시 그리는 참고로 써). 맞는 사진이 없으면 photo 를 -1 로 두고 새로 만들게 해.
+- 장 수: 사용자가 장 수를 정했으면(예: '한 장 짜리', '1장', '3장') 반드시 그 수로 만들어. 사진이 더 많으면 한 장에 합쳐서 맞춰.
+- photos: 이 장에 쓸 첨부 사진 번호 목록. 한 장에 여러 사진을 합쳐 쓰려면(필름 콜라주·스크랩북·필름 스트립·비교·그리드 등) 여러 번호를 넣고,
+  visual 에 어떻게 한 이미지로 합치는지 적어. 맞는 사진이 없어 새로 만들면 빈 목록 []. 컨셉에 맞지 않는 사진은 안 써도 돼
+  (웹툰처럼 그림체면 사진을 그 그림체로 다시 그리는 참고로 써).
 - layout 은 슬라이드마다 골라:
   designed = 글자까지 이미지 안에 그려 넣는 완성형 디자인. 말풍선 대사, 손글씨 메모, 포스터 제목처럼 글자가 그림의 일부인 형식은 반드시 이것.
              그릴 글자는 image_text 에 정확히 (짧게, 한 장에 1~4줄). title/body 는 비워.
@@ -230,15 +261,27 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
 
 캡션 규칙 (매우 중요)
 - 캡션의 말투·표현·강조점도 [주제]와 [연출 방향]을 따라. 조사 자료는 사실을 뒷받침할 때만 써.
-- 아래 캡션 양식에는 채워야 할 칸이 {k}개 있어: {names}
-- caption_parts 배열에 정확히 {k}개의 문자열을 칸 순서대로 넣어. 각 문자열은 해당 칸의 내용만 (칸 이름·대괄호·다른 칸 내용 금지).
-- 칸 이름의 지시를 그대로 지켜: 'N줄'이면 정확히 N줄(줄바꿈으로 구분), '설명'이면 설명, '방법'이면 단계별로 줄바꿈해서.
-- 칸 이름에 정보가 들어 있으면(예: '[추천인 정보: 코드 ABC123, 가입 시 £5]') 그 정보를 빠짐없이 자연스러운 문장으로 써.
-- 사용자 확정 정보와 조사 자료에 없는 사실(예: 추천인 코드·링크·가격)이 필요하면 지어내지 말고 '⚠️ 직접 입력: (무엇이 필요한지)' 라고만 써.
-- 해시태그는 caption_parts 에 넣지 말고 hashtags 배열(# 없이 10~15개)로.
+- 개인 일상·여행 기록처럼 사적인 게시물이면 친구에게 말하듯 자연스럽고 짧게 써. 요청하지 않았으면 홍보·저장·공유 유도 문구는 쓰지 마.
+- 해시태그는 caption_parts 에 넣지 말고 hashtags 배열(# 없이 8~15개, 주제·장소·분위기에 맞게)로. 항상 만들어.
+{caption_rules}"""
+
+_TEMPLATE_RULES = """- 아래 캡션 양식에는 채워야 할 칸이 {k}개 있어: {names}
+- caption_parts 배열에 정확히 {k}개의 문자열을 칸 순서대로 넣어. 칸 밖의 글자·이모지·줄바꿈은 서버가 그대로 유지하니 다시 쓰지 마.
+- 칸 이름의 지시를 그대로 지켜: 'N줄'이면 정확히 N줄(줄바꿈으로 구분), 'N~M줄'이면 그 범위, '이모지로 시작'이면 줄마다 이모지로 시작.
+- 칸 이름에 정보가 들어 있으면(예: '[추천인 정보: 코드 ABC123]') 그 정보를 빠짐없이 자연스러운 문장으로 써.
+- 채울 사실이 없어 지어내야 하는 칸이면 '⚠️ 직접 입력: (무엇이 필요한지)' 라고만 써.
 
 캡션 양식:
 {template}"""
+
+_INSTRUCTION_RULES = """- 사용자가 캡션에 대해 이렇게 적었어: «{request}»
+  이게 요청·지시(예: '너가 알아서 작성해줘', '짧고 감성적으로', '장소 이름 넣어줘')면 그 지시에 맞게 캡션을 새로 써. 지시 문장 자체를 캡션에 넣지 마.
+  그대로 올릴 완성된 문장이면 그 문장을 그대로 캡션으로 써 (맞춤법만 다듬어).
+- caption_parts 에는 완성된 캡션 전체를 문자열 1개로 넣어 (줄바꿈 포함 가능)."""
+
+_FREE_RULES = """- 캡션 양식이 따로 없어. [주제]와 [연출 방향]에 가장 어울리는 캡션을 네가 써.
+  정보형이면 후킹 문장 + 핵심 내용, 일상·여행 기록이면 그 순간의 느낌을 담은 짧은 글 몇 줄 (이모지 조금).
+- caption_parts 에는 완성된 캡션 전체를 문자열 1개로 넣어 (줄바꿈 포함 가능)."""
 
 LAYOUTS = ("designed", "photo", "overlay", "panel", "center")
 
@@ -264,7 +307,7 @@ def _plan_schema(k: int) -> dict[str, Any]:
                 "items": {
                     "type": "OBJECT",
                     "properties": {
-                        "photo": {"type": "INTEGER"},
+                        "photos": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                         "layout": {"type": "STRING", "enum": list(LAYOUTS)},
                         "title": {"type": "STRING"},
                         "body": {"type": "STRING"},
@@ -272,7 +315,7 @@ def _plan_schema(k: int) -> dict[str, Any]:
                         "image_text": {"type": "STRING"},
                         "visual": {"type": "STRING"},
                     },
-                    "required": ["photo", "layout", "title", "body", "cta", "image_text", "visual"],
+                    "required": ["photos", "layout", "title", "body", "cta", "image_text", "visual"],
                 },
             },
             "caption_parts": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": k, "maxItems": k},
@@ -296,8 +339,14 @@ def plan_cardnews(
     """(설계안, 사용 엔진, 경고) — Gemini 실패 시 기본 설계안. references 는 연출 참고 이미지."""
     n = len(photos)
     references = references or []
-    template = caption_format.strip() or DEFAULT_CAPTION_FORMAT
+    template = caption_format.strip()
     names = [p for p in placeholders(template) if "해시태그" not in p and "hashtag" not in p.lower()]
+    if names:
+        caption_rules = _TEMPLATE_RULES.format(k=len(names), names=", ".join(f"[{x}]" for x in names), template=template)
+    elif template:
+        caption_rules = _INSTRUCTION_RULES.format(request=template)
+    else:
+        caption_rules = _FREE_RULES
     text = _PLAN_PROMPT.format(
         n=n,
         prompt=prompt,
@@ -305,9 +354,7 @@ def plan_cardnews(
         style=style.strip() or "(없음 — 컨셉에 맞게 네가 판단)",
         research=research_notes.strip() or "(조사 자료 없음)",
         max_slides=MAX_SLIDES,
-        k=len(names),
-        names=", ".join(f"[{x}]" for x in names) or "(없음 — caption_parts 에 캡션 전체를 1개로)",
-        template=template,
+        caption_rules=caption_rules,
         fonts=" / ".join(f"{k}({v['label']})" for k, v in FONTS.items()),
         refs=(
             f"\n(사진 뒤에 첨부한 마지막 {len(references)}장은 사진이 아니라 1순위의 [참고 이미지] 양식 템플릿이야. 사진 번호로 쓰지 마.)"
@@ -328,20 +375,18 @@ def plan_cardnews(
         parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(photo))}})
     for ref in references:
         parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(ref, 512))}})
-    try:
-        data = _gemini(
-            settings.gemini_text_model,
-            parts,
-            {"temperature": 0.7, "responseMimeType": "application/json", "responseSchema": _plan_schema(max(1, len(names)))},
-            timeout=55.0,
-        )
-        raw = json.loads(_text_of(data))
-        design = _sanitize_plan(raw, n)
-    except (GeminiError, ValueError, KeyError, TypeError) as exc:
-        log.warning("post plan fallback: %s", exc)
-        design, engine, warning = fallback_plan(n, prompt), "template", f"Gemini 구성 실패로 기본 구성 사용: {exc}"
+    if not settings.gemini_api_key:
+        # Gemini 를 쓰지 않는 환경에서만 기본 구성. 키가 있는데 실패하면 엉뚱한 결과 대신 오류를 냅니다.
+        design, engine, warning = fallback_plan(n, prompt, style), "template", "GEMINI_API_KEY 가 없어 기본 구성을 사용했습니다."
         raw = {"caption_parts": []}
     else:
+        schema = _plan_schema(max(1, len(names)))
+        cfg = {"temperature": 0.7, "responseMimeType": "application/json", "responseSchema": schema}
+        try:
+            raw = json.loads(_text_of(_text_call(parts, cfg)))
+            design = _sanitize_plan(raw, n)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise GeminiError(f"Gemini 응답을 읽지 못했습니다: {exc}") from exc
         engine, warning = "gemini", ""
 
     # 캡션은 서버가 양식에 맞춰 조립합니다 (섹션 순서·빈 줄·고정 문구를 모델에 맡기지 않음).
@@ -356,7 +401,8 @@ def plan_cardnews(
                 j += 1
         caption, tags_inline = fill_template(template, full_parts, design["hashtags"])
     else:
-        caption, tags_inline = "\n".join(str(p) for p in raw.get("caption_parts") or []).strip() or template, False
+        # 지시·자유 모드: Gemini 가 쓴 캡션 그대로 (지시문 자체를 캡션으로 쓰지 않음)
+        caption, tags_inline = "\n".join(str(p) for p in raw.get("caption_parts") or []).strip(), False
     design["caption"] = caption[:2200]
     design["hashtags_inline"] = tags_inline
     design["caption_format"] = template
@@ -372,8 +418,14 @@ def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
     """사진 번호·레이아웃·길이를 보정합니다. 컨셉에 맞지 않는 사진은 쓰지 않아도 됩니다 (-1 = 새 이미지 생성)."""
 
     def slide(s: dict[str, Any]) -> dict[str, Any]:
-        photo = s.get("photo")
-        photo = photo if isinstance(photo, int) and 0 <= photo < n else -1
+        raw_photos = s.get("photos")
+        if raw_photos is None and isinstance(s.get("photo"), int):  # 예전 형식
+            raw_photos = [s["photo"]]
+        photos = []
+        for x in raw_photos or []:
+            if isinstance(x, int) and 0 <= x < n and x not in photos:
+                photos.append(x)
+        photos = photos[:4]
         layout = s.get("layout") if s.get("layout") in LAYOUTS else "overlay"
         title, body = _clip(s.get("title"), 26), _clip(s.get("body"), 100)
         image_text = _clip(s.get("image_text"), 160)
@@ -381,7 +433,8 @@ def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
             layout = "photo"  # 서버가 얹을 글이 없으면 이미지만
         server_text = layout in ("overlay", "panel", "center")
         return {
-            "photo": photo,
+            "photos": photos,
+            "photo": photos[0] if photos else -1,  # 예전 코드 호환
             "layout": layout,
             "title": title if server_text else "",
             "body": body if server_text else "",
@@ -408,12 +461,20 @@ def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
     }
 
 
-def fallback_plan(n: int, prompt: str) -> dict[str, Any]:
-    """Gemini 없이: 올린 사진을 순서대로 쓰고, 첫 장에만 주제를 얹습니다 (고정 문구 없음)."""
+_ONE_SLIDE = re.compile(r"(한|1)\s*장\s*(짜리|으로|만|에)|하나로\s*합|한\s*장의|단일\s*(이미지|게시물)")
+
+
+def fallback_plan(n: int, prompt: str, style: str = "") -> dict[str, Any]:
+    """Gemini 없이: 올린 사진을 순서대로 쓰고, 첫 장에만 주제를 얹습니다 (고정 문구 없음).
+    '한 장 짜리'처럼 한 장을 원하면 사진을 모두 한 장에 합칩니다."""
     topic = _clip(prompt.splitlines()[0] if prompt else "", 26)
+    blank = {"layout": "photo", "title": "", "body": "", "cta": "", "image_text": "", "visual": ""}
     if n == 0:
-        return {"concept": topic, "slides": [{"photo": -1, "layout": "center" if topic else "photo", "title": topic, "body": "", "cta": "", "visual": ""}], "hashtags": []}
-    slides = [{"photo": i, "layout": "photo", "title": "", "body": "", "cta": "", "visual": ""} for i in range(min(n, MAX_SLIDES))]
+        return {"concept": topic, "slides": [{**blank, "photos": [], "photo": -1, "layout": "center" if topic else "photo", "title": topic}], "hashtags": []}
+    if n > 1 and _ONE_SLIDE.search(f"{prompt}\n{style}"):
+        ids = list(range(min(n, 4)))
+        return {"concept": topic, "slides": [{**blank, "photos": ids, "photo": 0}], "hashtags": []}
+    slides = [{**blank, "photos": [i], "photo": i} for i in range(min(n, MAX_SLIDES))]
     if topic:
         slides[0].update(layout="overlay", title=topic)
     return {"concept": topic, "slides": slides, "hashtags": []}
@@ -442,7 +503,7 @@ def _visual_prompt(
     topic: str,
     style: str,
     instruction: str,
-    has_photo: bool,
+    has_photo: bool | int,
     art_style: str = "",
     post_format: str = "",
     font: str = "",
@@ -465,12 +526,21 @@ def _visual_prompt(
     message = " — ".join(p for p in (slide.get("title"), slide.get("body")) if p)
     if message and role != "designed":
         lines.append(f"It illustrates this message (Korean): {message}")
-    lines.append(
-        "Use the attached photo as the base/reference: keep its key subject recognizable but transform it into the art style "
-        "and scene described above (re-draw, re-compose, change background or add elements as needed)."
-        if has_photo
-        else "Create this image from scratch in the art style described above."
-    )
+    count = int(has_photo)
+    if count > 1:
+        lines.append(
+            f"COMBINE ALL {count} attached photos into ONE single image (one Instagram post), laid out as described above "
+            "(e.g. film-photo collage, scrapbook, film strip, split frame or grid). Every one of the photos must appear, "
+            "with its people, faces and landmarks kept real and recognizable; do not invent new places or people. "
+            "Output exactly one image, not separate images."
+        )
+    elif count == 1:
+        lines.append(
+            "Use the attached photo as the base/reference: keep its key subject recognizable but transform it into the art style "
+            "and scene described above (re-draw, re-compose, change background or add elements as needed)."
+        )
+    else:
+        lines.append("Create this image from scratch in the art style described above.")
     if role == "designed":
         text = (slide.get("image_text") or "").strip()
         if text:
@@ -521,7 +591,7 @@ def _image_call(parts: list[dict[str, Any]], aspect: str) -> bytes:
 
 
 def render_visual(
-    photo: bytes | None,
+    photos: list[bytes] | bytes | None,
     slide: dict[str, Any],
     *,
     topic: str,
@@ -532,15 +602,20 @@ def render_visual(
     post_format: str = "",
     font: str = "",
 ) -> tuple[bytes, str]:
-    """(이미지, 엔진). 사진이 있으면 연출 편집, 없으면(-1) 새로 생성. 실패하면 기본 보정/배경.
-    references 는 색감·분위기만 참고할 스타일 이미지 (첫 이미지 = 편집할 사진)."""
+    """(이미지, 엔진). 사진이 있으면 연출 편집(여러 장이면 한 이미지로 합침), 없으면 새로 생성.
+    실패하면 기본 보정 / 콜라주 / 배경. references 는 양식 템플릿 이미지."""
+    if photos is None:
+        photos = []
+    elif isinstance(photos, (bytes, bytearray)):
+        photos = [bytes(photos)]
+    photos = list(photos)[:4]
     references = references or []
     prompt = _visual_prompt(
         slide,
         topic=topic,
         style=style,
         instruction=instruction,
-        has_photo=photo is not None,
+        has_photo=len(photos),
         art_style=art_style,
         post_format=post_format,
         font=font,
@@ -549,8 +624,8 @@ def render_visual(
     if refs:
         k = len(refs)
         order = (
-            f"The first {k} attached image(s) are the TEMPLATE; the last attached image is the photo to use as content."
-            if photo is not None
+            f"The first {k} attached image(s) are the TEMPLATE; the remaining {len(photos)} attached image(s) are the photos to use as content."
+            if photos
             else f"All {k} attached image(s) are the TEMPLATE."
         )
         template_rule = (
@@ -565,13 +640,45 @@ def render_visual(
     parts: list[dict[str, Any]] = [{"text": prompt}]
     for ref in refs:  # 템플릿을 먼저 첨부
         parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(ref, 1024))}})
-    if photo is not None:
-        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(photo, 1280))}})
+    side = 1280 if len(photos) <= 1 else 1024
+    for photo in photos:
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(photo, side))}})
     try:
         return _image_call(parts, ASPECT[slide["role"]]), "gemini"
     except (GeminiError, OSError, ValueError) as exc:
         log.warning("render_visual fallback: %s", exc)
-        return (basic_enhance(photo) if photo is not None else placeholder_background()), f"basic ({exc})"
+        if len(photos) > 1:
+            return collage(photos), f"basic ({exc})"
+        return (basic_enhance(photos[0]) if photos else placeholder_background()), f"basic ({exc})"
+
+
+def collage(photos: list[bytes]) -> bytes:
+    """이미지 생성이 안 될 때 여러 사진을 한 장에 담는 필름 사진 콜라주 (크림색 배경 + 흰 테두리 + 살짝 기울임)."""
+    w, h = SIZE
+    k = len(photos)
+    canvas = Image.new("RGB", (w, h), (243, 238, 228))
+    if k == 2:
+        cells = [(0, 0, w, h // 2), (0, h // 2, w, h)]
+    elif k == 3:
+        cells = [(0, 0, w, h // 2), (0, h // 2, w // 2, h), (w // 2, h // 2, w, h)]
+    else:
+        cells = [(x, y, x + w // 2, y + h // 2) for y in (0, h // 2) for x in (0, w // 2)][:k]
+    angles = (-2.5, 2.0, 1.5, -1.8)
+    for i, (photo, (x0, y0, x1, y1)) in enumerate(zip(photos, cells)):
+        cw, ch = x1 - x0, y1 - y0
+        pad, border = 34, 16
+        inner = (cw - 2 * pad - 2 * border, ch - 2 * pad - 2 * border)
+        img = _cover_fit(photo, inner)
+        frame = Image.new("RGB", (inner[0] + 2 * border, inner[1] + 2 * border), (255, 255, 255))
+        frame.paste(img, (border, border))
+        rot = frame.convert("RGBA").rotate(angles[i % 4], expand=True, resample=Image.BICUBIC)
+        shadow = Image.new("RGBA", rot.size, (0, 0, 0, 0))
+        shadow.putalpha(rot.getchannel("A").point(lambda a: 60 if a else 0))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(10))
+        px, py = x0 + (cw - rot.width) // 2, y0 + (ch - rot.height) // 2
+        canvas.paste(shadow, (px + 6, py + 10), shadow)
+        canvas.paste(rot, (px, py), rot)
+    return to_jpeg(canvas, 92)
 
 
 def placeholder_background() -> bytes:
@@ -685,12 +792,20 @@ def _draw_lines(draw, lines, font, x, y, fill, gap) -> int:
     return y
 
 
+# 한글 글씨체에는 이모지 글리프가 없어 네모로 보이므로 서버가 얹는 글에서는 뺍니다 (캡션의 이모지는 그대로).
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\U000E0000-\U000E007F]")
+
+
+def _no_emoji(text: str) -> str:
+    return "\n".join(re.sub(r"[ \t]{2,}", " ", _EMOJI.sub("", line)).strip() for line in (text or "").splitlines()).strip()
+
+
 def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", font: str = DEFAULT_FONT, **_: Any) -> bytes:
     """레이아웃별로 이미지 위에 이 장의 글만 얹습니다 (배지·번호·쪽수·계정명 같은 고정 요소 없음)."""
     W, H = SIZE
     pad = 84
     role = slide["role"]
-    title, body, cta = slide.get("title", ""), slide.get("body", ""), slide.get("cta", "")
+    title, body, cta = (_no_emoji(slide.get(k, "")) for k in ("title", "body", "cta"))
 
     if role in ("designed", "photo") or not (title or body):
         return to_jpeg(_cover_fit(photo, SIZE), 92)  # designed 는 글자까지 이미지 모델이 그림

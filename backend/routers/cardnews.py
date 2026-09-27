@@ -143,18 +143,27 @@ def research(body: ResearchIn, account: Account = Depends(current_account)) -> d
 
 @router.post("/cardnews/plan", status_code=status.HTTP_201_CREATED)
 def plan(body: PlanIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
-    """사진과 주제로 표지·내용·결론 구성과 캡션·해시태그를 설계합니다."""
+    """사진과 주제로 게시물 구성(장 수·장별 사진·레이아웃)과 캡션·해시태그를 설계합니다."""
     blobs = _blobs(db, account, body.upload_ids)
     refs = _blobs(db, account, body.reference_ids)
-    design, engine, warning = svc.plan_cardnews(
-        [b.data for b in blobs],
-        references=[r.data for r in refs],
-        prompt=body.prompt,
-        style=body.style,
-        caption_format=body.caption_format,
-        notes=body.notes,
-        research_notes=body.research_notes,
-    )
+    try:
+        design, engine, warning = svc.plan_cardnews(
+            [b.data for b in blobs],
+            references=[r.data for r in refs],
+            prompt=body.prompt,
+            style=body.style,
+            caption_format=body.caption_format,
+            notes=body.notes,
+            research_notes=body.research_notes,
+        )
+    except svc.GeminiError as exc:
+        # 엉뚱한 기본 구성으로 만들지 않고 멈춥니다.
+        if svc.is_busy(exc):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})",
+            ) from exc
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Gemini 로 게시물을 구성하지 못했습니다: {exc}") from exc
     slides = svc.slide_list(design)
     job = GenerationJob(
         account_id=account.id,
@@ -206,13 +215,15 @@ def render_slide(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "이미지 번호가 올바르지 않습니다.")
     slide = slides[index]
     uploads = _blobs(db, account, job.plan.get("upload_ids") or [])
-    photo = slide.get("photo", -1)
-    source = uploads[photo].data if isinstance(photo, int) and 0 <= photo < len(uploads) else None
+    ids = slide.get("photos")
+    if ids is None:  # 예전 작업
+        ids = [slide.get("photo", -1)]
+    sources = [uploads[i].data for i in ids if isinstance(i, int) and 0 <= i < len(uploads)]
 
     instruction = body.instruction if body and body.instruction else ""
     references = [b.data for b in _blobs(db, account, job.plan.get("reference_ids") or [])]
     edited, engine = svc.render_visual(
-        source,
+        sources,
         slide,
         topic=job.plan.get("topic") or job.prompt,
         style=job.plan.get("style", ""),
@@ -241,7 +252,8 @@ def render_slide(
             "role": slide["role"],
             "status": "done",
             "engine": engine,
-            "generated": source is None,
+            "generated": not sources,
+            "photos": len(sources),
             "instruction": instruction or slide.get("visual", ""),
         },
     }
