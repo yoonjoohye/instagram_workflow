@@ -4,12 +4,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useMe } from "@/components/AdminShell";
-import { AutoReplyCard } from "@/components/AutoReplyCard";
+import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconMusic, IconSpark } from "@/components/icons";
 import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Segmented, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
 import { composeCaption, fmtDateTime, KIND_LABEL, parseHashtags, STATUS_LABEL } from "@/lib/format";
-import type { AspectRatio, Asset, GenerateInput, Job, MediaKind, Quota } from "@/lib/types";
+import type { AspectRatio, Asset, AutoReplyInput, AutoReplyRule, GenerateInput, Job, MediaKind, Quota } from "@/lib/types";
 import { statusTone } from "@/lib/status";
 
 const KINDS: { value: MediaKind; hint: string; ratio: AspectRatio }[] = [
@@ -340,6 +340,14 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
+  // 댓글 자동 응답은 게시 흐름의 일부로 함께 저장합니다 (스토리는 댓글이 없어 제외).
+  const supportsAutoReply = Boolean(job) && job!.media_kind !== "STORIES";
+  const arRule = useApi<AutoReplyRule>(job && supportsAutoReply ? `/autoreply/jobs/${job.id}` : null);
+  const [arForm, setArForm] = useState<AutoReplyInput | null>(null);
+
+  useEffect(() => {
+    setArForm(arRule.data ? autoReplyForm(arRule.data) : null);
+  }, [arRule.data]);
 
   useEffect(() => {
     setCaption(job?.caption ?? "");
@@ -373,30 +381,40 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
   const audio = job.assets.filter((a) => a.type === "audio");
   const overCaption = finalCaption.length > CAPTION_LIMIT;
   const overTags = hashtags.length > HASHTAG_LIMIT;
+  const arDirty = Boolean(arRule.data && arForm && autoReplyDirty(arRule.data, arForm));
+  const arValid = !arForm || autoReplyValid(arForm);
 
-  async function save(): Promise<Job | null> {
+  /** 캡션과 자동 응답 중 바뀐 것만 저장합니다. 실패하면 false. */
+  async function save(): Promise<boolean> {
     setSaving(true);
     setError(undefined);
     try {
-      const updated = await api<Job>(`/workflow/jobs/${job!.id}`, {
-        method: "PATCH",
-        json: { caption, hashtags },
-      });
-      onChange(updated);
+      if (dirty && !locked) {
+        onChange(await api<Job>(`/workflow/jobs/${job!.id}`, { method: "PATCH", json: { caption, hashtags } }));
+      }
+      if (arDirty && arForm) {
+        arRule.setData(await api<AutoReplyRule>(`/autoreply/jobs/${job!.id}`, { method: "PUT", json: arForm }));
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-      return updated;
+      return true;
     } catch (e) {
       setError(toApiError(e).message);
-      return null;
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
   async function publish() {
-    if (!window.confirm(`@${me.username} 계정에 ${KIND_LABEL[job!.media_kind]}(으)로 지금 게시합니다. 계속할까요?`)) return;
-    if (dirty && !(await save())) return;
+    const arLine = arForm?.enabled
+      ? `\n댓글 자동 응답: 켜짐 (${arForm.keywords.trim() ? `키워드 ${arForm.keywords}` : "모든 댓글"}${
+          arForm.link_url.trim() || arForm.link_message.trim() ? ", 팔로워 DM 포함" : ""
+        })`
+      : "";
+    if (!window.confirm(`@${me.username} 계정에 ${KIND_LABEL[job!.media_kind]}(으)로 지금 게시합니다.${arLine}\n계속할까요?`)) return;
+    // 게시 전에 캡션과 자동 응답을 먼저 저장해, 게시되는 순간부터 자동 응답이 동작하게 합니다.
+    if ((dirty || arDirty) && !(await save())) return;
     setPublishing(true);
     setError(undefined);
     try {
@@ -456,7 +474,10 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
         ))}
       </Card>
 
-      <Card title="캡션 · 해시태그" subtitle={job.media_kind === "STORIES" ? "스토리에는 캡션이 게시되지 않습니다." : undefined}>
+      <Card
+        title="캡션 · 게시"
+        subtitle={job.media_kind === "STORIES" ? "스토리에는 캡션과 댓글 자동 응답이 적용되지 않습니다." : undefined}
+      >
         <div className="space-y-4">
           <Field
             label="본문"
@@ -498,6 +519,23 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
             </div>
           </details>
 
+          {supportsAutoReply &&
+            (arForm ? (
+              <AutoReplyFields form={arForm} onChange={setArForm} published={job.status === "published"} />
+            ) : arRule.error ? (
+              <Notice tone="bad">자동 응답 설정을 불러오지 못했습니다: {arRule.error.message}</Notice>
+            ) : (
+              <Skeleton className="h-14" />
+            ))}
+
+          {locked && arDirty && (
+            <div className="flex justify-end">
+              <Button onClick={save} loading={saving} disabled={!arValid}>
+                {saved ? "저장됨 ✓" : "자동 응답 저장"}
+              </Button>
+            </div>
+          )}
+
           {!locked && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
               <div className="text-[12px] text-fg-3">
@@ -516,14 +554,14 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
                     피드에도 공유
                   </label>
                 )}
-                <Button onClick={save} disabled={!dirty || publishing} loading={saving}>
+                <Button onClick={save} disabled={!(dirty || arDirty) || !arValid || publishing} loading={saving}>
                   {saved ? "저장됨 ✓" : "저장"}
                 </Button>
                 <Button
                   variant="primary"
                   onClick={publish}
                   loading={publishing}
-                  disabled={overCaption || overTags || visual.length === 0 || quota.data?.remaining === 0}
+                  disabled={overCaption || overTags || !arValid || visual.length === 0 || quota.data?.remaining === 0}
                 >
                   {publishing ? "게시 중…" : job.status === "failed" ? "다시 게시" : "Instagram 에 게시"}
                 </Button>
@@ -539,7 +577,6 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
         </div>
       </Card>
 
-      <AutoReplyCard jobId={job.id} published={job.status === "published"} />
     </div>
   );
 }

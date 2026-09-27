@@ -23,14 +23,25 @@ from .meta_graph import GraphClient, GraphError
 log = logging.getLogger(__name__)
 
 DEFAULTS = {
-    "public_reply": "DM으로 링크 보내드렸어요! 📩",
+    "public_reply": "댓글 감사합니다! 😊",
     "dm_prompt": "댓글 감사합니다! 링크를 받으시려면 이 메시지에 아무 답장이나 보내주세요 🙌",
-    "link_message": "팔로우해 주셔서 감사해요! 요청하신 링크입니다 👇",
+    # 팔로워용 문구는 비워둡니다 — 비어 있으면 DM 단계를 쓰지 않는 것으로 봅니다.
+    "link_message": "",
     "not_following_message": "링크는 팔로워분들께만 보내드리고 있어요. 팔로우 후 이 대화에 다시 메시지를 보내주세요!",
 }
 
 # DM 답장을 기다리는 상태 — 이 상태의 기록에 대해서만 링크를 보냅니다.
 WAITING = ("dm_sent", "awaiting_follow")
+
+
+def follower_reward(rule: AutoReplyRule) -> str:
+    """팔로워에게 보낼 DM 본문: 문구 + 링크 (둘 중 하나만 있어도 됩니다)."""
+    return "\n".join(p for p in (rule.link_message.strip(), rule.link_url.strip()) if p)
+
+
+def dm_flow_enabled(rule: AutoReplyRule) -> bool:
+    """팔로워에게 보낼 문구나 링크가 있어야 DM 단계를 진행합니다."""
+    return bool(follower_reward(rule))
 
 
 def keyword_match(rule: AutoReplyRule, text: str) -> bool:
@@ -88,7 +99,7 @@ def handle_comment(db: Session, account: Account, client: GraphClient, value: di
         except GraphError as exc:
             errors.append(f"공개 답글 실패: {exc}")
 
-    if rule.link_url.strip():
+    if dm_flow_enabled(rule):
         try:
             client.send_private_reply(comment_id, rule.dm_prompt.strip() or DEFAULTS["dm_prompt"])
             dm_sent = True
@@ -137,7 +148,7 @@ def handle_message(db: Session, account: Account, client: GraphClient, event: di
     if record is None:
         return "no_pending"  # 자동 응답과 무관한 일반 DM 은 건드리지 않습니다.
     rule = db.get(AutoReplyRule, record.rule_id) if record.rule_id else None
-    if rule is None or not rule.link_url.strip():
+    if rule is None or not dm_flow_enabled(rule):
         return "no_rule"
     if not record.commenter_id:
         record.commenter_id = sender_id
@@ -149,8 +160,7 @@ def handle_message(db: Session, account: Account, client: GraphClient, event: di
 
     try:
         if profile.get("is_user_follow_business"):
-            text = (rule.link_message.strip() or DEFAULTS["link_message"]) + "\n" + rule.link_url.strip()
-            client.send_message(sender_id, text)
+            client.send_message(sender_id, follower_reward(rule))
             record.status = "link_sent"
         else:
             client.send_message(
