@@ -97,7 +97,9 @@ class PlanIn(BaseModel):
 
 
 class RenderIn(BaseModel):
-    instruction: str | None = Field(default=None, max_length=300)  # 이 슬라이드만 다시 편집할 때
+    instruction: str | None = Field(default=None, max_length=1000)  # 이 이미지만의 프롬프트
+    # True 면 지금 이미지(글 얹기 전)에서 요청한 부분만 고치고, False 면 원본 사진으로 처음부터 다시 만듭니다.
+    from_current: bool = False
 
 
 def _blobs(db: Session, account: Account, ids: list[str]) -> list[MediaBlob]:
@@ -220,30 +222,42 @@ def render_slide(
         ids = [slide.get("photo", -1)]
     sources = [uploads[i].data for i in ids if isinstance(i, int) and 0 <= i < len(uploads)]
 
-    instruction = body.instruction if body and body.instruction else ""
-    references = [b.data for b in _blobs(db, account, job.plan.get("reference_ids") or [])]
-    edited, engine = svc.render_visual(
-        sources,
-        slide,
-        topic=job.plan.get("topic") or job.prompt,
-        style=job.plan.get("style", ""),
-        instruction=instruction,
-        references=references,
-        art_style=job.plan.get("art_style", ""),
-        post_format=job.plan.get("format", ""),
-        font=job.plan.get("font", ""),
-    )
+    instruction = (body.instruction or "").strip() if body else ""
+    assets = list(job.assets or [])
+    prev_meta = (assets[index].get("meta") or {}) if index < len(assets) else {}
+    current = db.get(MediaBlob, prev_meta.get("visual_id") or "") if body and body.from_current else None
+    if body and body.from_current and not instruction:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "무엇을 고칠지 적어 주세요.")
+    if current is not None and current.account_id == account.id:
+        edited, engine = svc.edit_visual(current.data, instruction, aspect=svc.ASPECT[slide["role"]])
+    else:
+        references = [b.data for b in _blobs(db, account, job.plan.get("reference_ids") or [])]
+        edited, engine = svc.render_visual(
+            sources,
+            slide,
+            topic=job.plan.get("topic") or job.prompt,
+            style=job.plan.get("style", ""),
+            instruction=instruction,
+            references=references,
+            art_style=job.plan.get("art_style", ""),
+            post_format=job.plan.get("format", ""),
+            font=job.plan.get("font", ""),
+        )
     if slide["role"] == "designed" and engine.startswith("basic") and slide.get("image_text"):
         # 이미지 생성이 실패하면 그림 속 글자(말풍선·손글씨)가 사라지므로 서버 글자로라도 내용을 살립니다.
         slide = {**slide, "role": "overlay", "title": slide["image_text"], "body": ""}
     card = svc.compose(edited, slide, accent=job.plan.get("accent", "#6c5ce7"), font=job.plan.get("font", svc.DEFAULT_FONT))
     blob = _save_blob(db, account, card, *svc.SIZE, kind="slide")
+    # 글을 얹기 전 이미지도 보관해 '지금 이미지에서 고치기'에 씁니다.
+    vw, vh = svc.image_size(edited)
+    visual_blob = _save_blob(db, account, edited, vw, vh, kind="visual")
 
-    assets = list(job.assets or [])
-    # 다시 만들기라면 이전 슬라이드 이미지는 지워 DB 에 쌓이지 않게 합니다.
+    # 다시 만들기라면 이전 이미지는 지워 DB 에 쌓이지 않게 합니다.
     previous = (assets[index].get("url") or "").rsplit("/media/", 1)[-1].removesuffix(".jpg")
     if previous and (old := db.get(MediaBlob, previous)) is not None and old.kind == "slide":
         db.delete(old)
+    if (old_visual := db.get(MediaBlob, prev_meta.get("visual_id") or "")) is not None and old_visual.kind == "visual":
+        db.delete(old_visual)
     assets[index] = {
         "type": "image",
         "url": _media_url(blob.id),
@@ -255,6 +269,8 @@ def render_slide(
             "generated": not sources,
             "photos": len(sources),
             "instruction": instruction or slide.get("visual", ""),
+            "prompt": instruction,  # 사용자가 이 이미지에 적은 프롬프트
+            "visual_id": visual_blob.id,
         },
     }
     job.assets = assets

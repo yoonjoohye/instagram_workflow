@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import current_account, graph_for
-from ..models import Account, AutoReplyRule, GenerationJob
+from ..models import Account, AutoReplyRule, GenerationJob, MediaBlob
 from ..schemas import JobPatch, PublishIn
 from ..services import publishing
 from ..services.meta_graph import GraphError
@@ -111,7 +111,15 @@ def delete_job(
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ) -> Response:
-    db.delete(_get_job(db, account, job_id))
+    job = _get_job(db, account, job_id)
+    # 이 작업이 만든 이미지(완성본·글 얹기 전 이미지)도 함께 지웁니다. 사용자가 올린 원본 사진은 남깁니다.
+    for asset in job.assets or []:
+        ids = [(asset.get("url") or "").rsplit("/media/", 1)[-1].removesuffix(".jpg"), (asset.get("meta") or {}).get("visual_id")]
+        for blob_id in filter(None, ids):
+            blob = db.get(MediaBlob, blob_id)
+            if blob is not None and blob.account_id == account.id and blob.kind in ("slide", "visual"):
+                db.delete(blob)
+    db.delete(job)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

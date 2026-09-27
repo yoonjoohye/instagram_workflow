@@ -652,6 +652,26 @@ def render_visual(
         return (basic_enhance(photos[0]) if photos else placeholder_background()), f"basic ({exc})"
 
 
+def edit_visual(image: bytes, instruction: str, *, aspect: str = "4:5") -> tuple[bytes, str]:
+    """지금 이미지에서 요청한 부분만 고칩니다 (나머지는 그대로). 실패하면 원래 이미지를 그대로 돌려줍니다."""
+    prompt = (
+        f"Edit the attached image. Apply ONLY this change (Korean request, highest priority): {instruction}\n"
+        "Keep everything else exactly the same: composition, people and faces, landmarks, colors, art style, "
+        "and any existing text (keep its Korean characters identical). Do not add watermarks or logos. "
+        "Output one image in the same format."
+    )
+    parts = [{"text": prompt}, {"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(image, 1280))}}]
+    try:
+        return _image_call(parts, aspect), "gemini"
+    except (GeminiError, OSError, ValueError) as exc:
+        log.warning("edit_visual fallback: %s", exc)
+        return image, f"basic ({exc})"
+
+
+def image_size(data: bytes) -> tuple[int, int]:
+    return Image.open(io.BytesIO(data)).size
+
+
 def collage(photos: list[bytes]) -> bytes:
     """이미지 생성이 안 될 때 여러 사진을 한 장에 담는 필름 사진 콜라주 (크림색 배경 + 흰 테두리 + 살짝 기울임)."""
     w, h = SIZE

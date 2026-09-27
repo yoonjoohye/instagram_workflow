@@ -218,15 +218,14 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
 
         <MediaStrip
           assets={visual}
+          filePrefix={`post-${job.id}`}
           onRedo={
             (job.provider.startsWith("studio") || job.provider.startsWith("cardnews")) && !locked
-              ? async (i) => {
-                  const instruction = window.prompt(
-                    "이 이미지를 어떻게 다시 만들까요? (비우면 처음 연출대로 다시 만들어요)\n예) 더 밝게, 흑백으로, 배경 사람 지우기, 노을 지는 해변으로",
-                    "",
-                  );
-                  if (instruction === null) return;
-                  await api(`/cardnews/${job.id}/slides/${i}`, { method: "POST", json: instruction.trim() ? { instruction } : {} });
+              ? async (i, instruction, fromCurrent) => {
+                  await api(`/cardnews/${job.id}/slides/${i}`, {
+                    method: "POST",
+                    json: { instruction: instruction || null, from_current: fromCurrent },
+                  });
                   onChange(await api<Job>(`/workflow/jobs/${job.id}`));
                 }
               : undefined
@@ -386,60 +385,226 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
   );
 }
 
-function MediaStrip({ assets, onRedo }: { assets: Asset[]; onRedo?: (index: number) => Promise<void> }) {
-  const [redoing, setRedoing] = useState<number | null>(null);
-  const [redoError, setRedoError] = useState<string>();
+type RedoFn = (index: number, instruction: string, fromCurrent: boolean) => Promise<void>;
+
+/** 이미지 한 장을 파일로 저장합니다 (같은 출처 이미지를 blob 으로 받아 저장 — 새 탭으로 열리지 않게). */
+async function downloadImage(url: string, name: string) {
+  const res = await fetch(mediaSrc(url));
+  if (!res.ok) throw new Error(`이미지를 받지 못했습니다 (${res.status})`);
+  const href = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
+function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; onRedo?: RedoFn; filePrefix?: string }) {
+  const [error, setError] = useState<string>();
+  const [downloadingAll, setDownloadingAll] = useState(false);
   if (!assets.length) return <p className="py-8 text-center text-sm text-fg-3">미디어가 없습니다.</p>;
   const single = assets.length === 1;
-  const redo = async (i: number) => {
-    setRedoing(i);
-    setRedoError(undefined);
+  const fileName = (a: Asset, i: number) => `${filePrefix}-${i + 1}.${a.type === "video" ? "mp4" : "jpg"}`;
+  const ready = assets.filter((a) => a.url);
+
+  const downloadAll = async () => {
+    setDownloadingAll(true);
+    setError(undefined);
     try {
-      await onRedo?.(i);
+      for (const [i, a] of assets.entries()) {
+        if (!a.url) continue;
+        await downloadImage(a.url, fileName(a, i));
+        await new Promise((r) => setTimeout(r, 300)); // 브라우저가 연속 다운로드를 막지 않게
+      }
     } catch (e) {
-      setRedoError(toApiError(e).message);
+      setError(toApiError(e).message);
     } finally {
-      setRedoing(null);
+      setDownloadingAll(false);
     }
   };
+
   return (
     <>
-    {redoError && <p className="mb-2 text-[12px] text-bad">{redoError}</p>}
-    <div className={cx("flex gap-3", !single && "snap-x overflow-x-auto pb-2")}>
-      {assets.map((a, i) => (
-        <figure
-          key={`${a.url}-${i}`}
-          className={cx(
-            "relative shrink-0 snap-start overflow-hidden rounded-lg border border-line bg-surface-2",
-            single ? "mx-auto w-full max-w-sm" : "w-56",
-          )}
-        >
-          {a.type === "video" ? (
-            <video src={mediaSrc(a.url)} poster={mediaSrc(a.thumbnail_url) || undefined} controls playsInline className="block max-h-[520px] w-full object-contain" />
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={mediaSrc(a.url)} alt={`생성된 이미지 ${i + 1}`} className="block max-h-[520px] w-full object-contain" />
-          )}
-          {!single && (
-            <figcaption className="tnum absolute top-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">
-              {i + 1}/{assets.length}
-              {typeof a.meta?.role === "string" && ` · ${ROLE_LABEL[a.meta.role] ?? ""}`}
-            </figcaption>
-          )}
-          {onRedo && (
-            <button
-              type="button"
-              onClick={() => redo(i)}
-              disabled={redoing !== null}
-              className="absolute right-2 bottom-2 inline-flex items-center gap-1 rounded-md bg-black/65 px-2 py-1 text-[11px] font-medium text-white hover:bg-black/80 disabled:opacity-60"
-            >
-              {redoing === i ? <Spinner className="size-3" /> : "↻"} 다시 만들기
-            </button>
-          )}
-        </figure>
-      ))}
-    </div>
+      {error && <p className="mb-2 text-[12px] text-bad">{error}</p>}
+      {!single && ready.length > 1 && (
+        <div className="mb-2 flex justify-end">
+          <Button variant="ghost" size="sm" onClick={downloadAll} disabled={downloadingAll}>
+            {downloadingAll ? <Spinner className="size-3" /> : "↓"} 전체 다운로드 ({ready.length}장)
+          </Button>
+        </div>
+      )}
+      <div className={cx("flex items-start gap-3", !single && "snap-x overflow-x-auto pb-2")}>
+        {assets.map((a, i) => (
+          <MediaItem
+            key={`${a.url}-${i}`}
+            asset={a}
+            index={i}
+            total={assets.length}
+            single={single}
+            fileName={fileName(a, i)}
+            onRedo={onRedo}
+            onError={setError}
+          />
+        ))}
+      </div>
     </>
+  );
+}
+
+function MediaItem({
+  asset: a,
+  index: i,
+  total,
+  single,
+  fileName,
+  onRedo,
+  onError,
+}: {
+  asset: Asset;
+  index: number;
+  total: number;
+  single: boolean;
+  fileName: string;
+  onRedo?: RedoFn;
+  onError: (message?: string) => void;
+}) {
+  const canEditCurrent = typeof a.meta?.visual_id === "string";
+  const lastPrompt = typeof a.meta?.prompt === "string" ? a.meta.prompt : "";
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [fromCurrent, setFromCurrent] = useState(canEditCurrent);
+  const [busy, setBusy] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const failed = typeof a.meta?.engine === "string" && a.meta.engine.startsWith("basic");
+
+  const apply = async () => {
+    if (!onRedo) return;
+    setBusy(true);
+    onError(undefined);
+    try {
+      await onRedo(i, text.trim(), fromCurrent && canEditCurrent);
+      setText("");
+      setOpen(false);
+    } catch (e) {
+      onError(`${i + 1}번째 이미지: ${toApiError(e).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const download = async () => {
+    setDownloading(true);
+    onError(undefined);
+    try {
+      await downloadImage(a.url, fileName);
+    } catch (e) {
+      onError(toApiError(e).message);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <figure
+      className={cx(
+        "shrink-0 snap-start overflow-hidden rounded-lg border border-line bg-surface-2",
+        single ? "mx-auto w-full max-w-sm" : "w-64",
+      )}
+    >
+      <div className="relative">
+        {a.type === "video" ? (
+          <video src={mediaSrc(a.url)} poster={mediaSrc(a.thumbnail_url) || undefined} controls playsInline className="block max-h-[520px] w-full object-contain" />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={mediaSrc(a.url)} alt={`생성된 이미지 ${i + 1}`} className="block max-h-[520px] w-full object-contain" />
+        )}
+        {!single && (
+          <figcaption className="tnum absolute top-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">
+            {i + 1}/{total}
+            {typeof a.meta?.role === "string" && ` · ${ROLE_LABEL[a.meta.role] ?? ""}`}
+          </figcaption>
+        )}
+        {busy && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-[12px] text-white">
+            <Spinner className="mr-1.5 size-4" /> 만드는 중…
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1 border-t border-line bg-surface-1 px-2 py-1.5">
+        <button
+          type="button"
+          onClick={download}
+          disabled={!a.url || downloading}
+          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-fg-2 hover:bg-surface-2 disabled:opacity-50"
+        >
+          {downloading ? <Spinner className="size-3" /> : "↓"} 다운로드
+        </button>
+        {onRedo && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            disabled={busy}
+            aria-expanded={open}
+            className={cx(
+              "ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium hover:bg-surface-2 disabled:opacity-50",
+              open ? "text-accent" : "text-fg-2",
+            )}
+          >
+            ✎ 이 이미지 수정
+          </button>
+        )}
+      </div>
+      {failed && !busy && (
+        <p className="border-t border-line bg-surface-1 px-2 py-1 text-[11px] text-warn">이미지 연출 실패 — 기본 편집본이에요</p>
+      )}
+
+      {onRedo && open && (
+        <div className="space-y-2 border-t border-line bg-surface-1 p-2">
+          {lastPrompt && <p className="line-clamp-2 text-[11px] text-fg-3">지난 요청: {lastPrompt}</p>}
+          <textarea
+            rows={3}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            maxLength={1000}
+            placeholder={
+              fromCurrent && canEditCurrent
+                ? "예) 하늘을 더 노을빛으로, 오른쪽 사람 지우기, 필름 테두리 추가"
+                : "예) 두 사진을 필름 스트립처럼 세로로 이어 붙여줘 (비우면 처음 연출대로 다시)"
+            }
+            className={cx(inputClass, "resize-y text-[12px]")}
+            disabled={busy}
+          />
+          <div className="flex rounded-md border border-line p-0.5 text-[11px]" role="radiogroup" aria-label="수정 방식">
+            {[
+              { v: true, label: "지금 이미지에서 고치기", disabled: !canEditCurrent },
+              { v: false, label: "처음부터 다시", disabled: false },
+            ].map((o) => (
+              <button
+                key={o.label}
+                type="button"
+                role="radio"
+                aria-checked={fromCurrent === o.v}
+                disabled={o.disabled || busy}
+                title={o.disabled ? "이 이미지는 예전에 만들어져 처음부터 다시만 할 수 있어요" : undefined}
+                onClick={() => setFromCurrent(o.v)}
+                className={cx(
+                  "flex-1 rounded px-1.5 py-1 font-medium disabled:opacity-40",
+                  fromCurrent === o.v ? "bg-accent text-on-accent" : "text-fg-2 hover:bg-surface-2",
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <Button size="sm" className="w-full" onClick={apply} disabled={busy || (fromCurrent && canEditCurrent && !text.trim())}>
+            {busy ? <Spinner className="size-3" /> : "↻"} {fromCurrent && canEditCurrent ? "수정 적용" : "다시 만들기"}
+          </Button>
+        </div>
+      )}
+    </figure>
   );
 }
 

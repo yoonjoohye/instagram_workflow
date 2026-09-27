@@ -231,7 +231,7 @@ class MediaBlob(Base):
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
-    kind: Mapped[str] = mapped_column(String(16), default="upload")  # upload | slide
+    kind: Mapped[str] = mapped_column(String(16), default="upload")  # upload | slide | visual (글 얹기 전 이미지)
     content_type: Mapped[str] = mapped_column(String(32), default="image/jpeg")
     width: Mapped[int] = mapped_column(Integer, default=0)
     height: Mapped[int] = mapped_column(Integer, default=0)
