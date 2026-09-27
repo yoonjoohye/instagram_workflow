@@ -72,7 +72,9 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> dict:
                     continue
                 value = change.get("value") or {}
                 try:
-                    results.append(autoreply.handle_comment(db, account, client, value))
+                    results.append(
+                        autoreply.handle_comment(db, account, client, value, event_time=entry.get("time"))
+                    )
                 except Exception:  # noqa: BLE001
                     log.exception("comment webhook failed")
                     db.rollback()

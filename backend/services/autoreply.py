@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from typing import Any
 
@@ -66,8 +67,20 @@ def _follow_status(client: GraphClient, user_id: str) -> bool | None:
     return bool(value) if value is not None else None
 
 
-def handle_comment(db: Session, account: Account, client: GraphClient, value: dict[str, Any]) -> str:
-    """comments webhook 한 건 처리. 처리 결과 상태를 돌려줍니다 (테스트·로그용)."""
+def _before(event_time: int | None, enabled_at: dt.datetime | None) -> bool:
+    """이벤트가 규칙을 켜기 전에 발생했는지 (Meta 는 실패한 이벤트를 최대 36시간 재전송)."""
+    if not event_time or enabled_at is None:
+        return False
+    if enabled_at.tzinfo is None:  # SQLite 는 tz 정보를 잃습니다.
+        enabled_at = enabled_at.replace(tzinfo=dt.timezone.utc)
+    seconds = event_time / 1000 if event_time > 10**12 else event_time  # ms/초 모두 처리
+    return dt.datetime.fromtimestamp(seconds, dt.timezone.utc) < enabled_at
+
+
+def handle_comment(
+    db: Session, account: Account, client: GraphClient, value: dict[str, Any], *, event_time: int | None = None
+) -> str:
+    """comments webhook 한 건 처리. 규칙을 켠 뒤에 새로 달린 댓글에만 반응합니다."""
     comment_id = str(value.get("id") or "")
     media_id = str((value.get("media") or {}).get("id") or "")
     user = value.get("from") or {}
@@ -84,6 +97,8 @@ def handle_comment(db: Session, account: Account, client: GraphClient, value: di
     )
     if rule is None or not (rule.public_reply_enabled or rule.dm_enabled):
         return "no_rule"
+    if _before(event_time, rule.enabled_at):
+        return "before_enabled"
     if db.scalar(select(CommentReply.id).where(CommentReply.comment_id == comment_id)):
         return "duplicate"  # Meta 는 같은 이벤트를 재전송할 수 있습니다.
 

@@ -1,6 +1,8 @@
 """댓글 자동 응답 규칙 관리 + 처리 기록 + 설정 상태."""
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -51,9 +53,16 @@ def _rule_dict(rule: AutoReplyRule | None, job: GenerationJob | None = None) -> 
     return base
 
 
+def _mark_enabled(rule: AutoReplyRule, on: bool) -> None:
+    """꺼져 있다가 켜지는 순간을 기록 — 그 이후 댓글에만 반응합니다."""
+    if on and not rule.enabled:
+        rule.enabled_at = dt.datetime.now(dt.timezone.utc)
+    rule.enabled = int(on)
+
+
 def _apply(rule: AutoReplyRule, body: AutoReplyIn) -> None:
     # 두 스위치 중 하나라도 켜져 있으면 규칙이 동작합니다.
-    rule.enabled = int(body.public_reply_enabled or body.dm_enabled)
+    _mark_enabled(rule, body.public_reply_enabled or body.dm_enabled)
     rule.keywords = ""  # 키워드 필터는 없앴습니다 — 모든 댓글에 반응
     rule.public_reply_enabled = int(body.public_reply_enabled)
     rule.public_reply = body.public_reply
@@ -202,7 +211,7 @@ def toggle_rule(
     rule = db.get(AutoReplyRule, rule_id)
     if not rule or rule.account_id != account.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "규칙을 찾을 수 없습니다.")
-    rule.enabled = int(body.enabled)
+    _mark_enabled(rule, body.enabled)
     db.commit()
     return _rule_dict(rule, db.get(GenerationJob, rule.job_id) if rule.job_id else None)
 

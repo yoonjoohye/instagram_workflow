@@ -163,6 +163,8 @@ class AutoReplyRule(Base):
     public_reply_enabled: Mapped[int] = mapped_column(Integer, default=1)
     public_reply: Mapped[str] = mapped_column(Text, default="")  # 모든 댓글에 같은 문구로 답글
     dm_enabled: Mapped[int] = mapped_column(Integer, default=0)
+    # 규칙이 켜진 시각. 이보다 먼저 달린 댓글에는 반응하지 않습니다 (Meta 재전송 대비).
+    enabled_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     dm_prompt: Mapped[str] = mapped_column(Text, default="")
     link_url: Mapped[str] = mapped_column(Text, default="")
     link_message: Mapped[str] = mapped_column(Text, default="")

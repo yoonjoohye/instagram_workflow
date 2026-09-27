@@ -44,6 +44,7 @@ _ADDED_COLUMNS = {
     "auto_reply_rules": {
         "public_reply_enabled": "INTEGER DEFAULT 1",
         "dm_enabled": "INTEGER DEFAULT 0",
+        "enabled_at": "TIMESTAMP WITH TIME ZONE",
         "post_caption": "TEXT DEFAULT ''",
         "post_thumbnail": "TEXT DEFAULT ''",
         "post_permalink": "TEXT DEFAULT ''",
@@ -57,6 +58,8 @@ _BACKFILL = {
         "UPDATE auto_reply_rules SET public_reply_enabled = "
         "CASE WHEN public_reply <> '' THEN 1 ELSE 0 END"
     ),
+    # 기존 규칙은 마이그레이션 시점부터 새 댓글로 간주
+    ("auto_reply_rules", "enabled_at"): "UPDATE auto_reply_rules SET enabled_at = CURRENT_TIMESTAMP WHERE enabled = 1",
     ("auto_reply_rules", "dm_enabled"): (
         "UPDATE auto_reply_rules SET dm_enabled = "
         "CASE WHEN link_url <> '' OR link_message <> '' THEN 1 ELSE 0 END"
