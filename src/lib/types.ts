@@ -198,6 +198,13 @@ export type SentimentOverview = SentimentEngine & { totals: SentimentCounts };
 
 export type SentimentSync = SentimentEngine & { posts: number; comments_seen: number; classified: number };
 
+export type SentimentMediaSync = SentimentEngine & {
+  comments_seen: number;
+  comments_count: number;
+  classified: number;
+  counts: SentimentCounts;
+};
+
 export type SentimentComment = {
   comment_id: string;
   username: string;

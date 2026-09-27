@@ -230,6 +230,20 @@ def sync(db: Session, account: Account, client: GraphClient, *, media_limit: int
     return {"posts": len(medias), "comments_seen": seen, "classified": added}
 
 
+def sync_media(db: Session, account: Account, client: GraphClient, media_id: str) -> dict[str, int]:
+    """게시물 하나의 댓글만 모아 새 댓글을 분류합니다."""
+    media = client.get(media_id, {"fields": "id,caption,comments_count"})
+    comments = client.get(
+        f"{media_id}/comments", {"fields": "id,username,text,timestamp", "limit": 100}
+    ).get("data", [])
+    added = store(db, account, media_id, comments, caption=media.get("caption") or "")
+    return {"comments_seen": len(comments), "comments_count": int(media.get("comments_count") or 0), "classified": added}
+
+
+def counts_for(db: Session, account: Account, media_id: str) -> dict[str, int]:
+    return counts_by_media(db, account).get(media_id) or {k: 0 for k in LABELS}
+
+
 def counts_by_media(db: Session, account: Account) -> dict[str, dict[str, int]]:
     rows = db.execute(
         select(CommentSentiment.ig_media_id, CommentSentiment.sentiment, func.count())

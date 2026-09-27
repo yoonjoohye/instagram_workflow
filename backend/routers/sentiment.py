@@ -38,6 +38,19 @@ def _engine() -> dict:
     }
 
 
+@router.post("/media/{media_id}/sync")
+def sync_one(
+    media_id: str, account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> dict:
+    """게시물 상세(아코디언)의 '댓글 분석' — 해당 게시물 댓글만 분류합니다."""
+    with graph_for(account) as client:
+        try:
+            result = svc.sync_media(db, account, client, media_id)
+        except GraphError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+    return {**result, "counts": svc.counts_for(db, account, media_id), **_engine()}
+
+
 @router.get("/overview")
 def overview(account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
     rows = db.execute(

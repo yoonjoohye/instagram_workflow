@@ -8,7 +8,7 @@ import { SentimentBar, SentimentDialog } from "@/components/sentiment";
 import { Badge, Button, Card, cx, Dialog, Empty, Notice, PageHeader, Segmented, Skeleton, Spinner } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
 import { fmtCompact, fmtInt, fmtPct, fmtRelative, postKind } from "@/lib/format";
-import type { AutoReplyInput, AutoReplyRule, IgPost, Job, ListOf, SentimentSync } from "@/lib/types";
+import type { AutoReplyInput, AutoReplyRule, IgPost, Job, ListOf, SentimentMediaSync } from "@/lib/types";
 
 type SortKey = "timestamp" | "reach" | "views" | "likes" | "comments" | "saved" | "shares" | "rate";
 
@@ -65,21 +65,7 @@ function Posts() {
       else next.add(id);
       return next;
     });
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<SentimentSync>();
 
-  async function analyze() {
-    setAnalyzing(true);
-    setActionError(undefined);
-    try {
-      setAnalysis(await api<SentimentSync>(`/sentiment/sync?media_limit=${limit}`, { method: "POST" }));
-      posts.reload();
-    } catch (e) {
-      setActionError(toApiError(e).message);
-    } finally {
-      setAnalyzing(false);
-    }
-  }
   const [actionError, setActionError] = useState<string>();
   // 자동 응답 페이지의 '수정' 링크가 ?autoreply=<media_id> 로 바로 열 수 있게 합니다.
   const params = useSearchParams();
@@ -160,9 +146,6 @@ function Posts() {
                 { value: 50, label: "50개" },
               ]}
             />
-            <Button size="sm" onClick={analyze} loading={analyzing}>
-              댓글 분석
-            </Button>
             <Button variant="ghost" size="sm" onClick={posts.reload} loading={posts.loading}>
               {!posts.loading && <IconRefresh />} 새로고침
             </Button>
@@ -176,24 +159,6 @@ function Posts() {
           (삭제는 Facebook 페이지 연결 계정만 가능) 각 게시물의 ↗ 링크로 Instagram 에서 처리해 주세요.
         </Notice>
       </div>
-
-      {analysis && (
-        <div className="mb-6">
-          <Notice
-            tone={analysis.last_error ? "warn" : "good"}
-            title={`게시물 ${analysis.posts}개 · 댓글 ${analysis.comments_seen}개 확인, 새로 ${analysis.classified}개 분류`}
-            onClose={() => setAnalysis(undefined)}
-          >
-            {analysis.engine === "gemini"
-              ? analysis.last_error
-                ? `Gemini 호출 실패로 규칙 기반으로 분류했습니다: ${analysis.last_error}`
-                : `Gemini(${analysis.model})로 분류했습니다.`
-              : "GEMINI_API_KEY 가 없어 키워드·이모지 규칙으로 분류했습니다."}
-            {analysis.comments_seen === 0 &&
-              " 댓글이 조회되지 않았다면 Meta 앱이 개발 모드라 다른 사용자의 댓글이 제공되지 않는 상태일 수 있습니다."}
-          </Notice>
-        </div>
-      )}
 
       {actionError && (
         <div className="mb-6">
@@ -329,6 +294,7 @@ function Posts() {
                               toggling={togglingId === p.id}
                               onToggleComments={() => toggleComments(p)}
                               onOpenComments={() => setSentimentPost(p)}
+                              onAnalyzed={(counts) => patchPost(p.id, { sentiment: counts })}
                               onOpenAutoReply={() => openAutoReply(p.id)}
                             />
                           </td>
@@ -528,13 +494,48 @@ function PostDetail({
   onToggleComments,
   onOpenComments,
   onOpenAutoReply,
+  onAnalyzed,
 }: {
   post: IgPost;
   toggling: boolean;
   onToggleComments: () => void;
   onOpenComments: () => void;
   onOpenAutoReply: () => void;
+  onAnalyzed: (counts: IgPost["sentiment"]) => void;
 }) {
+  const [analyzing, setAnalyzing] = useState(false);
+  const [result, setResult] = useState<{ tone: "good" | "warn" | "bad"; text: string }>();
+
+  async function analyze() {
+    setAnalyzing(true);
+    setResult(undefined);
+    try {
+      const r = await api<SentimentMediaSync>(`/sentiment/media/${post.id}/sync`, { method: "POST" });
+      onAnalyzed(r.counts);
+      const engine =
+        r.engine === "gemini"
+          ? r.last_error
+            ? `Gemini 호출 실패로 규칙 기반 분류 (${r.last_error})`
+            : `Gemini로 분류`
+          : "키워드·이모지 규칙으로 분류";
+      if (r.comments_count > 0 && r.comments_seen === 0) {
+        setResult({
+          tone: "warn",
+          text: `댓글 ${r.comments_count}개가 있지만 조회되지 않았습니다. Meta 앱이 개발 모드라 다른 사용자의 댓글이 제공되지 않거나, 내 계정 댓글만 있는 경우입니다.`,
+        });
+      } else {
+        setResult({
+          tone: r.last_error ? "warn" : "good",
+          text: `댓글 ${r.comments_seen}개 확인 · 새로 ${r.classified}개 분류 · ${engine}`,
+        });
+      }
+    } catch (e) {
+      setResult({ tone: "bad", text: toApiError(e).message });
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   const commentsOn = post.is_comment_enabled ?? true;
   const ar = post.auto_reply;
   const analyzed = post.sentiment ? post.sentiment.positive + post.sentiment.neutral + post.sentiment.negative : 0;
@@ -544,21 +545,34 @@ function PostDetail({
       <section className="rounded-lg border border-line bg-surface-1 p-4">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-[13px] font-semibold">댓글 반응</h3>
-          {analyzed > 0 && (
-            <button onClick={onOpenComments} className="text-[12px] text-fg-3 hover:text-fg">
-              댓글 {analyzed}개 보기 →
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {analyzed > 0 && (
+              <button onClick={onOpenComments} className="h-7 rounded-md px-2 text-[12px] text-fg-3 hover:bg-surface-2 hover:text-fg">
+                댓글 {analyzed}개 보기 →
+              </button>
+            )}
+            {!!post.comments_count && (
+              <Button size="sm" onClick={analyze} loading={analyzing}>
+                {analyzed > 0 ? "새 댓글 분석" : "댓글 분석"}
+              </Button>
+            )}
+          </div>
         </div>
         <div className="mt-3">
           {post.sentiment && analyzed > 0 ? (
             <SentimentBar counts={post.sentiment} height={10} showLabels />
           ) : (
             <p className="text-[12px] text-fg-3">
-              {post.comments_count ? "아직 분석 전입니다. 상단의 '댓글 분석'을 눌러 주세요." : "댓글이 없습니다."}
+              {post.comments_count ? "아직 분석 전입니다. '댓글 분석'을 눌러 주세요." : "댓글이 없습니다."}
             </p>
           )}
         </div>
+        {result && (
+          <p className={cx("mt-3 text-[12px] leading-relaxed", result.tone === "bad" ? "text-bad" : "text-fg-3")}>
+            {result.tone === "warn" && "⚠ "}
+            {result.text}
+          </p>
+        )}
       </section>
 
       <section className="rounded-lg border border-line bg-surface-1 p-4">

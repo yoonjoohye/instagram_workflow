@@ -93,7 +93,7 @@ export function SentimentDialog({ post, onClose }: { post: IgPost; onClose: () =
         <Notice tone="bad">{comments.error.message}</Notice>
       ) : rows.length === 0 ? (
         <Empty title={filter === "all" ? "분석된 댓글이 없습니다" : "해당하는 댓글이 없습니다"}>
-          {filter === "all" && "상단의 '댓글 분석'을 눌러 최근 댓글을 분류하세요."}
+          {filter === "all" && "게시물 상세의 '댓글 분석'을 눌러 댓글을 분류하세요."}
         </Empty>
       ) : (
         <ul className="divide-y divide-line">

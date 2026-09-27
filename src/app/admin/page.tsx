@@ -374,9 +374,9 @@ function SentimentCard() {
         <p className="py-6 text-center text-sm text-fg-3">
           아직 분석된 댓글이 없습니다.{" "}
           <Link href="/admin/posts" className="underline">
-            게시물 성과에서 &lsquo;댓글 분석&rsquo;
+            게시물 성과
           </Link>
-          을 눌러 주세요.
+          에서 게시물을 펼쳐 &lsquo;댓글 분석&rsquo;을 눌러 주세요.
         </p>
       ) : (
         <>
