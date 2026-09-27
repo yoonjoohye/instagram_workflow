@@ -72,7 +72,8 @@ def serve_media(blob_id: str, db: Session = Depends(get_db)) -> Response:
 
 class ResearchIn(BaseModel):
     prompt: str = Field(min_length=2, max_length=2000)
-    notes: str = Field(default="", max_length=3000)  # 사용자 확정 정보 (추천 코드, 링크 등)
+    notes: str = Field(default="", max_length=3000)  # (예전 필드) 사용자 확정 정보
+    caption_format: str = Field(default="", max_length=2000)  # 캡션 양식 — 안에 적힌 사실도 확정 정보
 
 
 class Source(BaseModel):
@@ -114,7 +115,8 @@ def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
 @router.post("/cardnews/research")
 def research(body: ResearchIn, account: Account = Depends(current_account)) -> dict:
     """Gemini + Google 검색으로 주제를 조사합니다 (Vercel 시간 제한 때문에 설계와 나눠 호출)."""
-    result, warning = svc.research(body.prompt, body.notes)
+    # 캡션 양식에 적은 사실(추천인 코드 등)도 확정 정보로 조사에 넘깁니다.
+    result, warning = svc.research(body.prompt, "\n".join(p for p in (body.notes, body.caption_format) if p.strip()))
     return {**result, "warning": warning}
 
 

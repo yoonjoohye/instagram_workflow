@@ -18,7 +18,8 @@ const FORMAT_EXAMPLE = `[후킹 3줄]
 
 [스탈링 뱅크 설명]
 [스탈링 뱅크 개설하는 법]
-[추천인 정보]
+[추천인 정보: 코드 ABC123, 가입하고 카드 결제하면 £5 지급]
+👉 가입 링크는 프로필에 있어요
 
 [댓글 유도 글 작성]`;
 
@@ -55,7 +56,6 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [tone, setTone] = useState("친근한");
   const [style, setStyle] = useState("");
   const [refs, setRefs] = useState<Photo[]>([]);
-  const [notes, setNotes] = useState("");
   const [format, setFormat] = useState("");
   const refInput = useRef<HTMLInputElement>(null);
   const [accent, setAccent] = useState("#6c5ce7");
@@ -128,7 +128,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
       setStep({ label: "Gemini가 주제를 검색해 조사하는 중", done: 0, total: 1 });
       const research = await api<Research>("/cardnews/research", {
         method: "POST",
-        json: { prompt: prompt.trim(), notes },
+        json: { prompt: prompt.trim(), caption_format: format },
       });
       setStep({ label: "Gemini가 조사 내용·사진으로 구성과 연출을 짜는 중", done: 0, total: 1 });
       const plan = await api<{ job: Job; slides: { role: string }[]; warning: string }>("/cardnews/plan", {
@@ -139,7 +139,6 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           prompt: prompt.trim(),
           tone,
           style,
-          notes,
           caption_format: format,
           research_notes: research.notes,
           sources: research.sources,
@@ -271,22 +270,6 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           </div>
         </Field>
 
-        <Field
-          label="참고 정보 (선택)"
-          htmlFor="cn-notes"
-          hint="추천인 코드·링크·가격처럼 꼭 들어가야 하는데 Gemini가 알 수 없는 정보. 여기 있는 내용은 그대로 사용해요."
-        >
-          <textarea
-            id="cn-notes"
-            rows={3}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder={"예) 추천인 코드: ABC123 (가입 시 £5 지급)\n가입 링크: https://…"}
-            className={cx(inputClass, "resize-y")}
-            disabled={busy}
-          />
-        </Field>
-
         <div className="space-y-2">
           <Field
             label="연출 방향 (선택)"
@@ -347,12 +330,13 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         </div>
 
         <Field
-          label="캡션 양식"
+          label="캡션 양식 · 꼭 넣을 정보 (선택)"
           htmlFor="cn-format"
           hint={
             <>
-              [ ] 칸마다 Gemini가 따로 채우고, 칸 밖의 글자·줄바꿈은 그대로 유지돼요. &lsquo;[후킹 3줄]&rsquo;처럼 줄 수를 쓰면 딱 맞춰요.
-              해시태그는 자동으로 맨 뒤에 붙어요({"[해시태그]"} 칸을 넣으면 그 자리에).{" "}
+              [ ] 칸은 Gemini가 채우고, 칸 밖 글자·줄바꿈은 그대로 들어가요. &lsquo;[후킹 3줄]&rsquo;처럼 줄 수를 쓰면 딱 맞춰요.
+              추천인 코드·링크·가격처럼 Gemini가 모르는 정보는 칸 밖에 그대로 쓰거나 칸 안에 적어 주세요
+              (예: {"[추천인 정보: 코드 ABC123]"}) — 바꾸지 않고 그대로 써요. 해시태그는 맨 뒤에 자동으로 붙어요.{" "}
               <button type="button" className="underline" onClick={() => setFormat(FORMAT_EXAMPLE)} disabled={busy}>
                 예시 넣기
               </button>
