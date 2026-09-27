@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useMe } from "@/components/AdminShell";
+import { CardNewsForm } from "@/components/CardNewsForm";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconMusic, IconSpark } from "@/components/icons";
 import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Segmented, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
-import { composeCaption, fmtDateTime, KIND_LABEL, parseHashtags, STATUS_LABEL } from "@/lib/format";
+import { mediaSrc, composeCaption, fmtDateTime, KIND_LABEL, parseHashtags, STATUS_LABEL } from "@/lib/format";
 import type { AspectRatio, Asset, AutoReplyInput, AutoReplyRule, GenerateInput, Job, MediaKind, Quota } from "@/lib/types";
 import { statusTone } from "@/lib/status";
 
@@ -54,6 +55,11 @@ function Studio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
+  const [mode, setMode] = useState<"ai" | "cardnews">("cardnews");
+  useEffect(() => {
+    if (job?.provider.startsWith("cardnews")) setMode("cardnews");
+  }, [job?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onCreated = (j: Job) => {
     setJob(j);
     router.replace(`/admin/studio?job=${j.id}`, { scroll: false });
@@ -80,7 +86,18 @@ function Studio() {
         </div>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <GenerateForm onCreated={onCreated} seed={job} />
+        <div className="space-y-3">
+          <Segmented
+            ariaLabel="만들기 방식"
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "ai", label: "AI로 생성" },
+              { value: "cardnews", label: "내 사진으로 카드뉴스" },
+            ]}
+          />
+          {mode === "ai" ? <GenerateForm onCreated={onCreated} seed={job} /> : <CardNewsForm onCreated={onCreated} />}
+        </div>
         {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}
       </div>
     </>
@@ -463,7 +480,22 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
           </div>
         )}
 
-        <MediaStrip assets={visual} />
+        <MediaStrip
+          assets={visual}
+          onRedo={
+            job.provider.startsWith("cardnews") && !locked
+              ? async (i) => {
+                  const instruction = window.prompt(
+                    "이 슬라이드의 사진을 어떻게 다시 편집할까요? (비우면 처음 지시대로 다시 만들어요)\n예) 더 밝게, 흑백으로, 배경 사람 지우기",
+                    "",
+                  );
+                  if (instruction === null) return;
+                  await api(`/cardnews/${job.id}/slides/${i}`, { method: "POST", json: instruction.trim() ? { instruction } : {} });
+                  onChange(await api<Job>(`/workflow/jobs/${job.id}`));
+                }
+              : undefined
+          }
+        />
 
         {audio.map((a, i) => (
           <AudioTrack key={i} asset={a} />
@@ -585,10 +617,25 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
   );
 }
 
-function MediaStrip({ assets }: { assets: Asset[] }) {
+function MediaStrip({ assets, onRedo }: { assets: Asset[]; onRedo?: (index: number) => Promise<void> }) {
+  const [redoing, setRedoing] = useState<number | null>(null);
+  const [redoError, setRedoError] = useState<string>();
   if (!assets.length) return <p className="py-8 text-center text-sm text-fg-3">미디어가 없습니다.</p>;
   const single = assets.length === 1;
+  const redo = async (i: number) => {
+    setRedoing(i);
+    setRedoError(undefined);
+    try {
+      await onRedo?.(i);
+    } catch (e) {
+      setRedoError(toApiError(e).message);
+    } finally {
+      setRedoing(null);
+    }
+  };
   return (
+    <>
+    {redoError && <p className="mb-2 text-[12px] text-bad">{redoError}</p>}
     <div className={cx("flex gap-3", !single && "snap-x overflow-x-auto pb-2")}>
       {assets.map((a, i) => (
         <figure
@@ -599,21 +646,35 @@ function MediaStrip({ assets }: { assets: Asset[] }) {
           )}
         >
           {a.type === "video" ? (
-            <video src={a.url} poster={a.thumbnail_url || undefined} controls playsInline className="block max-h-[520px] w-full object-contain" />
+            <video src={mediaSrc(a.url)} poster={mediaSrc(a.thumbnail_url) || undefined} controls playsInline className="block max-h-[520px] w-full object-contain" />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={a.url} alt={`생성된 이미지 ${i + 1}`} className="block max-h-[520px] w-full object-contain" />
+            <img src={mediaSrc(a.url)} alt={`생성된 이미지 ${i + 1}`} className="block max-h-[520px] w-full object-contain" />
           )}
           {!single && (
             <figcaption className="tnum absolute top-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">
               {i + 1}/{assets.length}
+              {typeof a.meta?.role === "string" && ` · ${ROLE_LABEL[a.meta.role] ?? ""}`}
             </figcaption>
+          )}
+          {onRedo && (
+            <button
+              type="button"
+              onClick={() => redo(i)}
+              disabled={redoing !== null}
+              className="absolute right-2 bottom-2 inline-flex items-center gap-1 rounded-md bg-black/65 px-2 py-1 text-[11px] font-medium text-white hover:bg-black/80 disabled:opacity-60"
+            >
+              {redoing === i ? <Spinner className="size-3" /> : "↻"} 다시 만들기
+            </button>
           )}
         </figure>
       ))}
     </div>
+    </>
   );
 }
+
+const ROLE_LABEL: Record<string, string> = { cover: "표지", content: "내용", conclusion: "결론" };
 
 function AudioTrack({ asset }: { asset: Asset }) {
   return (

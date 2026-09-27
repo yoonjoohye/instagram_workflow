@@ -6,7 +6,7 @@ import { IconExternal, IconRefresh } from "@/components/icons";
 import { Badge, Button, Card, Empty, Notice, PageHeader, Skeleton, StatusDot, type Tone } from "@/components/ui";
 import { autoReplySummary } from "@/components/AutoReplyCard";
 import { api, LOGIN_URL, toApiError, useApi } from "@/lib/api";
-import { fmtInt, fmtRelative } from "@/lib/format";
+import { fmtInt, fmtRelative, mediaSrc } from "@/lib/format";
 import type { AutoReplyLog, AutoReplyLogStatus, AutoReplyRule, AutoReplyStatus, ListOf } from "@/lib/types";
 
 const LOG_STATUS: Record<AutoReplyLogStatus, { label: string; tone: Tone }> = {
@@ -108,7 +108,7 @@ export default function AutoReplyPage() {
                 <li key={r.id} className="flex items-center gap-3 py-3">
                   {r.post?.thumbnail_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.post.thumbnail_url} alt="" className="size-11 shrink-0 rounded-md object-cover" />
+                    <img src={mediaSrc(r.post.thumbnail_url)} alt="" className="size-11 shrink-0 rounded-md object-cover" />
                   ) : (
                     <span className="size-11 shrink-0 rounded-md bg-surface-2" />
                   )}

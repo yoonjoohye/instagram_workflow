@@ -49,6 +49,18 @@ Higgsfield·Anthropic 키가 없으면 목업 미디어와 템플릿 캡션으�
 
 > Facebook 로그인 방식을 쓰려면 `INSTAGRAM_APP_*` 대신 `META_APP_ID` / `META_APP_SECRET` 을 넣고, Facebook 로그인 for Business 의 유효한 OAuth 리디렉션 URI 에 같은 콜백 주소를 등록합니다. 이 방식은 Instagram 계정이 Facebook 페이지에 연결되어 있어야 합니다.
 
+## 내 사진으로 카드뉴스
+
+스튜디오 → **내 사진으로 카드뉴스**에서 사진을 최대 8장 올리고 주제를 입력하면:
+
+1. Gemini(`GEMINI_TEXT_MODEL`)가 사진을 보고 **표지 → 내용(사진별) → 결론** 구성과 문구, 캡션(지정한 형식), 해시태그를 설계
+2. 각 사진을 Gemini 이미지 모델(`GEMINI_IMAGE_MODEL`)로 AI 편집 (실패 시 기본 보정)
+3. 서버가 한글 제목·본문을 Pretendard 폰트로 합성해 1080×1350 카드 생성 (AI 모델의 한글 깨짐 방지)
+4. 작업함에 검수 대기로 저장 → 슬라이드별 '다시 만들기' → 게시
+
+업로드·결과 이미지는 DB 에 보관되고 `/api/py/media/<id>.jpg` 로 제공되어 Instagram 이 가져갑니다. 슬라이드는 Vercel 함수 시간 제한(60초) 때문에 한 장씩 요청해 만듭니다.
+폰트: Pretendard (SIL Open Font License, `backend/assets/fonts/LICENSE.txt`).
+
 ## 댓글 자동 응답 (팔로워 전용 링크)
 
 스튜디오의 게시물 화면에서 설정합니다. 게시 전에 저장해 두면 게시되는 순간부터 동작합니다.

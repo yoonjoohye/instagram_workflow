@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, AutoReplyRule, GenerationJob
@@ -172,6 +173,15 @@ def delete_job(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _current_media_url(url: str) -> str:
+    """우리 서버 이미지(/api/py/media/…)는 만든 뒤 도메인이 바뀌었을 수 있어 현재 공개 주소로 맞춥니다.
+    (Instagram 은 이 주소에서 직접 이미지를 가져갑니다.)"""
+    marker = "/api/py/media/"
+    if marker not in url:
+        return url
+    return settings.public_base_url.rstrip("/") + url[url.index(marker):]
+
+
 @router.post("/publish")
 def publish_job(
     body: PublishIn,
@@ -182,7 +192,11 @@ def publish_job(
     if job.status == "published":
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 발행된 작업입니다.")
 
-    visual = [a for a in (job.assets or []) if a.get("type") in {"image", "video"}]
+    visual = [
+        {**a, "url": _current_media_url(a.get("url", "")), "thumbnail_url": _current_media_url(a.get("thumbnail_url", ""))}
+        for a in (job.assets or [])
+        if a.get("type") in {"image", "video"}
+    ]
     if not visual:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "발행할 미디어가 없습니다.")
 

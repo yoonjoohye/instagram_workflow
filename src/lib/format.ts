@@ -132,3 +132,10 @@ export function fmtDuration(value: number | null | undefined, unit: "s" | "ms" =
   if (m < 60) return s ? `${m}분 ${s}초` : `${m}분`;
   return `${Math.floor(m / 60)}시간 ${m % 60}분`;
 }
+
+/** 우리 서버가 제공하는 이미지(/api/py/media/…)는 접속 도메인과 무관하게 보이도록 상대 주소로 바꿉니다. */
+export function mediaSrc(url: string | undefined | null) {
+  if (!url) return "";
+  const i = url.indexOf("/api/py/media/");
+  return i >= 0 ? url.slice(i) : url;
+}

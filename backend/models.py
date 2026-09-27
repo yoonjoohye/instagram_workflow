@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Date,
+    LargeBinary,
     DateTime,
     ForeignKey,
     Index,
@@ -78,6 +79,7 @@ class GenerationJob(Base):
     caption: Mapped[str] = mapped_column(Text, default="")
     hashtags: Mapped[Any] = mapped_column(JSON, default=list)
     assets: Mapped[Any] = mapped_column(JSON, default=list)  # [{type,url,thumbnail_url,meta}]
+    plan: Mapped[Any] = mapped_column(JSON, default=dict)  # 카드뉴스 설계안 (표지·내용·결론)
 
     ig_container_id: Mapped[str] = mapped_column(String(64), default="")
     ig_media_id: Mapped[str] = mapped_column(String(64), default="", index=True)
@@ -238,4 +240,23 @@ class DataDeletionRequest(Base):
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     source: Mapped[str] = mapped_column(String(32), default="")  # meta_deletion | meta_deauthorize | in_app
     status: Mapped[str] = mapped_column(String(16), default="completed")  # completed | not_found
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MediaBlob(Base):
+    """업로드한 사진과 카드뉴스 결과 이미지.
+
+    Instagram 게시 API 는 공개 URL 에서 이미지를 가져가므로 /api/py/media/<id>.jpg 로
+    제공합니다. id 는 추측 불가능한 무작위 값입니다.
+    """
+
+    __tablename__ = "media_blobs"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="upload")  # upload | slide
+    content_type: Mapped[str] = mapped_column(String(32), default="image/jpeg")
+    width: Mapped[int] = mapped_column(Integer, default=0)
+    height: Mapped[int] = mapped_column(Integer, default=0)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

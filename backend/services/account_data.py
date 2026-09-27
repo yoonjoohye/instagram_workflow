@@ -26,10 +26,11 @@ from ..models import (
     GenerationJob,
     InsightSnapshot,
     KnownVisitor,
+    MediaBlob,
 )
 
 # 자식 테이블부터 지웁니다 (SQLite 는 FK CASCADE 를 강제하지 않으므로 명시적으로).
-_CHILD_TABLES = [CommentReply, AutoReplyRule, CommentSentiment, KnownVisitor, InsightSnapshot, GenerationJob]
+_CHILD_TABLES = [CommentReply, AutoReplyRule, CommentSentiment, KnownVisitor, InsightSnapshot, MediaBlob, GenerationJob]
 
 
 def _b64url(data: str) -> bytes:

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { IconExternal, IconMusic } from "@/components/icons";
 import { Badge, Button, Empty, Notice, PageHeader, Segmented, Skeleton, StatusDot } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
-import { fmtRelative, KIND_LABEL, STATUS_LABEL } from "@/lib/format";
+import { fmtRelative, KIND_LABEL, mediaSrc, STATUS_LABEL } from "@/lib/format";
 import { statusTone } from "@/lib/status";
 import type { Job, JobStatus, ListOf } from "@/lib/types";
 
@@ -102,7 +102,7 @@ function JobCard({ job, onDelete }: { job: Job; onDelete: () => void }) {
       <Link href={`/admin/studio?job=${job.id}`} className="relative block aspect-[4/3] bg-surface-2">
         {cover && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={cover.thumbnail_url || cover.url} alt="" className="size-full object-cover" loading="lazy" />
+          <img src={mediaSrc(cover.thumbnail_url || cover.url)} alt="" className="size-full object-cover" loading="lazy" />
         )}
         <div className="absolute top-2 left-2 flex gap-1">
           <span className="rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white">
