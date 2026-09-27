@@ -1,8 +1,10 @@
 """내 사진으로 만드는 콘텐츠 마케팅 카드뉴스 (표지 → 내용 → 결론).
 
-1) plan    : Gemini 가 사진들과 주제를 보고 슬라이드 구성·문구·편집 지시·캡션·해시태그를 설계
-2) ai_edit : Gemini 이미지 모델이 각 사진을 편집 지시에 맞게 AI 보정
-3) compose : 편집된 사진 위에 한글 제목·본문을 서버에서 합성 (AI 이미지 모델은 한글을 자주 깨뜨림)
+1) research      : Gemini + Google 검색으로 주제를 조사 (사실·절차·주의사항, 출처)
+2) plan          : 조사 결과·사진·주제로 슬라이드 구성·문구·슬라이드별 연출 지시를 설계하고,
+                   캡션은 양식의 [칸]별로 받아 서버가 양식 그대로 조립
+3) render_visual : Gemini 이미지 모델이 연출 지시대로 사진을 재구성하거나(사진 있음), 새로 생성(-1)
+4) compose       : 이미지 위에 한글 제목·본문을 서버에서 합성 (AI 이미지 모델은 한글을 자주 깨뜨림)
 
 Gemini 키가 없거나 호출이 실패하면 기본 구성과 기본 보정(Pillow)으로 대신 만듭니다.
 """
@@ -12,6 +14,7 @@ import base64
 import io
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,17 +26,16 @@ from ..config import settings
 log = logging.getLogger(__name__)
 
 SIZE = (1080, 1350)  # Instagram 세로 4:5
-MAX_PHOTOS = 8  # 표지 + 사진 8장 + 결론 = 캐러셀 최대 10장
+MAX_PHOTOS = 8  # 업로드 최대 장수
+MAX_CONTENT = 8  # 표지 + 내용 8장 + 결론 = 캐러셀 최대 10장
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
-DEFAULT_CAPTION_FORMAT = """[후킹 한 줄]
+DEFAULT_CAPTION_FORMAT = """[후킹 2줄]
 
-[핵심 내용 3~5줄, 줄마다 이모지로 시작]
+[핵심 정보 3~5줄, 줄마다 이모지로 시작]
 
-[마무리 한 줄 + 저장/공유 유도]
-
-[해시태그 10~15개]"""
+[저장·공유를 유도하는 마무리 한 줄]"""
 
 
 # ── 이미지 유틸 ────────────────────────────────────────────────────────
@@ -65,14 +67,29 @@ class GeminiError(RuntimeError):
     pass
 
 
-def _gemini(model: str, parts: list[dict[str, Any]], generation_config: dict[str, Any], *, timeout: float = 50.0) -> dict:
+LEGACY_IMAGE_MODEL = "gemini-2.5-flash-image"  # 설정한 이미지 모델을 쓸 수 없을 때 한 번 더 시도
+
+
+def _gemini(
+    model: str,
+    parts: list[dict[str, Any]],
+    generation_config: dict[str, Any] | None = None,
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    timeout: float = 50.0,
+) -> dict:
     if not settings.gemini_api_key:
         raise GeminiError("GEMINI_API_KEY 가 설정되지 않았습니다.")
+    body: dict[str, Any] = {"contents": [{"role": "user", "parts": parts}]}
+    if generation_config:
+        body["generationConfig"] = generation_config
+    if tools:
+        body["tools"] = tools
     try:
         resp = httpx.post(
             GEMINI_URL.format(model=model),
             headers={"x-goog-api-key": settings.gemini_api_key},
-            json={"contents": [{"role": "user", "parts": parts}], "generationConfig": generation_config},
+            json=body,
             timeout=timeout,
         )
         data = resp.json()
@@ -91,98 +108,216 @@ def _parts_of(data: dict) -> list[dict[str, Any]]:
         raise GeminiError(f"Gemini 응답 없음: {reason}") from exc
 
 
-# ── 1) 구성 설계 ───────────────────────────────────────────────────────
-_PLAN_PROMPT = """너는 인스타그램 콘텐츠 마케팅 카드뉴스 기획자야.
-첨부한 사진 {n}장(사진 번호는 0부터 첨부 순서)과 아래 주제로 캐러셀 카드뉴스를 설계해.
+def _text_of(data: dict) -> str:
+    return "".join(p.get("text", "") for p in _parts_of(data)).strip()
+
+
+# ── 1) 주제 조사 (Google 검색) ────────────────────────────────────────
+_RESEARCH_PROMPT = """너는 인스타그램 콘텐츠 마케팅 카드뉴스의 리서처야. Google 검색으로 아래 주제를 조사해 카드뉴스에 쓸 사실을 정리해.
+
+주제/목적: {prompt}
+사용자가 준 확정 정보(그대로 신뢰): {notes}
+
+정리 형식 (한국어, 사실만, 추측 금지):
+1) 한 줄 요약
+2) 핵심 사실 6~10개 — 정의, 특징·장점, 절차/방법(단계별), 조건·수수료·주의사항, 최신 변경 사항 등 주제에 필요한 것
+3) 독자가 가장 궁금해할 질문 3개
+확인되지 않는 내용은 쓰지 말고, 날짜가 중요한 정보에는 기준 시점을 적어."""
+
+
+def research(prompt: str, notes: str) -> tuple[dict[str, Any], str]:
+    """(조사 결과 {notes, sources}, 경고). 검색이 안 되면 빈 결과로 계속 진행합니다."""
+    parts = [{"text": _RESEARCH_PROMPT.format(prompt=prompt, notes=notes.strip() or "없음")}]
+    try:
+        data = _gemini(settings.gemini_text_model, parts, {"temperature": 0.2}, tools=[{"googleSearch": {}}], timeout=55.0)
+        text = _text_of(data)
+        chunks = ((data.get("candidates") or [{}])[0].get("groundingMetadata") or {}).get("groundingChunks") or []
+        sources, seen = [], set()
+        for ch in chunks:
+            web = ch.get("web") or {}
+            uri = web.get("uri")
+            if uri and uri not in seen:
+                seen.add(uri)
+                sources.append({"title": (web.get("title") or uri)[:120], "uri": uri})
+        return {"notes": text[:6000], "sources": sources[:12]}, ""
+    except (GeminiError, KeyError, IndexError, TypeError) as exc:
+        log.warning("cardnews research skipped: %s", exc)
+        return {"notes": "", "sources": []}, f"주제 조사(검색) 실패로 사진·입력 정보만 사용: {exc}"
+
+
+# ── 2) 구성 설계 + 캡션 양식 채우기 ──────────────────────────────────────
+PLACEHOLDER = re.compile(r"\[([^\[\]\n]{1,60})\]")
+_LINES = re.compile(r"(\d+)\s*줄")
+
+
+def placeholders(template: str) -> list[str]:
+    return PLACEHOLDER.findall(template)
+
+
+def fill_template(template: str, parts: list[str], hashtags: list[str]) -> tuple[str, bool]:
+    """양식의 [칸]을 순서대로 채워 넣습니다. [ ] 밖의 글자·줄바꿈은 그대로 유지합니다.
+    '[후킹 3줄]'처럼 줄 수가 적힌 칸은 그 줄 수에 맞춥니다.
+    (최종 캡션, 해시태그를 양식 안에 넣었는지)"""
+    names = placeholders(template)
+    used_hashtags = False
+    it = iter(range(len(names)))
+
+    def repl(match: re.Match) -> str:
+        nonlocal used_hashtags
+        i = next(it)
+        name = names[i]
+        if "해시태그" in name or "hashtag" in name.lower():
+            used_hashtags = True
+            return " ".join(f"#{t.lstrip('#')}" for t in hashtags)
+        text = (parts[i] if i < len(parts) else "").strip() or f"⚠️ [{name}] 직접 입력"
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        want = _LINES.search(name)
+        if want and lines:
+            lines = lines[: int(want.group(1))]
+        return "\n".join(lines)
+
+    return PLACEHOLDER.sub(repl, template).strip(), used_hashtags
+
+
+_PLAN_PROMPT = """너는 인스타그램 콘텐츠 마케팅 카드뉴스 기획자이자 아트 디렉터야.
+주제와 조사 자료, 첨부한 사진 {n}장(번호는 0부터 첨부 순서)을 보고 저장·공유하고 싶어지는 정보성 캐러셀을 설계해.
+{refs}
 
 주제/목적: {prompt}
 톤: {tone}
-사진 편집 방향: {style}
+사용자 확정 정보(그대로 사용, 바꾸지 마): {notes}
+연출 방향(사용자 요청, 없으면 네가 판단): {style}
 
-구성 규칙
-- cover: 스크롤을 멈추게 하는 표지. title 은 18자 이내, subtitle 은 30자 이내.
-- slides: 사진마다 정확히 1장씩, 사진 순서를 이야기 흐름에 맞게 정해. heading 16자 이내, body 는 2~3문장 70자 이내.
-- conclusion: 핵심 요약과 행동 유도. title 18자 이내, body 60자 이내, cta 12자 이내(예: 저장하고 다시 보기).
-- 각 사진의 edit 에는 AI 이미지 편집 지시를 영어 한 문장으로 써 (사진의 내용과 구도는 유지하고, 편집 방향에 맞게 색감·조명·배경 정리 등). 글자를 넣으라는 지시는 절대 쓰지 마.
-- caption 은 아래 형식을 그대로 따르되 [ ] 안내문은 실제 내용으로 바꿔. 해시태그는 caption 에 넣지 말고 hashtags 배열로 따로 줘(# 없이 10~15개, 한국어 위주).
-- 사진에 없는 사실을 지어내지 마.
+조사 자료 (Google 검색 결과 요약 — 여기에 없는 사실은 지어내지 마):
+{research}
 
-캡션 형식:
-{caption_format}"""
+슬라이드 규칙
+- 흐름: cover(후킹) → slides(핵심 정보 3~{max_slides}장, 한 장에 한 메시지) → conclusion(요약·행동 유도).
+- 텍스트: cover.title 18자 이내, subtitle 30자 이내 / slides.heading 16자 이내, body 2~3문장 70자 이내 / conclusion.title 18자, body 60자, cta 12자 이내.
+- 사진 배정: photo 에 사용할 사진 번호. 첨부한 모든 사진을 slides 에 최소 한 번씩 써. 설명에 꼭 필요한데 맞는 사진이 없으면 photo 를 -1 로 두고 새 이미지를 만들게 해.
+- visual: 이미지 생성 AI 에게 줄 영어 연출 지시 2~4문장. 이 슬라이드의 메시지를 한눈에 보여주는 구체적인 장면·소품·구도·조명·색감을 적어.
+  사진이 있으면(photo ≥ 0) 그 사진을 바탕으로 무엇을 어떻게 바꿔 메시지를 살릴지(배경 교체, 관련 소품 추가, 재구성 등), 없으면(-1) 처음부터 그릴 장면을 적어.
+  읽을 수 있는 글자·숫자·로고는 절대 넣지 말라고 적고, cover 는 아래쪽 40% 가 단순하고 어둡게, conclusion 은 전체가 차분하게 해서 글자를 얹을 공간을 남겨.
 
-_PLAN_SCHEMA = {
-    "type": "OBJECT",
-    "properties": {
-        "cover": {
-            "type": "OBJECT",
-            "properties": {
-                "photo": {"type": "INTEGER"},
-                "title": {"type": "STRING"},
-                "subtitle": {"type": "STRING"},
-                "edit": {"type": "STRING"},
+캡션 규칙 (매우 중요)
+- 아래 캡션 양식에는 채워야 할 칸이 {k}개 있어: {names}
+- caption_parts 배열에 정확히 {k}개의 문자열을 칸 순서대로 넣어. 각 문자열은 해당 칸의 내용만 (칸 이름·대괄호·다른 칸 내용 금지).
+- 칸 이름의 지시를 그대로 지켜: 'N줄'이면 정확히 N줄(줄바꿈으로 구분), '설명'이면 설명, '방법'이면 단계별로 줄바꿈해서.
+- 사용자 확정 정보와 조사 자료에 없는 사실(예: 추천인 코드·링크·가격)이 필요하면 지어내지 말고 '⚠️ 직접 입력: (무엇이 필요한지)' 라고만 써.
+- 해시태그는 caption_parts 에 넣지 말고 hashtags 배열(# 없이 10~15개)로.
+
+캡션 양식:
+{template}"""
+
+
+def _plan_schema(k: int) -> dict[str, Any]:
+    visual = {"type": "STRING"}
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "cover": {
+                "type": "OBJECT",
+                "properties": {"photo": {"type": "INTEGER"}, "title": {"type": "STRING"}, "subtitle": {"type": "STRING"}, "visual": visual},
+                "required": ["photo", "title", "subtitle", "visual"],
             },
-            "required": ["photo", "title", "subtitle", "edit"],
-        },
-        "slides": {
-            "type": "ARRAY",
-            "items": {
+            "slides": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {"photo": {"type": "INTEGER"}, "heading": {"type": "STRING"}, "body": {"type": "STRING"}, "visual": visual},
+                    "required": ["photo", "heading", "body", "visual"],
+                },
+            },
+            "conclusion": {
                 "type": "OBJECT",
                 "properties": {
                     "photo": {"type": "INTEGER"},
-                    "heading": {"type": "STRING"},
+                    "title": {"type": "STRING"},
                     "body": {"type": "STRING"},
-                    "edit": {"type": "STRING"},
+                    "cta": {"type": "STRING"},
+                    "visual": visual,
                 },
-                "required": ["photo", "heading", "body", "edit"],
+                "required": ["photo", "title", "body", "cta", "visual"],
             },
+            "caption_parts": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": k, "maxItems": k},
+            "hashtags": {"type": "ARRAY", "items": {"type": "STRING"}},
         },
-        "conclusion": {
-            "type": "OBJECT",
-            "properties": {
-                "photo": {"type": "INTEGER"},
-                "title": {"type": "STRING"},
-                "body": {"type": "STRING"},
-                "cta": {"type": "STRING"},
-                "edit": {"type": "STRING"},
-            },
-            "required": ["photo", "title", "body", "cta", "edit"],
-        },
-        "caption": {"type": "STRING"},
-        "hashtags": {"type": "ARRAY", "items": {"type": "STRING"}},
-    },
-    "required": ["cover", "slides", "conclusion", "caption", "hashtags"],
-}
+        "required": ["cover", "slides", "conclusion", "caption_parts", "hashtags"],
+    }
 
 
 def plan_cardnews(
-    photos: list[bytes], *, prompt: str, tone: str, style: str, caption_format: str
+    photos: list[bytes],
+    *,
+    prompt: str,
+    tone: str,
+    style: str,
+    caption_format: str,
+    notes: str = "",
+    research_notes: str = "",
+    references: list[bytes] | None = None,
 ) -> tuple[dict[str, Any], str, str]:
-    """(설계안, 사용 엔진, 경고) — Gemini 실패 시 기본 설계안."""
+    """(설계안, 사용 엔진, 경고) — Gemini 실패 시 기본 설계안. references 는 연출 참고 이미지."""
     n = len(photos)
-    parts: list[dict[str, Any]] = [
-        {
-            "text": _PLAN_PROMPT.format(
-                n=n,
-                prompt=prompt,
-                tone=tone or "친근한",
-                style=style or "자연스럽고 선명하게, 원본 분위기 유지",
-                caption_format=caption_format.strip() or DEFAULT_CAPTION_FORMAT,
-            )
-        }
-    ]
+    references = references or []
+    template = caption_format.strip() or DEFAULT_CAPTION_FORMAT
+    names = [p for p in placeholders(template) if "해시태그" not in p and "hashtag" not in p.lower()]
+    text = _PLAN_PROMPT.format(
+        n=n,
+        prompt=prompt,
+        tone=tone or "친근한",
+        notes=notes.strip() or "없음",
+        style=style.strip() or "없음",
+        research=research_notes.strip() or "(조사 자료 없음 — 사진과 사용자 정보만 사용)",
+        max_slides=MAX_CONTENT,
+        k=len(names),
+        names=", ".join(f"[{x}]" for x in names) or "(없음 — caption_parts 에 캡션 전체를 1개로)",
+        template=template,
+        refs=(
+            f"그 뒤에 첨부한 {len(references)}장은 연출 '참고 이미지'야. 슬라이드 사진으로 배정하지 말고(사진 번호 아님), "
+            "모든 visual 을 쓸 때 참고 이미지의 색감·조명·구도·분위기·스타일을 따라가도록 구체적으로 반영해."
+            if references
+            else ""
+        ),
+    )
+    parts: list[dict[str, Any]] = [{"text": text}]
     for photo in photos:
         parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(photo))}})
+    for ref in references:
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(ref, 512))}})
     try:
         data = _gemini(
             settings.gemini_text_model,
             parts,
-            {"temperature": 0.7, "responseMimeType": "application/json", "responseSchema": _PLAN_SCHEMA},
+            {"temperature": 0.6, "responseMimeType": "application/json", "responseSchema": _plan_schema(max(1, len(names)))},
+            timeout=55.0,
         )
-        text = next(p["text"] for p in _parts_of(data) if "text" in p)
-        return _sanitize_plan(json.loads(text), n), "gemini", ""
-    except (GeminiError, StopIteration, ValueError, KeyError, TypeError) as exc:
+        raw = json.loads(_text_of(data))
+        design = _sanitize_plan(raw, n)
+    except (GeminiError, ValueError, KeyError, TypeError) as exc:
         log.warning("cardnews plan fallback: %s", exc)
-        return fallback_plan(n, prompt), "template", f"Gemini 구성 실패로 기본 구성 사용: {exc}"
+        design, engine, warning = fallback_plan(n, prompt), "template", f"Gemini 구성 실패로 기본 구성 사용: {exc}"
+        raw = {"caption_parts": []}
+    else:
+        engine, warning = "gemini", ""
+
+    # 캡션은 서버가 양식에 맞춰 조립합니다 (섹션 순서·빈 줄·고정 문구를 모델에 맡기지 않음).
+    if placeholders(template):
+        body_parts = [str(p) for p in (raw.get("caption_parts") or [])]
+        full_parts, j = [], 0
+        for name in placeholders(template):
+            if "해시태그" in name or "hashtag" in name.lower():
+                full_parts.append("")
+            else:
+                full_parts.append(body_parts[j] if j < len(body_parts) else "")
+                j += 1
+        caption, tags_inline = fill_template(template, full_parts, design["hashtags"])
+    else:
+        caption, tags_inline = "\n".join(str(p) for p in raw.get("caption_parts") or []).strip() or template, False
+    design["caption"] = caption[:2200]
+    design["hashtags_inline"] = tags_inline
+    design["caption_format"] = template
+    return design, engine, warning
 
 
 def _clip(value: Any, limit: int) -> str:
@@ -191,37 +326,42 @@ def _clip(value: Any, limit: int) -> str:
 
 
 def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
-    """모델 출력의 사진 번호·길이를 보정하고, 모든 사진이 내용 슬라이드에 한 번씩 쓰이게 합니다."""
-    idx = lambda v, default=0: v if isinstance(v, int) and 0 <= v < n else default  # noqa: E731
-    slides, used = [], set()
-    for s in raw.get("slides") or []:
-        p = idx(s.get("photo"), -1)
-        if p < 0 or p in used:
-            continue
-        used.add(p)
-        slides.append(
-            {"photo": p, "heading": _clip(s.get("heading"), 20), "body": _clip(s.get("body"), 90), "edit": _clip(s.get("edit"), 300)}
-        )
+    """사진 번호·길이를 보정하고, 모든 사진이 내용 슬라이드에 최소 한 번 쓰이게 합니다. (-1 = 새 이미지 생성)"""
+
+    def idx(v: Any, default: int) -> int:
+        if v == -1:
+            return -1
+        return v if isinstance(v, int) and 0 <= v < n else default
+
+    def slide(s: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "photo": idx(s.get("photo"), -1),
+            "heading": _clip(s.get("heading"), 20),
+            "body": _clip(s.get("body"), 90),
+            "visual": _clip(s.get("visual") or s.get("edit"), 600),
+        }
+
+    slides = [slide(s) for s in (raw.get("slides") or []) if isinstance(s, dict)]
+    used = {s["photo"] for s in slides if s["photo"] >= 0}
     for p in range(n):  # 빠진 사진은 뒤에 붙입니다
         if p not in used:
-            slides.append({"photo": p, "heading": f"포인트 {len(slides) + 1}", "body": "", "edit": ""})
+            slides.append({"photo": p, "heading": f"포인트 {len(slides) + 1}", "body": "", "visual": ""})
     cover, concl = raw.get("cover") or {}, raw.get("conclusion") or {}
     return {
         "cover": {
-            "photo": idx(cover.get("photo")),
+            "photo": idx(cover.get("photo"), 0 if n else -1),
             "title": _clip(cover.get("title"), 24),
             "subtitle": _clip(cover.get("subtitle"), 40),
-            "edit": _clip(cover.get("edit"), 300),
+            "visual": _clip(cover.get("visual") or cover.get("edit"), 600),
         },
-        "slides": slides[:MAX_PHOTOS],
+        "slides": slides[:MAX_CONTENT],
         "conclusion": {
-            "photo": idx(concl.get("photo"), n - 1),
+            "photo": idx(concl.get("photo"), n - 1 if n else -1),
             "title": _clip(concl.get("title"), 24),
             "body": _clip(concl.get("body"), 80),
             "cta": _clip(concl.get("cta"), 16),
-            "edit": _clip(concl.get("edit"), 300),
+            "visual": _clip(concl.get("visual") or concl.get("edit"), 600),
         },
-        "caption": str(raw.get("caption") or "").strip()[:2000],
         "hashtags": [str(t).lstrip("#").strip() for t in (raw.get("hashtags") or []) if str(t).strip()][:20],
     }
 
@@ -229,10 +369,9 @@ def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
 def fallback_plan(n: int, prompt: str) -> dict[str, Any]:
     topic = _clip(prompt.splitlines()[0] if prompt else "오늘의 기록", 22)
     return {
-        "cover": {"photo": 0, "title": topic, "subtitle": "끝까지 넘겨 보세요 👉", "edit": ""},
-        "slides": [{"photo": i, "heading": f"포인트 {i + 1}", "body": "", "edit": ""} for i in range(n)],
-        "conclusion": {"photo": n - 1, "title": "오늘의 정리", "body": topic, "cta": "저장하고 다시 보기", "edit": ""},
-        "caption": f"{topic}\n\n사진으로 정리해 봤어요. 도움이 됐다면 저장해 두세요!",
+        "cover": {"photo": 0, "title": topic, "subtitle": "끝까지 넘겨 보세요 👉", "visual": ""},
+        "slides": [{"photo": i, "heading": f"포인트 {i + 1}", "body": "", "visual": ""} for i in range(n)],
+        "conclusion": {"photo": n - 1, "title": "오늘의 정리", "body": topic, "cta": "저장하고 다시 보기", "visual": ""},
         "hashtags": [],
     }
 
@@ -246,32 +385,98 @@ def slide_list(plan: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
-# ── 2) AI 편집 ─────────────────────────────────────────────────────────
-def ai_edit(photo: bytes, instruction: str, *, style: str = "") -> tuple[bytes, str]:
-    """(편집된 이미지, 엔진). Gemini 이미지 편집 실패 시 기본 보정."""
-    direction = " ".join(p for p in (instruction.strip(), style.strip()) if p) or "Enhance lighting and colors naturally."
-    prompt = (
-        "Edit this photo for an Instagram content-marketing card. "
-        f"{direction} "
-        "Keep the original subject, composition and perspective recognizable. "
-        "Do not add any text, letters, logos, watermarks or borders. Photorealistic result."
+# ── 3) 이미지 연출 (편집 · 생성) ─────────────────────────────────────────
+# 내용 슬라이드는 위쪽 62% 에 이미지가 들어가므로 가로형, 표지·결론은 세로 4:5.
+ASPECT = {"cover": "4:5", "content": "4:3", "conclusion": "4:5"}
+
+
+def _visual_prompt(slide: dict[str, Any], *, topic: str, style: str, instruction: str, has_photo: bool) -> str:
+    message = " — ".join(
+        p for p in (slide.get("title") or slide.get("heading"), slide.get("subtitle") or slide.get("body")) if p
     )
-    try:
-        data = _gemini(
-            settings.gemini_image_model,
-            [{"text": prompt}, {"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(photo, 1280))}}],
-            {"responseModalities": ["IMAGE", "TEXT"]},
-            timeout=55.0,
+    direction = instruction.strip() or slide.get("visual", "").strip() or "Show the subject clearly with natural, appealing light."
+    base = (
+        "Use the provided photo as the base. Keep its main subject recognizable, but you may re-compose the scene, "
+        "replace or clean up the background, adjust lighting and color, and add relevant objects so the image clearly "
+        "conveys the message."
+        if has_photo
+        else "Create a new photorealistic image from scratch."
+    )
+    layout = {
+        "cover": "Keep the lower 40% of the frame simple and darker so a title can be placed there.",
+        "content": "Wide framing with the key subject centered.",
+        "conclusion": "Calm, uncluttered composition with soft contrast so text can sit on top.",
+    }[slide["role"]]
+    return (
+        f"You are the art director of an Instagram content-marketing card-news post about: {topic}. "
+        f"This slide says (Korean): {message}. "
+        f"{base} Creative direction: {direction} "
+        + (f"Overall style requested by the user: {style}. " if style.strip() else "")
+        + f"{layout} "
+        "Absolutely no readable text, letters, numbers, logos, watermarks, UI labels or borders anywhere in the image. "
+        "High quality, realistic, Instagram-worthy."
+    )
+
+
+def _image_call(parts: list[dict[str, Any]], aspect: str) -> bytes:
+    cfg = {"responseModalities": ["IMAGE", "TEXT"], "imageConfig": {"aspectRatio": aspect}}
+    models = [settings.gemini_image_model]
+    if settings.gemini_image_model != LEGACY_IMAGE_MODEL:
+        models.append(LEGACY_IMAGE_MODEL)
+    last: Exception | None = None
+    for model in models:
+        try:
+            data = _gemini(model, parts, cfg, timeout=55.0)
+            for part in _parts_of(data):
+                inline = part.get("inlineData") or part.get("inline_data")
+                if inline and inline.get("data"):
+                    return to_jpeg(Image.open(io.BytesIO(base64.b64decode(inline["data"]))).convert("RGB"))
+            raise GeminiError("이미지가 응답에 없습니다.")
+        except GeminiError as exc:
+            last = exc
+            # 모델을 찾을 수 없을 때만 구형 모델로 다시 시도합니다.
+            if "not found" not in str(exc).lower() and "not supported" not in str(exc).lower():
+                break
+    raise GeminiError(str(last))
+
+
+def render_visual(
+    photo: bytes | None,
+    slide: dict[str, Any],
+    *,
+    topic: str,
+    style: str = "",
+    instruction: str = "",
+    references: list[bytes] | None = None,
+) -> tuple[bytes, str]:
+    """(이미지, 엔진). 사진이 있으면 연출 편집, 없으면(-1) 새로 생성. 실패하면 기본 보정/배경.
+    references 는 색감·분위기만 참고할 스타일 이미지 (첫 이미지 = 편집할 사진)."""
+    references = references or []
+    prompt = _visual_prompt(slide, topic=topic, style=style, instruction=instruction, has_photo=photo is not None)
+    if references:
+        which = f"The last {len(references)} attached image(s)" if photo is not None else f"The {len(references)} attached image(s)"
+        prompt += (
+            f" {which} are STYLE REFERENCES only: match their color grading, lighting, mood and composition style, "
+            "but do not copy their subjects."
         )
-        for part in _parts_of(data):
-            inline = part.get("inlineData") or part.get("inline_data")
-            if inline and inline.get("data"):
-                img = Image.open(io.BytesIO(base64.b64decode(inline["data"]))).convert("RGB")
-                return to_jpeg(img), "gemini"
-        raise GeminiError("편집 이미지가 응답에 없습니다.")
+    parts: list[dict[str, Any]] = [{"text": prompt}]
+    if photo is not None:
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(photo, 1280))}})
+    for ref in references[:3]:
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(ref, 640))}})
+    try:
+        return _image_call(parts, ASPECT[slide["role"]]), "gemini"
     except (GeminiError, OSError, ValueError) as exc:
-        log.warning("ai_edit fallback: %s", exc)
-        return basic_enhance(photo), f"basic ({exc})"
+        log.warning("render_visual fallback: %s", exc)
+        return (basic_enhance(photo) if photo is not None else placeholder_background()), f"basic ({exc})"
+
+
+def placeholder_background() -> bytes:
+    """이미지 생성에 실패했고 원본 사진도 없을 때 쓰는 은은한 배경."""
+    w, h = SIZE
+    img = Image.linear_gradient("L").resize((w, h)).convert("RGB")
+    img = ImageOps.colorize(img.convert("L"), black=(38, 38, 52), white=(120, 110, 170))
+    return to_jpeg(img.filter(ImageFilter.GaussianBlur(40)))
 
 
 def basic_enhance(photo: bytes) -> bytes:
@@ -281,7 +486,7 @@ def basic_enhance(photo: bytes) -> bytes:
     return to_jpeg(img)
 
 
-# ── 3) 카드 합성 ───────────────────────────────────────────────────────
+# ── 4) 카드 합성 ───────────────────────────────────────────────────────
 def _font(weight: str, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(FONT_DIR / f"Pretendard-{weight}.otf"), size)
 

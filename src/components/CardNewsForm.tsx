@@ -8,11 +8,21 @@ import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
 
 const MAX_PHOTOS = 8; // 표지 + 사진 8장 + 결론 = 캐러셀 최대 10장
 const TONES = ["친근한", "전문적인", "감성적인", "유머러스한", "정보 전달형"];
-const DEFAULT_FORMAT = `[후킹 한 줄]
+const MAX_REFS = 3;
+const DEFAULT_FORMAT = `[후킹 2줄]
 
-[핵심 내용 3~5줄, 줄마다 이모지로 시작]
+[핵심 정보 3~5줄, 줄마다 이모지로 시작]
 
-[마무리 한 줄 + 저장/공유 유도]`;
+[저장·공유를 유도하는 마무리 한 줄]`;
+const FORMAT_EXAMPLE = `[후킹 3줄]
+
+[스탈링 뱅크 설명]
+[스탈링 뱅크 개설하는 법]
+[추천인 정보]
+
+[댓글 유도 글 작성]`;
+
+type Research = { notes: string; sources: { title: string; uri: string }[]; warning: string };
 
 type Photo = { key: string; file: File; preview: string };
 type Step = { label: string; done: number; total: number };
@@ -44,7 +54,10 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [prompt, setPrompt] = useState("");
   const [tone, setTone] = useState("친근한");
   const [style, setStyle] = useState("");
+  const [refs, setRefs] = useState<Photo[]>([]);
+  const [notes, setNotes] = useState("");
   const [format, setFormat] = useState("");
+  const refInput = useRef<HTMLInputElement>(null);
   const [accent, setAccent] = useState("#6c5ce7");
   const [step, setStep] = useState<Step | null>(null);
   const [error, setError] = useState<string>();
@@ -85,6 +98,18 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
       return prev.filter((_, k) => k !== i);
     });
 
+  function addRefs(list: FileList) {
+    const images = Array.from(list).filter((f) => f.type.startsWith("image/"));
+    setRefs((prev) => [
+      ...prev,
+      ...images.slice(0, Math.max(0, MAX_REFS - prev.length)).map((file) => ({
+        key: `${file.name}-${Math.random()}`,
+        file,
+        preview: URL.createObjectURL(file),
+      })),
+    ]);
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!photos.length) return setError("사진을 1장 이상 올려 주세요.");
@@ -96,10 +121,31 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
         setStep({ label: "사진 올리는 중", done: i, total: photos.length });
         ids.push(await uploadPhoto(photos[i].file));
       }
-      setStep({ label: "Gemini가 사진을 보고 구성을 짜는 중", done: 0, total: 1 });
+      const refIds: string[] = [];
+      for (let i = 0; i < refs.length; i++) {
+        setStep({ label: "참고 이미지 올리는 중", done: i, total: refs.length });
+        refIds.push(await uploadPhoto(refs[i].file));
+      }
+      setStep({ label: "Gemini가 주제를 검색해 조사하는 중", done: 0, total: 1 });
+      const research = await api<Research>("/cardnews/research", {
+        method: "POST",
+        json: { prompt: prompt.trim(), notes },
+      });
+      setStep({ label: "Gemini가 조사 내용·사진으로 구성과 연출을 짜는 중", done: 0, total: 1 });
       const plan = await api<{ job: Job; slides: { role: string }[]; warning: string }>("/cardnews/plan", {
         method: "POST",
-        json: { upload_ids: ids, prompt: prompt.trim(), tone, style, caption_format: format, accent },
+        json: {
+          upload_ids: ids,
+          reference_ids: refIds,
+          prompt: prompt.trim(),
+          tone,
+          style,
+          notes,
+          caption_format: format,
+          research_notes: research.notes,
+          sources: research.sources,
+          accent,
+        },
       });
       const total = plan.slides.length;
       for (let i = 0; i < total; i++) {
@@ -224,24 +270,108 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
           </div>
         </Field>
 
-        <Field label="사진 AI 편집 방향" htmlFor="cn-style" hint="예) 따뜻한 필름 톤, 배경의 사람·간판 정리, 밝고 선명하게">
-          <input id="cn-style" value={style} onChange={(e) => setStyle(e.target.value)} className={inputClass} disabled={busy} />
+        <Field
+          label="참고 정보 (선택)"
+          htmlFor="cn-notes"
+          hint="추천인 코드·링크·가격처럼 꼭 들어가야 하는데 Gemini가 알 수 없는 정보. 여기 있는 내용은 그대로 사용해요."
+        >
+          <textarea
+            id="cn-notes"
+            rows={3}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder={"예) 추천인 코드: ABC123 (가입 시 £5 지급)\n가입 링크: https://…"}
+            className={cx(inputClass, "resize-y")}
+            disabled={busy}
+          />
+        </Field>
+
+        <div className="space-y-2">
+          <Field
+            label="연출 방향 (선택)"
+            htmlFor="cn-style"
+            hint="비워두면 Gemini가 주제를 조사해 슬라이드마다 직접 장면을 연출해요. 필요하면 사진이 없는 설명용 이미지도 새로 만들어요."
+          >
+            <input
+              id="cn-style"
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              placeholder="예) 따뜻한 필름 톤, 런던 느낌, 깔끔한 제품 촬영처럼"
+              className={inputClass}
+              disabled={busy}
+            />
+          </Field>
+          <div className="flex flex-wrap items-center gap-2">
+            {refs.map((r, i) => (
+              <span key={r.key} className="group relative size-14 overflow-hidden rounded-md border border-line">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r.preview} alt="" className="size-full object-cover" />
+                {!busy && (
+                  <button
+                    type="button"
+                    onClick={() => setRefs((prev) => prev.filter((_, k) => k !== i))}
+                    className="absolute inset-0 hidden items-center justify-center bg-black/55 text-[12px] text-white group-hover:flex"
+                    aria-label="참고 이미지 삭제"
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            ))}
+            {refs.length < MAX_REFS && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => refInput.current?.click()}
+                className="inline-flex h-14 items-center rounded-md border border-dashed border-line-strong px-3 text-[12px] text-fg-2 hover:bg-surface-2"
+              >
+                + 참고 이미지 ({refs.length}/{MAX_REFS})
+              </button>
+            )}
+            <input
+              ref={refInput}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) addRefs(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          <p className="text-[12px] text-fg-3">
+            참고 이미지는 색감·조명·구도·분위기만 따라가요. 카드뉴스 슬라이드로 들어가지는 않아요.
+          </p>
+        </div>
+
+        <Field
+          label="캡션 양식"
+          htmlFor="cn-format"
+          hint={
+            <>
+              [ ] 칸마다 Gemini가 따로 채우고, 칸 밖의 글자·줄바꿈은 그대로 유지돼요. &lsquo;[후킹 3줄]&rsquo;처럼 줄 수를 쓰면 딱 맞춰요.
+              해시태그는 자동으로 맨 뒤에 붙어요({"[해시태그]"} 칸을 넣으면 그 자리에).{" "}
+              <button type="button" className="underline" onClick={() => setFormat(FORMAT_EXAMPLE)} disabled={busy}>
+                예시 넣기
+              </button>
+            </>
+          }
+        >
+          <textarea
+            id="cn-format"
+            rows={7}
+            value={format}
+            onChange={(e) => setFormat(e.target.value)}
+            placeholder={DEFAULT_FORMAT}
+            className={cx(inputClass, "resize-y font-mono text-[12px]")}
+            disabled={busy}
+          />
         </Field>
 
         <details className="rounded-lg border border-line px-3 py-2">
-          <summary className="cursor-pointer text-[13px] font-medium text-fg-2">캡션 형식 · 포인트 색 (선택)</summary>
+          <summary className="cursor-pointer text-[13px] font-medium text-fg-2">포인트 색 (선택)</summary>
           <div className="mt-3 space-y-3">
-            <Field label="캡션 형식" htmlFor="cn-format" hint="[ ] 안은 Gemini가 채울 자리예요. 비워두면 기본 형식을 씁니다. 해시태그는 자동으로 따로 붙어요.">
-              <textarea
-                id="cn-format"
-                rows={6}
-                value={format}
-                onChange={(e) => setFormat(e.target.value)}
-                placeholder={DEFAULT_FORMAT}
-                className={cx(inputClass, "resize-y font-mono text-[12px]")}
-                disabled={busy}
-              />
-            </Field>
             <label className="flex items-center gap-3 text-[13px] text-fg-2">
               포인트 색
               <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} className="h-8 w-12 cursor-pointer rounded border border-line" disabled={busy} />
@@ -263,7 +393,7 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
             <div className="h-2 overflow-hidden rounded-full bg-surface-2">
               <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(step.done / Math.max(step.total, 1)) * 100}%` }} />
             </div>
-            <p className="text-[12px] text-fg-3">사진 AI 편집은 장당 10~30초 걸려요. 창을 닫지 마세요.</p>
+            <p className="text-[12px] text-fg-3">주제 조사와 슬라이드 연출에 몇 분 걸릴 수 있어요. 창을 닫지 마세요.</p>
           </div>
         ) : (
           <Button type="submit" variant="primary" className="w-full" disabled={!photos.length}>

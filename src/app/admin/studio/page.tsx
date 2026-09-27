@@ -233,6 +233,23 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
           }
         />
 
+        {!!job.sources?.length && (
+          <details className="mt-4 rounded-lg border border-line px-3 py-2">
+            <summary className="cursor-pointer text-[13px] font-medium text-fg-2">
+              Gemini가 조사에 참고한 자료 {job.sources.length}개 — 사실 확인용
+            </summary>
+            <ul className="mt-2 space-y-1">
+              {job.sources.map((src) => (
+                <li key={src.uri} className="truncate text-[12px]">
+                  <a href={src.uri} target="_blank" rel="noreferrer" className="text-fg-2 underline hover:text-fg">
+                    {src.title}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
         {audio.map((a, i) => (
           <AudioTrack key={i} asset={a} />
         ))}

@@ -51,6 +51,7 @@ export type Job = {
   permalink: string;
   published_at: string | null;
   created_at: string;
+  sources?: { title: string; uri: string }[];
 };
 
 export type Quota = { used: number; total: number; remaining: number };

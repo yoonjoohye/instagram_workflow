@@ -45,6 +45,8 @@ def _job_dict(job: GenerationJob) -> dict:
         "permalink": job.permalink,
         "published_at": job.published_at.isoformat() if job.published_at else None,
         "created_at": job.created_at.isoformat(),
+        # 카드뉴스: Gemini 가 주제 조사에 참고한 출처
+        "sources": (job.plan or {}).get("sources", []) if isinstance(job.plan, dict) else [],
     }
 
 

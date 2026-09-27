@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-flash-lite-latest"
     # 카드뉴스: 사진 분석·구성은 gemini_text_model, 사진 AI 편집은 gemini_image_model
     gemini_text_model: str = "gemini-flash-latest"
-    gemini_image_model: str = "gemini-2.5-flash-image"
+    gemini_image_model: str = "gemini-3.1-flash-image"
 
     # Meta Webhooks 구독 시 '인증 토큰' 칸에 넣는 값과 같아야 합니다 (아무 임의 문자열).
     webhook_verify_token: str = ""

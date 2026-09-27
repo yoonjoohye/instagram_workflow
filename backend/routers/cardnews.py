@@ -69,12 +69,26 @@ def serve_media(blob_id: str, db: Session = Depends(get_db)) -> Response:
     )
 
 
+class ResearchIn(BaseModel):
+    prompt: str = Field(min_length=2, max_length=2000)
+    notes: str = Field(default="", max_length=3000)  # 사용자 확정 정보 (추천 코드, 링크 등)
+
+
+class Source(BaseModel):
+    title: str = Field(default="", max_length=200)
+    uri: str = Field(max_length=2000)
+
+
 class PlanIn(BaseModel):
     upload_ids: list[str] = Field(min_length=1, max_length=svc.MAX_PHOTOS)
     prompt: str = Field(min_length=2, max_length=2000)
     tone: str = Field(default="친근한", max_length=64)
-    style: str = Field(default="", max_length=300)  # AI 편집 방향
+    style: str = Field(default="", max_length=300)  # 연출 방향 (선택)
     caption_format: str = Field(default="", max_length=2000)
+    notes: str = Field(default="", max_length=3000)
+    research_notes: str = Field(default="", max_length=8000)
+    sources: list[Source] = Field(default_factory=list, max_length=20)
+    reference_ids: list[str] = Field(default_factory=list, max_length=3)  # 연출 참고 이미지
     accent: str = Field(default="#6c5ce7", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
@@ -96,16 +110,27 @@ def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
     return job
 
 
+@router.post("/cardnews/research")
+def research(body: ResearchIn, account: Account = Depends(current_account)) -> dict:
+    """Gemini + Google 검색으로 주제를 조사합니다 (Vercel 시간 제한 때문에 설계와 나눠 호출)."""
+    result, warning = svc.research(body.prompt, body.notes)
+    return {**result, "warning": warning}
+
+
 @router.post("/cardnews/plan", status_code=status.HTTP_201_CREATED)
 def plan(body: PlanIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
     """사진과 주제로 표지·내용·결론 구성과 캡션·해시태그를 설계합니다."""
     blobs = _blobs(db, account, body.upload_ids)
+    refs = _blobs(db, account, body.reference_ids)
     design, engine, warning = svc.plan_cardnews(
         [b.data for b in blobs],
+        references=[r.data for r in refs],
         prompt=body.prompt,
         tone=body.tone,
         style=body.style,
         caption_format=body.caption_format,
+        notes=body.notes,
+        research_notes=body.research_notes,
     )
     slides = svc.slide_list(design)
     job = GenerationJob(
@@ -117,8 +142,17 @@ def plan(body: PlanIn, account: Account = Depends(current_account), db: Session 
         provider=f"cardnews/{engine}",
         error=warning,
         caption=design["caption"],
-        hashtags=design["hashtags"],
-        plan={**design, "upload_ids": body.upload_ids, "style": body.style, "accent": body.accent},
+        # 양식 안에 해시태그 칸이 있으면 이미 캡션에 들어갔으므로 따로 붙이지 않습니다.
+        hashtags=[] if design.get("hashtags_inline") else design["hashtags"],
+        plan={
+            **design,
+            "upload_ids": body.upload_ids,
+            "reference_ids": body.reference_ids,
+            "style": body.style,
+            "accent": body.accent,
+            "topic": body.prompt,
+            "sources": [s.model_dump() for s in body.sources],
+        },
         assets=[
             {"type": "image", "url": "", "thumbnail_url": "", "meta": {"role": s["role"], "status": "pending"}}
             for s in slides
@@ -147,10 +181,19 @@ def render_slide(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "슬라이드 번호가 올바르지 않습니다.")
     slide = slides[index]
     uploads = _blobs(db, account, job.plan["upload_ids"])
-    source = uploads[slide["photo"]].data
+    photo = slide.get("photo", -1)
+    source = uploads[photo].data if isinstance(photo, int) and 0 <= photo < len(uploads) else None
 
-    instruction = body.instruction if body and body.instruction else slide.get("edit", "")
-    edited, engine = svc.ai_edit(source, instruction, style=job.plan.get("style", ""))
+    instruction = body.instruction if body and body.instruction else ""
+    references = [b.data for b in _blobs(db, account, job.plan.get("reference_ids") or [])]
+    edited, engine = svc.render_visual(
+        source,
+        slide,
+        topic=job.plan.get("topic") or job.prompt,
+        style=job.plan.get("style", ""),
+        instruction=instruction,
+        references=references,
+    )
     card = svc.compose(
         edited, slide, index=index, total=len(slides), handle=account.username, accent=job.plan.get("accent", "#6c5ce7")
     )
@@ -165,7 +208,13 @@ def render_slide(
         "type": "image",
         "url": _media_url(blob.id),
         "thumbnail_url": _media_url(blob.id),
-        "meta": {"role": slide["role"], "status": "done", "engine": engine, "instruction": instruction},
+        "meta": {
+            "role": slide["role"],
+            "status": "done",
+            "engine": engine,
+            "generated": source is None,
+            "instruction": instruction or slide.get("visual", ""),
+        },
     }
     job.assets = assets
     flag_modified(job, "assets")
