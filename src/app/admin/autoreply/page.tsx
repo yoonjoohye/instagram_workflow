@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { IconExternal, IconRefresh } from "@/components/icons";
 import { Badge, Button, Card, Empty, Notice, PageHeader, Skeleton, StatusDot, type Tone } from "@/components/ui";
+import { autoReplySummary } from "@/components/AutoReplyCard";
 import { api, LOGIN_URL, toApiError, useApi } from "@/lib/api";
 import { fmtInt, fmtRelative } from "@/lib/format";
 import type { AutoReplyLog, AutoReplyLogStatus, AutoReplyRule, AutoReplyStatus, ListOf } from "@/lib/types";
@@ -114,7 +115,7 @@ export default function AutoReplyPage() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-medium">{r.post?.prompt ?? "게시물"}</p>
                     <p className="truncate text-[12px] text-fg-3">
-                      {r.keywords ? `키워드: ${r.keywords}` : "모든 댓글"} · {r.link_url || r.link_message ? "팔로워 전용 DM" : "공개 답글만"}
+                      {autoReplySummary(r)}
                       {!r.ig_media_id && " · 게시 전"}
                     </p>
                   </div>

@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
-import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyValid } from "@/components/AutoReplyCard";
+import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
+import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconRefresh, IconReply, IconSpark } from "@/components/icons";
-import { SENTIMENTS, SentimentBar, SentimentDialog } from "@/components/sentiment";
+import { SentimentBar, SentimentDialog } from "@/components/sentiment";
 import { Badge, Button, Card, cx, Dialog, Empty, Notice, PageHeader, Segmented, Skeleton, Spinner } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
 import { fmtCompact, fmtInt, fmtPct, fmtRelative, postKind } from "@/lib/format";
@@ -56,6 +56,15 @@ function Posts() {
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "timestamp", desc: true });
   const [togglingId, setTogglingId] = useState<string>();
   const [sentimentPost, setSentimentPost] = useState<IgPost | null>(null);
+  // 댓글 반응·관리는 행을 펼쳤을 때만 보여줍니다.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleRow = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<SentimentSync>();
 
@@ -220,7 +229,7 @@ function Posts() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-[13px]">
+            <table className="w-full min-w-[860px] text-[13px]">
               <thead className="border-b border-line text-left text-fg-3">
                 <tr>
                   <SortTh label="게시물" active={sort.key === "timestamp"} desc={sort.desc} onClick={() => onSort("timestamp")} left />
@@ -234,110 +243,100 @@ function Posts() {
                       onClick={() => onSort(c.key)}
                     />
                   ))}
-                  <th className="px-3 py-2.5 text-left font-medium" title="긍정 · 보통 · 부정 (분석된 댓글 기준)">댓글 반응</th>
-                  <th className="px-5 py-2.5 text-left font-medium">관리</th>
+                  <th className="w-12 pr-4" aria-label="상세" />
                 </tr>
               </thead>
               <tbody className="tnum">
-                {rows.map((p) => (
-                  <tr key={p.id} className="border-b border-line last:border-0 hover:bg-surface-2">
-                    <td className="px-5 py-2.5">
-                      <a href={p.permalink} target="_blank" rel="noreferrer" className="group flex items-center gap-3">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={p.thumbnail_url || p.media_url} alt="" className="size-11 shrink-0 rounded-md object-cover" loading="lazy" />
-                        <span className="min-w-0 max-w-[260px]">
-                          <span className="flex items-center gap-1.5">
-                            <span className="truncate font-medium group-hover:underline">
-                              {p.caption?.split("\n")[0] || "(캡션 없음)"}
-                            </span>
-                            <IconExternal className="shrink-0 text-fg-3" />
-                          </span>
-                          <span className="mt-0.5 flex items-center gap-1.5 text-[12px] text-fg-3">
-                            {postKind(p)} · {fmtRelative(p.timestamp)}
-                            {studioIds.has(p.id) && (
-                              <Badge tone="accent" icon={<IconSpark width={11} height={11} />}>
-                                스튜디오
-                              </Badge>
-                            )}
-                          </span>
-                        </span>
-                      </a>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center justify-end gap-2">
-                        <span className="font-medium">{fmtCompact(p.insights?.reach)}</span>
-                        <span className="hidden h-2 w-16 overflow-hidden rounded-full bg-surface-2 lg:block" aria-hidden>
-                          <span
-                            className="block h-full rounded-r"
-                            style={{ width: `${((p.insights?.reach ?? 0) / maxReach) * 100}%`, background: "var(--seq-bar)" }}
-                          />
-                        </span>
-                      </div>
-                    </td>
-                    {(["views", "likes", "comments", "saved", "shares"] as const).map((k) => (
-                      <td key={k} className="px-3 py-2.5 text-right text-fg-2">
-                        {fmtCompact(metric(p, k))}
-                      </td>
-                    ))}
-                    <td className="px-3 py-2.5 text-right font-medium">{fmtPct(metric(p, "rate"))}</td>
-                    <td className="w-32 px-3 py-2.5">
-                      {p.sentiment ? (
-                        <button onClick={() => setSentimentPost(p)} className="block w-full rounded-md p-1 text-left hover:bg-surface-2">
-                          <SentimentBar counts={p.sentiment} />
-                          <span className="tnum mt-1 flex gap-2 text-[11px] whitespace-nowrap text-fg-2">
-                            {SENTIMENTS.map((x) => (
-                              <span key={x.key} className="flex items-center gap-1" title={x.label}>
-                                <span className="inline-block size-1.5 rounded-full" style={{ background: x.color }} />
-                                <span className="sr-only">{x.label}</span>
-                                {p.sentiment![x.key]}
+                {rows.map((p) => {
+                  const open = expanded.has(p.id);
+                  return (
+                    <Fragment key={p.id}>
+                      <tr
+                        onClick={() => toggleRow(p.id)}
+                        className={cx("cursor-pointer border-b border-line hover:bg-surface-2", open && "bg-surface-2 border-b-0")}
+                      >
+                        <td className="px-5 py-2.5">
+                          <div className="flex items-center gap-3">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={p.thumbnail_url || p.media_url} alt="" className="size-11 shrink-0 rounded-md object-cover" loading="lazy" />
+                            <span className="min-w-0 max-w-[300px]">
+                              <span className="block truncate font-medium">{p.caption?.split("\n")[0] || "(캡션 없음)"}</span>
+                              <span className="mt-0.5 flex items-center gap-1.5 text-[12px] text-fg-3">
+                                {postKind(p)} · {fmtRelative(p.timestamp)}
+                                {studioIds.has(p.id) && (
+                                  <Badge tone="accent" icon={<IconSpark width={11} height={11} />}>
+                                    스튜디오
+                                  </Badge>
+                                )}
+                                {p.auto_reply?.enabled && (
+                                  <Badge tone="accent" icon={<IconReply width={11} height={11} />}>
+                                    자동 응답
+                                  </Badge>
+                                )}
                               </span>
-                            ))}
-                          </span>
-                        </button>
-                      ) : (
-                        <span className="text-[12px] text-fg-3">{p.comments_count ? "분석 전" : "댓글 없음"}</span>
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="font-medium">{fmtCompact(p.insights?.reach)}</span>
+                            <span className="hidden h-2 w-16 overflow-hidden rounded-full bg-surface-1 lg:block" aria-hidden>
+                              <span
+                                className="block h-full rounded-r"
+                                style={{ width: `${((p.insights?.reach ?? 0) / maxReach) * 100}%`, background: "var(--seq-bar)" }}
+                              />
+                            </span>
+                          </div>
+                        </td>
+                        {(["views", "likes", "comments", "saved", "shares"] as const).map((k) => (
+                          <td key={k} className="px-3 py-2.5 text-right text-fg-2">
+                            {fmtCompact(metric(p, k))}
+                          </td>
+                        ))}
+                        <td className="px-3 py-2.5 text-right font-medium">{fmtPct(metric(p, "rate"))}</td>
+                        <td className="pr-4 text-right">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRow(p.id);
+                            }}
+                            aria-expanded={open}
+                            aria-label={open ? "상세 닫기" : "상세 열기"}
+                            className="inline-flex size-7 items-center justify-center rounded-md text-fg-3 hover:bg-surface-1 hover:text-fg"
+                          >
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className={cx("transition-transform", open && "rotate-180")}
+                              aria-hidden
+                            >
+                              <path d="M6 9l6 6 6-6" />
+                            </svg>
+                          </button>
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="border-b border-line bg-surface-2">
+                          <td colSpan={9} className="px-5 pt-1 pb-4">
+                            <PostDetail
+                              post={p}
+                              toggling={togglingId === p.id}
+                              onToggleComments={() => toggleComments(p)}
+                              onOpenComments={() => setSentimentPost(p)}
+                              onOpenAutoReply={() => openAutoReply(p.id)}
+                            />
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td className="px-5 py-2.5">
-                      <div className="flex items-center gap-1.5 whitespace-nowrap">
-                        <button
-                          onClick={() => toggleComments(p)}
-                          disabled={togglingId === p.id}
-                          title="댓글 허용 여부"
-                          className={cx(
-                            "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[12px] font-medium",
-                            (p.is_comment_enabled ?? true) ? "border-line-strong text-fg-2 hover:bg-surface-2" : "border-warn/50 bg-warn/10 text-fg",
-                          )}
-                        >
-                          {togglingId === p.id && <Spinner className="size-3" />}
-                          {(p.is_comment_enabled ?? true) ? "댓글 켜짐" : "댓글 꺼짐"}
-                        </button>
-                        <button
-                          onClick={() => openAutoReply(p.id)}
-                          title={p.auto_reply ? (p.auto_reply.enabled ? "자동 응답 켜짐" : "자동 응답 꺼짐") : "자동 응답 설정"}
-                          className={cx(
-                            "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[12px] font-medium",
-                            p.auto_reply?.enabled ? "border-accent/50 bg-accent/10 text-fg" : "border-line-strong text-fg-2 hover:bg-surface-2",
-                          )}
-                        >
-                          <IconReply width={13} height={13} />
-                          자동 응답
-                          {p.auto_reply?.enabled && <span className="size-1.5 rounded-full bg-accent" aria-label="켜짐" />}
-                        </button>
-                        <a
-                          href={p.permalink}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="캡션 수정·삭제는 Instagram 앱에서"
-                          aria-label="Instagram 에서 열기 (수정·삭제)"
-                          className="inline-flex size-7 items-center justify-center rounded-md text-fg-3 hover:bg-surface-2 hover:text-fg"
-                        >
-                          <IconExternal width={13} height={13} />
-                        </a>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -349,7 +348,13 @@ function Posts() {
         <PostAutoReplyDialog
           post={editing}
           onClose={() => openAutoReply(null)}
-          onSaved={(rule) => patchPost(editing.id, { auto_reply: rule.id ? { id: rule.id, enabled: rule.enabled } : null })}
+          onSaved={(rule) =>
+            patchPost(editing.id, {
+              auto_reply: rule.id
+                ? { id: rule.id, enabled: rule.enabled, public_reply_enabled: rule.public_reply_enabled, dm_enabled: rule.dm_enabled }
+                : null,
+            })
+          }
         />
       )}
 
@@ -439,7 +444,8 @@ function PostAutoReplyDialog({
 
   useEffect(() => {
     // 기존 게시물에서 여는 건 '설정하려는' 의도이므로 새 규칙도 켜진 상태로 시작합니다.
-    if (rule.data) setForm(rule.data.exists ? autoReplyForm(rule.data) : { ...autoReplyForm(rule.data), enabled: true });
+    // 기존 게시물에서 여는 건 '설정하려는' 의도이므로 새 규칙은 답글을 켠 상태로 시작합니다.
+    if (rule.data) setForm(rule.data.exists ? autoReplyForm(rule.data) : { ...autoReplyForm(rule.data), public_reply_enabled: true });
   }, [rule.data]);
 
   const dirty = Boolean(rule.data && form && (!rule.data.exists || autoReplyDirty(rule.data, form)));
@@ -500,7 +506,7 @@ function PostAutoReplyDialog({
         </div>
       )}
       {form ? (
-        <AutoReplyFields form={form} onChange={setForm} published />
+        <AutoReplyFields form={form} onChange={setForm} />
       ) : rule.error ? (
         <Notice tone="bad">{rule.error.message}</Notice>
       ) : (
@@ -512,5 +518,102 @@ function PostAutoReplyDialog({
         </div>
       )}
     </Dialog>
+  );
+}
+
+/** 행을 펼쳤을 때 보이는 상세: 댓글 반응 + 관리 */
+function PostDetail({
+  post,
+  toggling,
+  onToggleComments,
+  onOpenComments,
+  onOpenAutoReply,
+}: {
+  post: IgPost;
+  toggling: boolean;
+  onToggleComments: () => void;
+  onOpenComments: () => void;
+  onOpenAutoReply: () => void;
+}) {
+  const commentsOn = post.is_comment_enabled ?? true;
+  const ar = post.auto_reply;
+  const analyzed = post.sentiment ? post.sentiment.positive + post.sentiment.neutral + post.sentiment.negative : 0;
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <section className="rounded-lg border border-line bg-surface-1 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-[13px] font-semibold">댓글 반응</h3>
+          {analyzed > 0 && (
+            <button onClick={onOpenComments} className="text-[12px] text-fg-3 hover:text-fg">
+              댓글 {analyzed}개 보기 →
+            </button>
+          )}
+        </div>
+        <div className="mt-3">
+          {post.sentiment && analyzed > 0 ? (
+            <SentimentBar counts={post.sentiment} height={10} showLabels />
+          ) : (
+            <p className="text-[12px] text-fg-3">
+              {post.comments_count ? "아직 분석 전입니다. 상단의 '댓글 분석'을 눌러 주세요." : "댓글이 없습니다."}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-surface-1 p-4">
+        <h3 className="text-[13px] font-semibold">관리</h3>
+        <dl className="mt-3 space-y-2.5 text-[13px]">
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-fg-2">댓글 허용</dt>
+            <dd>
+              <button
+                onClick={onToggleComments}
+                disabled={toggling}
+                className={cx(
+                  "inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-[12px] font-medium",
+                  commentsOn ? "border-line-strong text-fg-2 hover:bg-surface-2" : "border-warn/50 bg-warn/10 text-fg",
+                )}
+              >
+                {toggling && <Spinner className="size-3" />}
+                {commentsOn ? "켜짐 · 끄기" : "꺼짐 · 켜기"}
+              </button>
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-fg-2">
+              자동 응답
+              <span className="ml-1.5 text-[12px] text-fg-3">
+                {ar && ar.enabled ? autoReplySummary(ar) : ar ? "일시정지" : "설정 안 됨"}
+              </span>
+            </dt>
+            <dd>
+              <button
+                onClick={onOpenAutoReply}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-line-strong px-2.5 text-[12px] font-medium text-fg-2 hover:bg-surface-2"
+              >
+                <IconReply width={13} height={13} /> 설정
+              </button>
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-fg-2">
+              캡션 수정 · 삭제
+              <span className="ml-1.5 text-[12px] text-fg-3">API 미지원</span>
+            </dt>
+            <dd>
+              <a
+                href={post.permalink}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-fg-2 hover:bg-surface-2 hover:text-fg"
+              >
+                Instagram에서 <IconExternal width={12} height={12} />
+              </a>
+            </dd>
+          </div>
+        </dl>
+      </section>
+    </div>
   );
 }

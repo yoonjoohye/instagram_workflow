@@ -42,10 +42,25 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 _ADDED_COLUMNS = {
     "insight_snapshots": {"totals_synced": "INTEGER DEFAULT 0"},
     "auto_reply_rules": {
+        "public_reply_enabled": "INTEGER DEFAULT 1",
+        "dm_enabled": "INTEGER DEFAULT 0",
         "post_caption": "TEXT DEFAULT ''",
         "post_thumbnail": "TEXT DEFAULT ''",
         "post_permalink": "TEXT DEFAULT ''",
     },
+}
+
+
+# 컬럼이 새로 생길 때 한 번만 실행하는 값 채우기 (기존 규칙의 동작을 유지)
+_BACKFILL = {
+    ("auto_reply_rules", "public_reply_enabled"): (
+        "UPDATE auto_reply_rules SET public_reply_enabled = "
+        "CASE WHEN public_reply <> '' THEN 1 ELSE 0 END"
+    ),
+    ("auto_reply_rules", "dm_enabled"): (
+        "UPDATE auto_reply_rules SET dm_enabled = "
+        "CASE WHEN link_url <> '' OR link_message <> '' THEN 1 ELSE 0 END"
+    ),
 }
 
 
@@ -59,6 +74,8 @@ def init_db() -> None:
             for name, ddl in columns.items():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+                    if (table, name) in _BACKFILL:
+                        conn.execute(text(_BACKFILL[(table, name)]))
 
 
 def get_db() -> Iterator[Session]:

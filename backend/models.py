@@ -158,9 +158,11 @@ class AutoReplyRule(Base):
     )
     ig_media_id: Mapped[str] = mapped_column(String(64), default="", index=True)
 
-    enabled: Mapped[int] = mapped_column(Integer, default=1)
-    keywords: Mapped[str] = mapped_column(Text, default="")  # 쉼표 구분, 비우면 모든 댓글
-    public_reply: Mapped[str] = mapped_column(Text, default="")  # 비우면 공개 답글 생략
+    enabled: Mapped[int] = mapped_column(Integer, default=1)  # 규칙 전체 일시정지 스위치
+    keywords: Mapped[str] = mapped_column(Text, default="")  # (사용 안 함) 예전 키워드 필터
+    public_reply_enabled: Mapped[int] = mapped_column(Integer, default=1)
+    public_reply: Mapped[str] = mapped_column(Text, default="")  # 모든 댓글에 같은 문구로 답글
+    dm_enabled: Mapped[int] = mapped_column(Integer, default=0)
     dm_prompt: Mapped[str] = mapped_column(Text, default="")
     link_url: Mapped[str] = mapped_column(Text, default="")
     link_message: Mapped[str] = mapped_column(Text, default="")

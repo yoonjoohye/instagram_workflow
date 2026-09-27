@@ -122,7 +122,7 @@ export type IgPost = {
   like_count?: number;
   comments_count?: number;
   is_comment_enabled?: boolean;
-  auto_reply?: { id: number; enabled: boolean } | null;
+  auto_reply?: { id: number; enabled: boolean; public_reply_enabled: boolean; dm_enabled: boolean } | null;
   sentiment?: SentimentCounts | null;
   insights: Partial<
     Record<
@@ -148,9 +148,11 @@ export type AutoReplyRule = {
   exists: boolean;
   job_id: number | null;
   ig_media_id: string;
+  /** 규칙 전체 일시정지 스위치 (답글·DM 중 하나라도 켜면 저장 시 켜짐) */
   enabled: boolean;
-  keywords: string;
+  public_reply_enabled: boolean;
   public_reply: string;
+  dm_enabled: boolean;
   dm_prompt: string;
   link_url: string;
   link_message: string;
@@ -158,7 +160,10 @@ export type AutoReplyRule = {
   post?: { prompt: string; status: JobStatus; permalink: string; thumbnail_url: string };
 };
 
-export type AutoReplyInput = Omit<AutoReplyRule, "id" | "exists" | "job_id" | "ig_media_id" | "post">;
+export type AutoReplyInput = Pick<
+  AutoReplyRule,
+  "public_reply_enabled" | "public_reply" | "dm_enabled" | "dm_prompt" | "link_url" | "link_message" | "not_following_message"
+>;
 
 export type AutoReplyStatus = {
   auth_mode: "instagram" | "facebook";

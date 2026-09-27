@@ -279,7 +279,12 @@ def posts(
                 "insights": i,
                 "sentiment": sentiments.get(m["id"]),
                 "auto_reply": (
-                    {"id": rules[m["id"]].id, "enabled": bool(rules[m["id"]].enabled)}
+                    {
+                        "id": rules[m["id"]].id,
+                        "enabled": bool(rules[m["id"]].enabled),
+                        "public_reply_enabled": bool(rules[m["id"]].public_reply_enabled),
+                        "dm_enabled": bool(rules[m["id"]].dm_enabled),
+                    }
                     if m["id"] in rules
                     else None
                 ),

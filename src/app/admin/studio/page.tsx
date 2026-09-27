@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useMe } from "@/components/AdminShell";
-import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyValid } from "@/components/AutoReplyCard";
+import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconMusic, IconSpark } from "@/components/icons";
 import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Segmented, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
@@ -407,11 +407,7 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
   }
 
   async function publish() {
-    const arLine = arForm?.enabled
-      ? `\n댓글 자동 응답: 켜짐 (${arForm.keywords.trim() ? `키워드 ${arForm.keywords}` : "모든 댓글"}${
-          arForm.link_url.trim() || arForm.link_message.trim() ? ", 팔로워 DM 포함" : ""
-        })`
-      : "";
+    const arLine = arForm && autoReplyOn(arForm) ? `\n댓글 자동 응답: ${autoReplySummary(arForm)}` : "";
     if (!window.confirm(`@${me.username} 계정에 ${KIND_LABEL[job!.media_kind]}(으)로 지금 게시합니다.${arLine}\n계속할까요?`)) return;
     // 게시 전에 캡션과 자동 응답을 먼저 저장해, 게시되는 순간부터 자동 응답이 동작하게 합니다.
     if ((dirty || arDirty) && !(await save())) return;
@@ -521,7 +517,15 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
 
           {supportsAutoReply &&
             (arForm ? (
-              <AutoReplyFields form={arForm} onChange={setArForm} published={job.status === "published"} />
+              <div>
+                <p className="mb-2 text-[13px] font-semibold">
+                  댓글 자동 응답
+                  <span className="ml-1.5 text-[12px] font-normal text-fg-3">
+                    {job.status === "published" ? "바꾸면 새 댓글부터 적용됩니다." : "게시와 함께 설정됩니다."}
+                  </span>
+                </p>
+                <AutoReplyFields form={arForm} onChange={setArForm} />
+              </div>
             ) : arRule.error ? (
               <Notice tone="bad">자동 응답 설정을 불러오지 못했습니다: {arRule.error.message}</Notice>
             ) : (

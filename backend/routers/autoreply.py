@@ -22,9 +22,10 @@ def _rule_dict(rule: AutoReplyRule | None, job: GenerationJob | None = None) -> 
         "exists": rule is not None,
         "job_id": rule.job_id if rule else (job.id if job else None),
         "ig_media_id": rule.ig_media_id if rule else (job.ig_media_id if job else ""),
-        "enabled": bool(rule.enabled) if rule else True,
-        "keywords": rule.keywords if rule else "",
+        "enabled": bool(rule.enabled) if rule else False,
+        "public_reply_enabled": bool(rule.public_reply_enabled) if rule else True,
         "public_reply": rule.public_reply if rule else DEFAULTS["public_reply"],
+        "dm_enabled": bool(rule.dm_enabled) if rule else False,
         "dm_prompt": rule.dm_prompt if rule else DEFAULTS["dm_prompt"],
         "link_url": rule.link_url if rule else "",
         "link_message": rule.link_message if rule else DEFAULTS["link_message"],
@@ -51,9 +52,12 @@ def _rule_dict(rule: AutoReplyRule | None, job: GenerationJob | None = None) -> 
 
 
 def _apply(rule: AutoReplyRule, body: AutoReplyIn) -> None:
-    rule.enabled = int(body.enabled)
-    rule.keywords = ",".join(k.strip() for k in body.keywords.split(",") if k.strip())
+    # 두 스위치 중 하나라도 켜져 있으면 규칙이 동작합니다.
+    rule.enabled = int(body.public_reply_enabled or body.dm_enabled)
+    rule.keywords = ""  # 키워드 필터는 없앴습니다 — 모든 댓글에 반응
+    rule.public_reply_enabled = int(body.public_reply_enabled)
     rule.public_reply = body.public_reply
+    rule.dm_enabled = int(body.dm_enabled)
     rule.dm_prompt = body.dm_prompt
     rule.link_url = body.link_url.strip()
     rule.link_message = body.link_message

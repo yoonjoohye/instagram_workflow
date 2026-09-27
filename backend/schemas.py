@@ -30,9 +30,9 @@ class PublishIn(BaseModel):
 
 
 class AutoReplyIn(BaseModel):
-    enabled: bool = True
-    keywords: str = Field(default="", max_length=500)
+    public_reply_enabled: bool = True
     public_reply: str = Field(default="", max_length=2200)
+    dm_enabled: bool = False
     dm_prompt: str = Field(default="", max_length=1000)
     link_url: str = Field(default="", max_length=2000)
     link_message: str = Field(default="", max_length=1000)
