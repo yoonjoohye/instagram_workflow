@@ -111,20 +111,23 @@ def _text_of(data: dict) -> str:
 
 
 # ── 1) 주제 조사 (Google 검색) ────────────────────────────────────────
-_RESEARCH_PROMPT = """너는 인스타그램 게시물 리서처야. Google 검색으로 아래 주제를 조사해 게시물에 쓸 내용을 정리해.
+_RESEARCH_PROMPT = """너는 인스타그램 게시물 리서처야. Google 검색으로 아래 주제를 조사해, 사용자가 원하는 게시물을 뒷받침할 자료를 정리해.
+게시물의 컨셉과 형식은 사용자가 정한 [주제]와 [연출 방향]이 절대 기준이고, 너의 조사는 그 내용을 사실로 뒷받침하는 보조 역할이야.
 
-주제/컨셉: {prompt}
+[주제] {prompt}
+[연출 방향] {style}
 사용자가 준 확정 정보(그대로 신뢰): {notes}
 
+연출 방향이 요구하는 형식에 필요한 자료(예: 이벤트면 기간·조건, 비교형이면 비교 항목)를 우선 찾아.
 주제가 정보·방법·제품·서비스처럼 사실이 중요한 내용이면:
 1) 한 줄 요약  2) 핵심 사실 6~10개 (정의, 특징, 절차·방법, 조건·비용·주의사항, 최신 변경)  3) 독자가 궁금해할 질문 3개
 주제가 감성·일상·여행 기록처럼 분위기가 중요한 내용이면: 관련 배경 지식과 표현에 쓸 만한 사실 몇 줄만.
 한국어로, 확인된 사실만 쓰고 추측하지 마. 날짜가 중요한 정보에는 기준 시점을 적어."""
 
 
-def research(prompt: str, notes: str) -> tuple[dict[str, Any], str]:
+def research(prompt: str, notes: str, style: str = "") -> tuple[dict[str, Any], str]:
     """(조사 결과 {notes, sources}, 경고). 검색이 안 되면 빈 결과로 계속 진행합니다."""
-    parts = [{"text": _RESEARCH_PROMPT.format(prompt=prompt, notes=notes.strip() or "없음")}]
+    parts = [{"text": _RESEARCH_PROMPT.format(prompt=prompt, notes=notes.strip() or "없음", style=style.strip() or "없음")}]
     try:
         data = _gemini(settings.gemini_text_model, parts, {"temperature": 0.2}, tools=[{"googleSearch": {}}], timeout=55.0)
         text = _text_of(data)
@@ -176,18 +179,25 @@ def fill_template(template: str, parts: list[str], hashtags: list[str]) -> tuple
     return PLACEHOLDER.sub(repl, template).strip(), used_hashtags
 
 
-_PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터야. 사용자가 요청한 주제와 컨셉을 그대로 살려 게시물을 설계해.
+_PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터야. 사용자의 주제와 연출 방향을 그대로 실현하는 게시물을 설계해.
 정해진 구성이나 장수는 없어.
 
-주제/컨셉: {prompt}
-연출 방향 (최우선 — 반드시 지켜. 형식·그림체·구도·글자 표현을 이 요청대로 해): {style}
-사용자 확정 정보(그대로 사용, 바꾸지 마): {notes}
-※ 아래 캡션 양식 안에 적힌 사실(칸 밖 문장, '[추천인 정보: 코드 ABC123]'처럼 칸 이름 속 정보)도 모두 확정 정보야. 그대로 쓰고 바꾸지 마.
+━━ 1순위 · 절대 기준 (이미지, 이미지 속 글, 캡션 모두 여기에 맞춰. 어떤 것도 이걸 바꾸거나 무시하면 안 돼) ━━
+[주제] {prompt}
+[연출 방향] {style}
 
-첨부 사진: {n}장 (번호는 0부터 첨부 순서){refs}
+━━ 2순위 · 사용자 확정 정보 (그대로 사용, 바꾸지 마) ━━
+{notes}
+※ 아래 캡션 양식 안에 적힌 사실(칸 밖 문장, '[추천인 정보: 코드 ABC123]'처럼 칸 이름 속 정보)도 확정 정보야.
 
-조사 자료 (Google 검색 요약 — 정보가 필요한 경우에만 쓰고, 여기에 없는 사실은 지어내지 마):
+━━ 3순위 · 조사 자료 (Google 검색 요약 — 1순위를 뒷받침하는 사실로만 써. 컨셉·연출·형식을 바꾸는 근거로 쓰지 마. 여기 없는 사실은 지어내지 마) ━━
 {research}
+
+━━ 4순위 · 첨부 사진 {n}장 (번호는 0부터 첨부 순서) — 연출에 맞을 때만 써 ━━{refs}
+
+0) requirements: 먼저 [주제]와 [연출 방향]에서 사용자의 요구를 빠짐없이 하나씩 뽑아
+  (형식, 장별 지시, 그림체, 글자 표현, 말투, 강조할 내용 등. 예: '첫 장은 배경을 어둡게 하고 후킹 제목', '두 번째 장부터 손글씨 동그라미·화살표로 설명').
+  각 요구마다 how 에 어느 장(몇 번째)에 어떻게 반영했는지 구체적으로 적어. 반영하지 못한 요구가 없게 설계해.
 
 1) 형식(format) 정하기 — 주제·컨셉·연출 방향에 나온 형식을 그대로 따르고, 언급이 없으면 가장 잘 맞는 것을 골라:
   인스타툰/웹툰(캐릭터·말풍선 컷), 손글씨 메모(사진이나 종이 위 손글씨·동그라미·화살표 낙서), 인터뷰/Q&A, 이벤트·프로모션 포스터,
@@ -214,6 +224,7 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
   그 외 레이아웃이면 글자를 넣지 말라고 적고, overlay 는 아래쪽·center 는 가운데를 단순하게 비워 두라고 적어.
 
 캡션 규칙 (매우 중요)
+- 캡션의 말투·표현·강조점도 [주제]와 [연출 방향]을 따라. 조사 자료는 사실을 뒷받침할 때만 써.
 - 아래 캡션 양식에는 채워야 할 칸이 {k}개 있어: {names}
 - caption_parts 배열에 정확히 {k}개의 문자열을 칸 순서대로 넣어. 각 문자열은 해당 칸의 내용만 (칸 이름·대괄호·다른 칸 내용 금지).
 - 칸 이름의 지시를 그대로 지켜: 'N줄'이면 정확히 N줄(줄바꿈으로 구분), '설명'이면 설명, '방법'이면 단계별로 줄바꿈해서.
@@ -231,6 +242,14 @@ def _plan_schema(k: int) -> dict[str, Any]:
     return {
         "type": "OBJECT",
         "properties": {
+            "requirements": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {"requirement": {"type": "STRING"}, "how": {"type": "STRING"}},
+                    "required": ["requirement", "how"],
+                },
+            },
             "concept": {"type": "STRING"},
             "format": {"type": "STRING"},
             "art_style": {"type": "STRING"},
@@ -253,7 +272,7 @@ def _plan_schema(k: int) -> dict[str, Any]:
             "caption_parts": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": k, "maxItems": k},
             "hashtags": {"type": "ARRAY", "items": {"type": "STRING"}},
         },
-        "required": ["concept", "format", "art_style", "slides", "caption_parts", "hashtags"],
+        "required": ["requirements", "concept", "format", "art_style", "slides", "caption_parts", "hashtags"],
     }
 
 
@@ -361,6 +380,11 @@ def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
     if not slides:
         slides = fallback_plan(n, "")["slides"]
     return {
+        "requirements": [
+            {"requirement": _clip(r.get("requirement"), 200), "how": _clip(r.get("how"), 300)}
+            for r in (raw.get("requirements") or [])
+            if isinstance(r, dict) and r.get("requirement")
+        ][:20],
         "concept": _clip(raw.get("concept"), 200),
         "format": _clip(raw.get("format"), 60),
         "art_style": _clip(raw.get("art_style"), 400),
@@ -414,7 +438,10 @@ def _visual_prompt(
         lines.append(f"USER'S ART DIRECTION (highest priority, follow it exactly): {style.strip()}")
     if instruction.strip():
         lines.append(f"Revision request for this image (also highest priority): {instruction.strip()}")
-    lines.append(f"Instagram post concept: {topic}." + (f" Post format: {post_format}." if post_format else ""))
+    lines.append(
+        f"POST TOPIC (must be clearly conveyed, together with the art direction above): {topic}."
+        + (f" Post format: {post_format}." if post_format else "")
+    )
     if art_style:
         lines.append(f"Art style for every image in this post (keep it identical across images): {art_style}")
     if slide.get("visual"):

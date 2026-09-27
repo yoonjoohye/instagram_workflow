@@ -52,6 +52,7 @@ export type Job = {
   published_at: string | null;
   created_at: string;
   sources?: { title: string; uri: string }[];
+  requirements?: { requirement: string; how: string }[];
 };
 
 export type Quota = { used: number; total: number; remaining: number };

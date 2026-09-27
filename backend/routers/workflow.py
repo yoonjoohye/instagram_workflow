@@ -47,6 +47,8 @@ def _job_dict(job: GenerationJob) -> dict:
         "created_at": job.created_at.isoformat(),
         # 게시물 만들기: Gemini 가 주제 조사에 참고한 출처
         "sources": (job.plan or {}).get("sources", []) if isinstance(job.plan, dict) else [],
+        # 게시물 만들기: 주제·연출 방향에서 뽑은 요구사항과 반영 위치 (검수용)
+        "requirements": (job.plan or {}).get("requirements", []) if isinstance(job.plan, dict) else [],
     }
 
 

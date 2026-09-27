@@ -123,12 +123,12 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         setStep({ label: "참고 이미지 올리는 중", done: i, total: refs.length });
         refIds.push(await uploadPhoto(refs[i].file));
       }
-      setStep({ label: "Gemini가 주제를 검색해 조사하는 중", done: 0, total: 1 });
+      setStep({ label: "Gemini가 주제·연출 방향에 맞는 자료를 검색하는 중", done: 0, total: 1 });
       const research = await api<Research>("/cardnews/research", {
         method: "POST",
-        json: { prompt: prompt.trim(), caption_format: format },
+        json: { prompt: prompt.trim(), caption_format: format, style },
       });
-      setStep({ label: "Gemini가 조사 내용·사진으로 구성과 연출을 짜는 중", done: 0, total: 1 });
+      setStep({ label: "Gemini가 연출 방향대로 구성·이미지·글을 설계하는 중", done: 0, total: 1 });
       const plan = await api<{ job: Job; slides: { role: string }[]; warning: string }>("/cardnews/plan", {
         method: "POST",
         json: {
@@ -184,6 +184,67 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             disabled={busy}
           />
         </Field>
+
+        <div className="space-y-2">
+          <Field
+            label="연출 방향"
+            htmlFor="cn-style"
+            hint="주제와 함께 가장 우선하는 기준이에요 — 이미지와 글 모두 이대로 만들어요. 형식(인스타툰·손글씨 메모·인터뷰·이벤트 포스터 등), 장별 지시, 그림체, 글자 표현, 말투를 자세히 적을수록 정확해져요. 조사 자료는 이 내용을 뒷받침하는 데만 써요."
+          >
+            <textarea
+              id="cn-style"
+              rows={6}
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              placeholder={"예) 인스타툰 웹툰 형식. 귀여운 캐릭터가 말풍선으로 설명하고 파스텔 톤으로.\n첫 장은 배경을 어둡게 하고 후킹 제목 크게.\n두 번째 장부터는 사진 위에 아이패드 손글씨로 동그라미·화살표를 그려 설명.\n말투는 친구한테 알려주듯 반말로."}
+              className={cx(inputClass, "resize-y leading-relaxed")}
+              disabled={busy}
+            />
+          </Field>
+          <div className="flex flex-wrap items-center gap-2">
+            {refs.map((r, i) => (
+              <span key={r.key} className="group relative size-14 overflow-hidden rounded-md border border-line">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r.preview} alt="" className="size-full object-cover" />
+                {!busy && (
+                  <button
+                    type="button"
+                    onClick={() => setRefs((prev) => prev.filter((_, k) => k !== i))}
+                    className="absolute inset-0 hidden items-center justify-center bg-black/55 text-[12px] text-white group-hover:flex"
+                    aria-label="참고 이미지 삭제"
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            ))}
+            {refs.length < MAX_REFS && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => refInput.current?.click()}
+                className="inline-flex h-14 items-center rounded-md border border-dashed border-line-strong px-3 text-[12px] text-fg-2 hover:bg-surface-2"
+              >
+                + 참고 이미지 ({refs.length}/{MAX_REFS})
+              </button>
+            )}
+            <input
+              ref={refInput}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) addRefs(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          <p className="text-[12px] text-fg-3">
+            참고 이미지는 색감·조명·구도·분위기만 따라가요. 게시물 이미지로 들어가지는 않아요.
+          </p>
+        </div>
+
 
         <div
           onDragOver={(e) => {
@@ -247,65 +308,6 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         </div>
         <p className="-mt-3 text-[12px] text-fg-3">사진은 선택이에요. Gemini가 컨셉에 맞는 사진만 골라 쓰고, 필요한 장면은 글 내용대로 새로 만들어요.</p>
 
-
-        <div className="space-y-2">
-          <Field
-            label="연출 방향 (선택)"
-            htmlFor="cn-style"
-            hint="형식(인스타툰·손글씨 메모·인터뷰·이벤트 포스터·카드뉴스 등)과 그림체·구도를 적으면 최우선으로 따라요. 말풍선·손글씨처럼 글자가 그림의 일부인 형식은 이미지 안에 직접 그려요. 비워두면 Gemini가 컨셉에 맞게 정해요."
-          >
-            <input
-              id="cn-style"
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-              placeholder="예) 인스타툰 웹툰으로, 귀여운 캐릭터가 말풍선으로 설명 / 사진 위에 아이패드 손글씨·동그라미·화살표로 메모"
-              className={inputClass}
-              disabled={busy}
-            />
-          </Field>
-          <div className="flex flex-wrap items-center gap-2">
-            {refs.map((r, i) => (
-              <span key={r.key} className="group relative size-14 overflow-hidden rounded-md border border-line">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={r.preview} alt="" className="size-full object-cover" />
-                {!busy && (
-                  <button
-                    type="button"
-                    onClick={() => setRefs((prev) => prev.filter((_, k) => k !== i))}
-                    className="absolute inset-0 hidden items-center justify-center bg-black/55 text-[12px] text-white group-hover:flex"
-                    aria-label="참고 이미지 삭제"
-                  >
-                    ✕
-                  </button>
-                )}
-              </span>
-            ))}
-            {refs.length < MAX_REFS && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => refInput.current?.click()}
-                className="inline-flex h-14 items-center rounded-md border border-dashed border-line-strong px-3 text-[12px] text-fg-2 hover:bg-surface-2"
-              >
-                + 참고 이미지 ({refs.length}/{MAX_REFS})
-              </button>
-            )}
-            <input
-              ref={refInput}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={(e) => {
-                if (e.target.files) addRefs(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </div>
-          <p className="text-[12px] text-fg-3">
-            참고 이미지는 색감·조명·구도·분위기만 따라가요. 게시물 이미지로 들어가지는 않아요.
-          </p>
-        </div>
 
         <Field
           label="캡션 양식 · 꼭 넣을 정보 (선택)"

@@ -74,6 +74,7 @@ class ResearchIn(BaseModel):
     prompt: str = Field(min_length=2, max_length=2000)
     notes: str = Field(default="", max_length=3000)  # (예전 필드) 사용자 확정 정보
     caption_format: str = Field(default="", max_length=2000)  # 캡션 양식 — 안에 적힌 사실도 확정 정보
+    style: str = Field(default="", max_length=2000)  # 연출 방향 — 조사 방향도 여기에 맞춤
 
 
 class Source(BaseModel):
@@ -85,7 +86,7 @@ class PlanIn(BaseModel):
     upload_ids: list[str] = Field(default_factory=list, max_length=svc.MAX_PHOTOS)  # 없으면 전부 새로 생성
     prompt: str = Field(min_length=2, max_length=2000)
     tone: str = Field(default="", max_length=64)  # (사용 안 함) 예전 요청 호환용
-    style: str = Field(default="", max_length=300)  # 연출 방향 (선택)
+    style: str = Field(default="", max_length=2000)  # 연출 방향 — 주제와 함께 절대 기준
     caption_format: str = Field(default="", max_length=2000)
     notes: str = Field(default="", max_length=3000)
     research_notes: str = Field(default="", max_length=8000)
@@ -116,7 +117,9 @@ def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
 def research(body: ResearchIn, account: Account = Depends(current_account)) -> dict:
     """Gemini + Google 검색으로 주제를 조사합니다 (Vercel 시간 제한 때문에 설계와 나눠 호출)."""
     # 캡션 양식에 적은 사실(추천인 코드 등)도 확정 정보로 조사에 넘깁니다.
-    result, warning = svc.research(body.prompt, "\n".join(p for p in (body.notes, body.caption_format) if p.strip()))
+    result, warning = svc.research(
+        body.prompt, "\n".join(p for p in (body.notes, body.caption_format) if p.strip()), body.style
+    )
     return {**result, "warning": warning}
 
 

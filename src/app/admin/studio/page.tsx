@@ -233,6 +233,22 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
           }
         />
 
+        {!!job.requirements?.length && (
+          <details open className="mt-4 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2">
+            <summary className="cursor-pointer text-[13px] font-medium text-fg">
+              연출 요구사항 반영 {job.requirements.length}개 — Gemini가 이해한 요청과 반영 위치
+            </summary>
+            <ul className="mt-2 space-y-1.5">
+              {job.requirements.map((r, i) => (
+                <li key={i} className="text-[12px] leading-relaxed">
+                  <span className="font-medium text-fg">✓ {r.requirement}</span>
+                  <span className="block text-fg-3">→ {r.how}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
         {!!job.sources?.length && (
           <details className="mt-4 rounded-lg border border-line px-3 py-2">
             <summary className="cursor-pointer text-[13px] font-medium text-fg-2">
