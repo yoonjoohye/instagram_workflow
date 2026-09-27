@@ -8,7 +8,8 @@ import { IconRefresh } from "@/components/icons";
 import { Avatar, Button, Card, Notice, PageHeader, Segmented, Skeleton } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { fmtInt, fmtRelative, METRIC_HINT, METRIC_LABEL, postKind } from "@/lib/format";
-import type { Audience, Breakdown, IgPost, ListOf, MetricKey, Overview, Visitor } from "@/lib/types";
+import type { Audience, Breakdown, IgPost, ListOf, MetricKey, Overview, SentimentOverview, Visitor } from "@/lib/types";
+import { SentimentBar } from "@/components/sentiment";
 
 const TILE_METRICS: MetricKey[] = ["reach", "profile_views", "accounts_engaged", "total_interactions", "website_clicks"];
 
@@ -84,8 +85,9 @@ export default function DashboardPage() {
         <RecentVisitorsCard visitors={visitors.data?.data} loading={visitors.loading && !visitors.data} />
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <AudienceCard />
+        <SentimentCard />
       </div>
 
       {overview.data?.note && <p className="mt-6 text-[12px] leading-relaxed text-fg-3">{overview.data.note}</p>}
@@ -341,6 +343,50 @@ function AudienceCard() {
             label: breakdown === "gender" ? (GENDER_LABEL[r.label] ?? r.label) : r.label,
           }))}
         />
+      )}
+    </Card>
+  );
+}
+
+function SentimentCard() {
+  const overview = useApi<SentimentOverview>("/sentiment/overview");
+  const t = overview.data?.totals;
+  const n = t ? t.positive + t.neutral + t.negative : 0;
+  return (
+    <Card
+      title="댓글 반응"
+      subtitle={
+        overview.data
+          ? `분석된 댓글 ${fmtInt(n)}개 · ${overview.data.engine === "gemini" ? `Gemini(${overview.data.model})` : "키워드·이모지 규칙"}로 분류`
+          : "긍정 · 보통 · 부정"
+      }
+      action={
+        <Link href="/admin/posts" className="text-[13px] text-fg-3 hover:text-fg">
+          게시물별 보기 →
+        </Link>
+      }
+    >
+      {overview.loading && !overview.data ? (
+        <Skeleton className="h-16" />
+      ) : overview.error ? (
+        <Notice tone="bad">{overview.error.message}</Notice>
+      ) : !t || n === 0 ? (
+        <p className="py-6 text-center text-sm text-fg-3">
+          아직 분석된 댓글이 없습니다.{" "}
+          <Link href="/admin/posts" className="underline">
+            게시물 성과에서 &lsquo;댓글 분석&rsquo;
+          </Link>
+          을 눌러 주세요.
+        </p>
+      ) : (
+        <>
+          <p className="pnum text-3xl font-semibold tracking-tight">
+            {Math.round((t.positive / n) * 100)}%<span className="ml-2 text-[13px] font-normal text-fg-3">긍정 비율</span>
+          </p>
+          <div className="mt-4">
+            <SentimentBar counts={t} height={14} showLabels />
+          </div>
+        </>
       )}
     </Card>
   );

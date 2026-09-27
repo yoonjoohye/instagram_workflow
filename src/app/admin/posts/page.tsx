@@ -4,10 +4,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconRefresh, IconReply, IconSpark } from "@/components/icons";
+import { SENTIMENTS, SentimentBar, SentimentDialog } from "@/components/sentiment";
 import { Badge, Button, Card, cx, Dialog, Empty, Notice, PageHeader, Segmented, Skeleton, Spinner } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
 import { fmtCompact, fmtInt, fmtPct, fmtRelative, postKind } from "@/lib/format";
-import type { AutoReplyInput, AutoReplyRule, IgPost, Job, ListOf } from "@/lib/types";
+import type { AutoReplyInput, AutoReplyRule, IgPost, Job, ListOf, SentimentSync } from "@/lib/types";
 
 type SortKey = "timestamp" | "reach" | "views" | "likes" | "comments" | "saved" | "shares" | "rate";
 
@@ -54,6 +55,22 @@ function Posts() {
   const jobs = useApi<ListOf<Job>>("/workflow/jobs?limit=100");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "timestamp", desc: true });
   const [togglingId, setTogglingId] = useState<string>();
+  const [sentimentPost, setSentimentPost] = useState<IgPost | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<SentimentSync>();
+
+  async function analyze() {
+    setAnalyzing(true);
+    setActionError(undefined);
+    try {
+      setAnalysis(await api<SentimentSync>(`/sentiment/sync?media_limit=${limit}`, { method: "POST" }));
+      posts.reload();
+    } catch (e) {
+      setActionError(toApiError(e).message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
   const [actionError, setActionError] = useState<string>();
   // 자동 응답 페이지의 '수정' 링크가 ?autoreply=<media_id> 로 바로 열 수 있게 합니다.
   const params = useSearchParams();
@@ -134,6 +151,9 @@ function Posts() {
                 { value: 50, label: "50개" },
               ]}
             />
+            <Button size="sm" onClick={analyze} loading={analyzing}>
+              댓글 분석
+            </Button>
             <Button variant="ghost" size="sm" onClick={posts.reload} loading={posts.loading}>
               {!posts.loading && <IconRefresh />} 새로고침
             </Button>
@@ -144,9 +164,27 @@ function Posts() {
       <div className="mb-6">
         <Notice tone="neutral" title="기존 게시물에서 할 수 있는 것">
           여기서는 <b>댓글 켜기/끄기</b>와 <b>댓글 자동 응답</b>을 바꿀 수 있습니다. 캡션 수정과 삭제는 Instagram API 가 지원하지 않아
-          (삭제는 Facebook 페이지 연결 계정만 가능) 각 게시물의 &lsquo;Instagram&rsquo; 링크에서 앱으로 처리해 주세요.
+          (삭제는 Facebook 페이지 연결 계정만 가능) 각 게시물의 ↗ 링크로 Instagram 에서 처리해 주세요.
         </Notice>
       </div>
+
+      {analysis && (
+        <div className="mb-6">
+          <Notice
+            tone={analysis.last_error ? "warn" : "good"}
+            title={`게시물 ${analysis.posts}개 · 댓글 ${analysis.comments_seen}개 확인, 새로 ${analysis.classified}개 분류`}
+            onClose={() => setAnalysis(undefined)}
+          >
+            {analysis.engine === "gemini"
+              ? analysis.last_error
+                ? `Gemini 호출 실패로 규칙 기반으로 분류했습니다: ${analysis.last_error}`
+                : `Gemini(${analysis.model})로 분류했습니다.`
+              : "GEMINI_API_KEY 가 없어 키워드·이모지 규칙으로 분류했습니다."}
+            {analysis.comments_seen === 0 &&
+              " 댓글이 조회되지 않았다면 Meta 앱이 개발 모드라 다른 사용자의 댓글이 제공되지 않는 상태일 수 있습니다."}
+          </Notice>
+        </div>
+      )}
 
       {actionError && (
         <div className="mb-6">
@@ -182,7 +220,7 @@ function Posts() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1080px] text-[13px]">
+            <table className="w-full min-w-[1100px] text-[13px]">
               <thead className="border-b border-line text-left text-fg-3">
                 <tr>
                   <SortTh label="게시물" active={sort.key === "timestamp"} desc={sort.desc} onClick={() => onSort("timestamp")} left />
@@ -196,6 +234,7 @@ function Posts() {
                       onClick={() => onSort(c.key)}
                     />
                   ))}
+                  <th className="px-3 py-2.5 text-left font-medium" title="긍정 · 보통 · 부정 (분석된 댓글 기준)">댓글 반응</th>
                   <th className="px-5 py-2.5 text-left font-medium">관리</th>
                 </tr>
               </thead>
@@ -241,6 +280,24 @@ function Posts() {
                       </td>
                     ))}
                     <td className="px-3 py-2.5 text-right font-medium">{fmtPct(metric(p, "rate"))}</td>
+                    <td className="w-32 px-3 py-2.5">
+                      {p.sentiment ? (
+                        <button onClick={() => setSentimentPost(p)} className="block w-full rounded-md p-1 text-left hover:bg-surface-2">
+                          <SentimentBar counts={p.sentiment} />
+                          <span className="tnum mt-1 flex gap-2 text-[11px] whitespace-nowrap text-fg-2">
+                            {SENTIMENTS.map((x) => (
+                              <span key={x.key} className="flex items-center gap-1" title={x.label}>
+                                <span className="inline-block size-1.5 rounded-full" style={{ background: x.color }} />
+                                <span className="sr-only">{x.label}</span>
+                                {p.sentiment![x.key]}
+                              </span>
+                            ))}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="text-[12px] text-fg-3">{p.comments_count ? "분석 전" : "댓글 없음"}</span>
+                      )}
+                    </td>
                     <td className="px-5 py-2.5">
                       <div className="flex items-center gap-1.5 whitespace-nowrap">
                         <button
@@ -257,22 +314,25 @@ function Posts() {
                         </button>
                         <button
                           onClick={() => openAutoReply(p.id)}
+                          title={p.auto_reply ? (p.auto_reply.enabled ? "자동 응답 켜짐" : "자동 응답 꺼짐") : "자동 응답 설정"}
                           className={cx(
                             "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[12px] font-medium",
                             p.auto_reply?.enabled ? "border-accent/50 bg-accent/10 text-fg" : "border-line-strong text-fg-2 hover:bg-surface-2",
                           )}
                         >
                           <IconReply width={13} height={13} />
-                          {p.auto_reply ? (p.auto_reply.enabled ? "자동 응답 켜짐" : "자동 응답 꺼짐") : "자동 응답"}
+                          자동 응답
+                          {p.auto_reply?.enabled && <span className="size-1.5 rounded-full bg-accent" aria-label="켜짐" />}
                         </button>
                         <a
                           href={p.permalink}
                           target="_blank"
                           rel="noreferrer"
                           title="캡션 수정·삭제는 Instagram 앱에서"
-                          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-fg-3 hover:bg-surface-2 hover:text-fg"
+                          aria-label="Instagram 에서 열기 (수정·삭제)"
+                          className="inline-flex size-7 items-center justify-center rounded-md text-fg-3 hover:bg-surface-2 hover:text-fg"
                         >
-                          Instagram <IconExternal width={12} height={12} />
+                          <IconExternal width={13} height={13} />
                         </a>
                       </div>
                     </td>
@@ -283,6 +343,8 @@ function Posts() {
           </div>
         )}
       </Card>
+      {sentimentPost && <SentimentDialog post={sentimentPost} onClose={() => setSentimentPost(null)} />}
+
       {editing && (
         <PostAutoReplyDialog
           post={editing}
@@ -319,7 +381,7 @@ function SortTh({
 }) {
   return (
     <th
-      className={cx("py-2.5 font-medium", left ? "px-5 text-left" : "px-3 text-right", "last:pr-5")}
+      className={cx("py-2.5 font-medium whitespace-nowrap", left ? "px-5 text-left" : "px-3 text-right", "last:pr-5")}
       aria-sort={active ? (desc ? "descending" : "ascending") : "none"}
     >
       <button onClick={onClick} title={hint || undefined} className={cx("inline-flex items-center gap-1 hover:text-fg", active && "text-fg")}>

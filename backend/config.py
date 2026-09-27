@@ -39,6 +39,10 @@ class Settings(BaseSettings):
 
     cron_secret: str = ""
 
+    # 댓글 감정 분석(긍정/보통/부정). 비워두면 한국어 키워드·이모지 규칙으로 분류합니다.
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-flash-lite-latest"
+
     # Meta Webhooks 구독 시 '인증 토큰' 칸에 넣는 값과 같아야 합니다 (아무 임의 문자열).
     webhook_verify_token: str = ""
 

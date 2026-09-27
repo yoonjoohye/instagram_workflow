@@ -22,7 +22,7 @@ from ..config import settings
 from ..db import get_db
 from ..deps import graph_for
 from ..models import Account
-from ..services import autoreply
+from ..services import autoreply, sentiment
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 log = logging.getLogger(__name__)
@@ -70,12 +70,23 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> dict:
             for change in entry.get("changes", []):
                 if change.get("field") != "comments":
                     continue
+                value = change.get("value") or {}
                 try:
-                    results.append(autoreply.handle_comment(db, account, client, change.get("value") or {}))
+                    results.append(autoreply.handle_comment(db, account, client, value))
                 except Exception:  # noqa: BLE001
                     log.exception("comment webhook failed")
                     db.rollback()
                     results.append("error")
+                try:  # 새 댓글은 들어오는 즉시 감정도 분류해 둡니다.
+                    sentiment.store(
+                        db,
+                        account,
+                        str((value.get("media") or {}).get("id") or ""),
+                        [{**value, "username": (value.get("from") or {}).get("username", "")}],
+                    )
+                except Exception:  # noqa: BLE001
+                    log.exception("sentiment on webhook failed")
+                    db.rollback()
             for event in entry.get("messaging", []):
                 try:
                     results.append(autoreply.handle_message(db, account, client, event))

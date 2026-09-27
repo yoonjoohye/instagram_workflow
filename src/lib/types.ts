@@ -123,6 +123,7 @@ export type IgPost = {
   comments_count?: number;
   is_comment_enabled?: boolean;
   auto_reply?: { id: number; enabled: boolean } | null;
+  sentiment?: SentimentCounts | null;
   insights: Partial<
     Record<
       | "reach"
@@ -181,4 +182,23 @@ export type AutoReplyLog = {
   error: string;
   created_at: string;
   updated_at: string;
+};
+
+export type Sentiment = "positive" | "neutral" | "negative";
+export type SentimentCounts = Record<Sentiment, number>;
+
+export type SentimentEngine = { engine: "gemini" | "rules"; model: string; last_error: string };
+
+export type SentimentOverview = SentimentEngine & { totals: SentimentCounts };
+
+export type SentimentSync = SentimentEngine & { posts: number; comments_seen: number; classified: number };
+
+export type SentimentComment = {
+  comment_id: string;
+  username: string;
+  text: string;
+  sentiment: Sentiment;
+  reason: string;
+  classified_by: "gemini" | "rules";
+  commented_at: string | null;
 };

@@ -201,3 +201,24 @@ class CommentReply(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class CommentSentiment(Base):
+    """댓글별 감정 분류 결과. Instagram API 는 감정 값을 주지 않아 직접 분류해 저장합니다."""
+
+    __tablename__ = "comment_sentiments"
+    __table_args__ = (Index("ix_sentiment_account_media", "account_id", "ig_media_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    comment_id: Mapped[str] = mapped_column(String(64), unique=True)
+    ig_media_id: Mapped[str] = mapped_column(String(64), default="")
+    username: Mapped[str] = mapped_column(String(128), default="")
+    text: Mapped[str] = mapped_column(Text, default="")
+    commented_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+    sentiment: Mapped[str] = mapped_column(String(16), default="")  # positive | neutral | negative
+    reason: Mapped[str] = mapped_column(Text, default="")
+    classified_by: Mapped[str] = mapped_column(String(32), default="")  # gemini | rules
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

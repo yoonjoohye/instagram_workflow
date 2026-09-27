@@ -15,6 +15,7 @@ from ..models import Account, AutoReplyRule, InsightSnapshot, KnownVisitor
 from ..schemas import CommentsToggle
 from ..security import encrypt
 from ..services import insights as svc
+from ..services import sentiment as sentiment_svc
 from ..services.meta_graph import GraphError
 
 router = APIRouter(tags=["insights"])
@@ -270,11 +271,13 @@ def posts(
             )
         ).all()
     }
+    sentiments = sentiment_svc.counts_by_media(db, account)
     return {
         "data": [
             {
                 **m,
                 "insights": i,
+                "sentiment": sentiments.get(m["id"]),
                 "auto_reply": (
                     {"id": rules[m["id"]].id, "enabled": bool(rules[m["id"]].enabled)}
                     if m["id"] in rules
@@ -325,6 +328,7 @@ def cron_sync(request: Request, db: Session = Depends(get_db)) -> dict:
                 account.followers_count = profile.get("followers_count", 0) or 0
                 _persist_reach(db, account, series)
                 _backfill_day_totals(db, account, client, days=30, limit=10)
+                sentiment_svc.sync(db, account, client, media_limit=12)
                 _persist_visitors(db, account, svc.interacting_accounts(client, account.ig_user_id))
             synced += 1
         except Exception as exc:  # 한 계정 실패가 전체를 막지 않도록

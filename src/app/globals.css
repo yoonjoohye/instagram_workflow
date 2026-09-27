@@ -31,6 +31,11 @@
 
   --accent: #4a3aa7;
   --on-accent: #ffffff;
+
+  /* 댓글 감정: 발산형 — 긍정 파랑 ↔ 부정 빨강, 보통은 회색 */
+  --sent-pos: #2a78d6;
+  --sent-neu: #cfcec8;
+  --sent-neg: #e34948;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -60,6 +65,10 @@
 
     --accent: #9085e9;
     --on-accent: #121211;
+
+    --sent-pos: #3987e5;
+    --sent-neu: #56554f;
+    --sent-neg: #e66767;
   }
 }
 
@@ -83,6 +92,9 @@
   --status-critical: #e66767;
   --accent: #9085e9;
   --on-accent: #121211;
+  --sent-pos: #3987e5;
+  --sent-neu: #56554f;
+  --sent-neg: #e66767;
 }
 
 /* 토큰을 Tailwind 유틸리티(bg-surface-1, text-fg-2 …)로 노출 */
