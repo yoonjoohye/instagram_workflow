@@ -100,6 +100,8 @@ class RenderIn(BaseModel):
     instruction: str | None = Field(default=None, max_length=1000)  # 이 이미지만의 프롬프트
     # True 면 지금 이미지(글 얹기 전)에서 요청한 부분만 고치고, False 면 원본 사진으로 처음부터 다시 만듭니다.
     from_current: bool = False
+    # 검수 화면에서 직접 요청한 수정이면 True — 이미지 연출이 실패했을 때 기본 편집본으로 덮어쓰지 않고 오류를 알립니다.
+    strict: bool = False
 
 
 def _blobs(db: Session, account: Account, ids: list[str]) -> list[MediaBlob]:
@@ -225,12 +227,24 @@ def render_slide(
     instruction = (body.instruction or "").strip() if body else ""
     assets = list(job.assets or [])
     prev_meta = (assets[index].get("meta") or {}) if index < len(assets) else {}
-    current = db.get(MediaBlob, prev_meta.get("visual_id") or "") if body and body.from_current else None
-    if body and body.from_current and not instruction:
+    from_current = bool(body and body.from_current)
+    if from_current and not instruction:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "무엇을 고칠지 적어 주세요.")
-    if current is not None and current.account_id == account.id:
+    # 글이 이미 들어간 이미지(예전 작업이거나 이전에 완성본을 고친 경우)는 그 위에 글을 다시 얹지 않습니다.
+    baked = bool(prev_meta.get("text_baked"))
+    current = db.get(MediaBlob, prev_meta.get("visual_id") or "") if from_current else None
+    if from_current and current is None:
+        # 글 얹기 전 이미지가 없는 예전 이미지: 완성본에서 바로 고칩니다.
+        slide_id = (assets[index].get("url") or "").rsplit("/media/", 1)[-1].removesuffix(".jpg")
+        current, baked = db.get(MediaBlob, slide_id), True
+        if current is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "고칠 이미지를 찾지 못했습니다. '처음부터 다시'로 만들어 주세요.")
+    if current is not None and current.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "고칠 이미지를 찾지 못했습니다.")
+    if current is not None:
         edited, engine = svc.edit_visual(current.data, instruction, aspect=svc.ASPECT[slide["role"]])
     else:
+        baked = False
         references = [b.data for b in _blobs(db, account, job.plan.get("reference_ids") or [])]
         edited, engine = svc.render_visual(
             sources,
@@ -243,10 +257,16 @@ def render_slide(
             post_format=job.plan.get("format", ""),
             font=job.plan.get("font", ""),
         )
+    if body and body.strict and engine.startswith("basic"):
+        # 사용자가 요청한 수정이 적용되지 않았는데 조용히 같은/보정본 이미지로 바꾸지 않습니다.
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "이미지를 수정하지 못했습니다. " + _image_failure_hint(engine))
     if slide["role"] == "designed" and engine.startswith("basic") and slide.get("image_text"):
         # 이미지 생성이 실패하면 그림 속 글자(말풍선·손글씨)가 사라지므로 서버 글자로라도 내용을 살립니다.
         slide = {**slide, "role": "overlay", "title": slide["image_text"], "body": ""}
-    card = svc.compose(edited, slide, accent=job.plan.get("accent", "#6c5ce7"), font=job.plan.get("font", svc.DEFAULT_FONT))
+    if baked:
+        card = svc.to_jpeg(svc.cover_fit(edited, svc.SIZE), 92)
+    else:
+        card = svc.compose(edited, slide, accent=job.plan.get("accent", "#6c5ce7"), font=job.plan.get("font", svc.DEFAULT_FONT))
     blob = _save_blob(db, account, card, *svc.SIZE, kind="slide")
     # 글을 얹기 전 이미지도 보관해 '지금 이미지에서 고치기'에 씁니다.
     vw, vh = svc.image_size(edited)
@@ -271,12 +291,26 @@ def render_slide(
             "instruction": instruction or slide.get("visual", ""),
             "prompt": instruction,  # 사용자가 이 이미지에 적은 프롬프트
             "visual_id": visual_blob.id,
+            "text_baked": baked,
         },
     }
     job.assets = assets
     flag_modified(job, "assets")
     db.commit()
     return {"index": index, "asset": assets[index], "engine": engine}
+
+
+def _image_failure_hint(engine: str) -> str:
+    reason = engine.removeprefix("basic (").removesuffix(")")
+    low = reason.lower()
+    if "quota" in low or "exhausted" in low:
+        return (
+            "Gemini 이미지 모델 사용 한도가 없습니다 (무료 등급은 이미지 생성 한도가 0). "
+            "Google AI Studio 에서 결제를 설정해 유료 등급으로 바꿔야 이미지 연출·생성·수정이 동작합니다."
+        )
+    if "not found" in low or "not supported" in low:
+        return "설정한 Gemini 이미지 모델을 쓸 수 없습니다. GEMINI_IMAGE_MODEL 을 확인하세요."
+    return f"원인: {reason[:200]}"
 
 
 @router.post("/cardnews/{job_id}/finalize")
@@ -289,17 +323,7 @@ def finalize(job_id: int, account: Account = Depends(current_account), db: Sessi
     failed = [a["meta"].get("engine", "") for a in job.assets if str(a["meta"].get("engine", "")).startswith("basic")]
     notes = [job.error] if job.error else []
     if failed:
-        reason = failed[0].removeprefix("basic (").removesuffix(")")
-        low = reason.lower()
-        if "quota" in low or "exhausted" in low:
-            hint = (
-                "Gemini 이미지 모델 사용 한도가 없습니다 (무료 등급은 이미지 생성 한도가 0). "
-                "Google AI Studio 에서 결제를 설정해 유료 등급으로 바꿔야 이미지 연출·생성이 동작합니다."
-            )
-        elif "not found" in low or "not supported" in low:
-            hint = "설정한 Gemini 이미지 모델을 쓸 수 없습니다. GEMINI_IMAGE_MODEL 을 확인하세요."
-        else:
-            hint = f"원인: {reason[:200]}"
+        hint = _image_failure_hint(failed[0])
         notes.append(
             f"{len(failed)}/{len(job.assets)}장은 이미지 생성에 실패해 원본 사진 보정(또는 빈 배경)으로 대신 만들었습니다. {hint}"
         )

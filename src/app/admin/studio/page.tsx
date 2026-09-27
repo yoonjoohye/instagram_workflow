@@ -224,7 +224,7 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
               ? async (i, instruction, fromCurrent) => {
                   await api(`/cardnews/${job.id}/slides/${i}`, {
                     method: "POST",
-                    json: { instruction: instruction || null, from_current: fromCurrent },
+                    json: { instruction: instruction || null, from_current: fromCurrent, strict: true },
                   });
                   onChange(await api<Job>(`/workflow/jobs/${job.id}`));
                 }
@@ -470,25 +470,26 @@ function MediaItem({
   onRedo?: RedoFn;
   onError: (message?: string) => void;
 }) {
-  const canEditCurrent = typeof a.meta?.visual_id === "string";
+  const canEditCurrent = a.type === "image" && Boolean(a.url);
   const lastPrompt = typeof a.meta?.prompt === "string" ? a.meta.prompt : "";
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [fromCurrent, setFromCurrent] = useState(canEditCurrent);
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [editError, setEditError] = useState<string>();
   const failed = typeof a.meta?.engine === "string" && a.meta.engine.startsWith("basic");
 
   const apply = async () => {
     if (!onRedo) return;
     setBusy(true);
-    onError(undefined);
+    setEditError(undefined);
     try {
       await onRedo(i, text.trim(), fromCurrent && canEditCurrent);
       setText("");
       setOpen(false);
     } catch (e) {
-      onError(`${i + 1}번째 이미지: ${toApiError(e).message}`);
+      setEditError(toApiError(e).message);
     } finally {
       setBusy(false);
     }
@@ -588,7 +589,6 @@ function MediaItem({
                 role="radio"
                 aria-checked={fromCurrent === o.v}
                 disabled={o.disabled || busy}
-                title={o.disabled ? "이 이미지는 예전에 만들어져 처음부터 다시만 할 수 있어요" : undefined}
                 onClick={() => setFromCurrent(o.v)}
                 className={cx(
                   "flex-1 rounded px-1.5 py-1 font-medium disabled:opacity-40",
@@ -599,6 +599,11 @@ function MediaItem({
               </button>
             ))}
           </div>
+          {editError && (
+            <p role="alert" className="rounded-md bg-bad/10 px-2 py-1.5 text-[11px] leading-relaxed text-bad">
+              {editError}
+            </p>
+          )}
           <Button size="sm" className="w-full" onClick={apply} disabled={busy || (fromCurrent && canEditCurrent && !text.trim())}>
             {busy ? <Spinner className="size-3" /> : "↻"} {fromCurrent && canEditCurrent ? "수정 적용" : "다시 만들기"}
           </Button>

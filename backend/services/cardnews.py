@@ -793,6 +793,10 @@ def _cover_fit(photo: bytes, size: tuple[int, int]) -> Image.Image:
     return ImageOps.fit(img, size, Image.LANCZOS, centering=(0.5, 0.45))
 
 
+def cover_fit(photo: bytes, size: tuple[int, int]) -> Image.Image:
+    return _cover_fit(photo, size)
+
+
 def _gradient(size: tuple[int, int], start: float, alpha_top: int, alpha_bottom: int) -> Image.Image:
     w, h = size
     grad = Image.new("L", (1, h))
