@@ -177,34 +177,41 @@ def fill_template(template: str, parts: list[str], hashtags: list[str]) -> tuple
 
 
 _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터야. 사용자가 요청한 주제와 컨셉을 그대로 살려 게시물을 설계해.
-정해진 구성이나 장수는 없어. 컨셉에 가장 잘 맞는 형식을 네가 판단해 — 사진 한 장, 감성 사진 여러 장, 정보 정리형,
-단계별 안내, 비교, 인용 한 줄 등 무엇이든 가능해.
+정해진 구성이나 장수는 없어.
 
-주제/컨셉(가장 중요, 끝까지 유지): {prompt}
+주제/컨셉: {prompt}
+연출 방향 (최우선 — 반드시 지켜. 형식·그림체·구도·글자 표현을 이 요청대로 해): {style}
 톤: {tone}
 사용자 확정 정보(그대로 사용, 바꾸지 마): {notes}
 ※ 아래 캡션 양식 안에 적힌 사실(칸 밖 문장, '[추천인 정보: 코드 ABC123]'처럼 칸 이름 속 정보)도 모두 확정 정보야. 그대로 쓰고 바꾸지 마.
-연출 방향(사용자 요청, 없으면 컨셉에 맞게 네가 판단): {style}
 
 첨부 사진: {n}장 (번호는 0부터 첨부 순서){refs}
 
 조사 자료 (Google 검색 요약 — 정보가 필요한 경우에만 쓰고, 여기에 없는 사실은 지어내지 마):
 {research}
 
+1) 형식(format) 정하기 — 주제·컨셉·연출 방향에 나온 형식을 그대로 따르고, 언급이 없으면 가장 잘 맞는 것을 골라:
+  인스타툰/웹툰(캐릭터·말풍선 컷), 손글씨 메모(사진이나 종이 위 손글씨·동그라미·화살표 낙서), 인터뷰/Q&A, 이벤트·프로모션 포스터,
+  정보 정리형(체크리스트·단계별 안내·비교), 감성 사진/무드보드, 비포·애프터, 인용 한 줄 등. 특정 형식을 기본값처럼 쓰지 마.
+2) art_style: 모든 이미지에 똑같이 적용할 그림체를 영어로 구체적으로 (예: 'Korean Instagram webtoon, clean black line art, flat pastel colors, rounded chibi character' /
+  'real photo with white hand-drawn iPad marker doodles and Korean handwriting' / 'natural film photography, warm grain').
+  연출 방향과 참고 이미지를 가장 크게 반영하고, 요청이 그림체면 실사로 바꾸지 마.
+
 슬라이드 규칙
-- slides 는 1~{max_slides}장. 컨셉에 필요한 만큼만 (억지로 늘리지 마). 1장이면 단일 사진 게시물이 돼.
-- 첨부 사진은 컨셉에 맞는 것만 골라 써. 맞지 않는 사진은 쓰지 않아도 돼.
-  장면에 맞는 사진이 없으면 photo 를 -1 로 두고, 글 내용을 그대로 보여주는 이미지를 새로 만들게 해.
+- slides 는 1~{max_slides}장. 형식과 컨셉에 필요한 만큼만. 1장이면 단일 게시물이 돼.
+- 첨부 사진은 컨셉에 맞는 것만 골라 써 (웹툰처럼 그림체면 사진을 그 그림체로 다시 그리는 참고로 써). 맞는 사진이 없으면 photo 를 -1 로 두고 새로 만들게 해.
 - layout 은 슬라이드마다 골라:
-  photo   = 이미지만 (글자 없음, title/body 비움)
-  overlay = 이미지 아래쪽에 제목과 짧은 문장
-  panel   = 위 이미지 + 아래 글 영역 (정보·설명이 긴 장)
-  center  = 이미지 위 가운데에 큰 문장 (인용·강조·핵심 한 줄)
-- title 은 20자 이내, body 는 80자 이내(없어도 됨). 컨셉의 말투를 따라. cta 는 행동 유도 버튼이 꼭 필요할 때만(12자 이내), 아니면 빈 문자열.
-- visual: 이미지 생성 AI 에게 줄 영어 지시 2~4문장. 이 장의 내용을 한눈에 보여주는 구체적인 장면·피사체·소품·구도·조명·색감.
-  사진을 쓰면(photo ≥ 0) 그 사진을 바탕으로 컨셉에 맞게 무엇을 어떻게 바꿀지, 새로 만들면(-1) 처음부터 그릴 장면을 적어.
-  전체 슬라이드의 색감과 분위기가 하나의 컨셉으로 이어지게 해. 읽을 수 있는 글자·숫자·로고는 넣지 말라고 적어.
-  overlay 는 아래쪽, center 는 가운데에 글자가 올라갈 단순한 공간을 남기라고 적어.
+  designed = 글자까지 이미지 안에 그려 넣는 완성형 디자인. 말풍선 대사, 손글씨 메모, 포스터 제목처럼 글자가 그림의 일부인 형식은 반드시 이것.
+             그릴 글자는 image_text 에 정확히 (짧게, 한 장에 1~4줄). title/body 는 비워.
+  photo    = 이미지만 (글자 없음)
+  overlay  = 서버가 이미지 아래쪽에 깔끔한 제목·문장을 얹음
+  panel    = 위 이미지 + 아래 글 영역 (설명이 긴 정보형)
+  center   = 이미지 위 가운데 큰 문장 (인용·강조)
+  웹툰·손글씨 메모·포스터·인터뷰 형식이면 designed 를, 깔끔한 정보 정리형이면 overlay/panel/center 를 주로 써.
+- title 20자, body 80자, image_text 는 줄당 16자 이내로 짧게. cta 는 꼭 필요할 때만(12자), 아니면 빈 문자열.
+- visual: 이미지 AI 에게 줄 영어 지시 2~4문장. 이 장의 장면·등장인물·소품·구도·연출을 art_style 로 구체적으로.
+  designed 면 글자가 어디에 어떤 모양으로 들어가는지(말풍선 위치, 손글씨 위치, 화살표가 가리키는 대상 등)도 적어.
+  그 외 레이아웃이면 글자를 넣지 말라고 적고, overlay 는 아래쪽·center 는 가운데를 단순하게 비워 두라고 적어.
 
 캡션 규칙 (매우 중요)
 - 아래 캡션 양식에는 채워야 할 칸이 {k}개 있어: {names}
@@ -217,7 +224,7 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
 캡션 양식:
 {template}"""
 
-LAYOUTS = ("photo", "overlay", "panel", "center")
+LAYOUTS = ("designed", "photo", "overlay", "panel", "center")
 
 
 def _plan_schema(k: int) -> dict[str, Any]:
@@ -225,6 +232,8 @@ def _plan_schema(k: int) -> dict[str, Any]:
         "type": "OBJECT",
         "properties": {
             "concept": {"type": "STRING"},
+            "format": {"type": "STRING"},
+            "art_style": {"type": "STRING"},
             "slides": {
                 "type": "ARRAY",
                 "items": {
@@ -235,15 +244,16 @@ def _plan_schema(k: int) -> dict[str, Any]:
                         "title": {"type": "STRING"},
                         "body": {"type": "STRING"},
                         "cta": {"type": "STRING"},
+                        "image_text": {"type": "STRING"},
                         "visual": {"type": "STRING"},
                     },
-                    "required": ["photo", "layout", "title", "body", "cta", "visual"],
+                    "required": ["photo", "layout", "title", "body", "cta", "image_text", "visual"],
                 },
             },
             "caption_parts": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": k, "maxItems": k},
             "hashtags": {"type": "ARRAY", "items": {"type": "STRING"}},
         },
-        "required": ["concept", "slides", "caption_parts", "hashtags"],
+        "required": ["concept", "format", "art_style", "slides", "caption_parts", "hashtags"],
     }
 
 
@@ -268,7 +278,7 @@ def plan_cardnews(
         prompt=prompt,
         tone=tone or "친근한",
         notes=notes.strip() or "없음",
-        style=style.strip() or "없음",
+        style=style.strip() or "(없음 — 컨셉에 맞게 네가 판단)",
         research=research_notes.strip() or "(조사 자료 없음)",
         max_slides=MAX_SLIDES,
         k=len(names),
@@ -334,14 +344,17 @@ def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
         photo = photo if isinstance(photo, int) and 0 <= photo < n else -1
         layout = s.get("layout") if s.get("layout") in LAYOUTS else "overlay"
         title, body = _clip(s.get("title"), 26), _clip(s.get("body"), 100)
-        if layout != "photo" and not (title or body):
-            layout = "photo"  # 글이 없으면 이미지만
+        image_text = _clip(s.get("image_text"), 160)
+        if layout in ("overlay", "panel", "center") and not (title or body):
+            layout = "photo"  # 서버가 얹을 글이 없으면 이미지만
+        server_text = layout in ("overlay", "panel", "center")
         return {
             "photo": photo,
             "layout": layout,
-            "title": "" if layout == "photo" else title,
-            "body": "" if layout == "photo" else body,
+            "title": title if server_text else "",
+            "body": body if server_text else "",
             "cta": _clip(s.get("cta"), 16) if layout in ("overlay", "center") else "",
+            "image_text": image_text if layout == "designed" else "",
             "visual": _clip(s.get("visual"), 700),
         }
 
@@ -350,6 +363,8 @@ def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
         slides = fallback_plan(n, "")["slides"]
     return {
         "concept": _clip(raw.get("concept"), 200),
+        "format": _clip(raw.get("format"), 60),
+        "art_style": _clip(raw.get("art_style"), 400),
         "slides": slides,
         "hashtags": [str(t).lstrip("#").strip() for t in (raw.get("hashtags") or []) if str(t).strip()][:20],
     }
@@ -380,33 +395,62 @@ def slide_list(plan: dict[str, Any]) -> list[dict[str, Any]]:
 
 # ── 3) 이미지 연출 (편집 · 생성) ─────────────────────────────────────────
 # panel 은 위쪽 62% 에 이미지가 들어가므로 가로형, 나머지는 세로 4:5.
-ASPECT = {"photo": "4:5", "overlay": "4:5", "panel": "4:3", "center": "4:5"}
+ASPECT = {"designed": "4:5", "photo": "4:5", "overlay": "4:5", "panel": "4:3", "center": "4:5"}
 
 
-def _visual_prompt(slide: dict[str, Any], *, topic: str, style: str, instruction: str, has_photo: bool) -> str:
+def _visual_prompt(
+    slide: dict[str, Any],
+    *,
+    topic: str,
+    style: str,
+    instruction: str,
+    has_photo: bool,
+    art_style: str = "",
+    post_format: str = "",
+) -> str:
+    """이미지 모델 지시문. 사용자 연출 방향을 맨 앞(최우선)에, 게시물 전체 그림체를 모든 장에 공통으로."""
+    role = slide["role"]
+    lines: list[str] = []
+    if style.strip():
+        lines.append(f"USER'S ART DIRECTION (highest priority, follow it exactly): {style.strip()}")
+    if instruction.strip():
+        lines.append(f"Revision request for this image (also highest priority): {instruction.strip()}")
+    lines.append(f"Instagram post concept: {topic}." + (f" Post format: {post_format}." if post_format else ""))
+    if art_style:
+        lines.append(f"Art style for every image in this post (keep it identical across images): {art_style}")
+    if slide.get("visual"):
+        lines.append(f"This image: {slide['visual']}")
     message = " — ".join(p for p in (slide.get("title"), slide.get("body")) if p)
-    direction = instruction.strip() or slide.get("visual", "").strip() or f"Depict: {message or topic}."
-    base = (
-        "Use the provided photo as the base. Keep its main subject recognizable, but you may re-compose the scene, "
-        "replace or clean up the background, adjust lighting and color, and add relevant objects so the image fits the concept."
+    if message and role != "designed":
+        lines.append(f"It illustrates this message (Korean): {message}")
+    lines.append(
+        "Use the attached photo as the base/reference: keep its key subject recognizable but transform it into the art style "
+        "and scene described above (re-draw, re-compose, change background or add elements as needed)."
         if has_photo
-        else "Create a new photorealistic image from scratch that shows exactly what this slide is about."
+        else "Create this image from scratch in the art style described above."
     )
-    layout = {
-        "photo": "Use the full frame.",
-        "overlay": "Keep the lower third of the frame simple and slightly darker so text can be placed there.",
-        "panel": "Wide framing with the key subject centered.",
-        "center": "Calm, uncluttered composition with soft contrast in the middle so a sentence can sit on top.",
-    }[slide["role"]]
-    return (
-        f"You are the creative director of an Instagram post. The user's concept (keep it consistent across all images): {topic}. "
-        + (f"This image carries the message (Korean): {message}. " if message else "")
-        + f"{base} Creative direction: {direction} "
-        + (f"Overall style requested by the user: {style}. " if style.strip() else "")
-        + f"{layout} "
-        "Absolutely no readable text, letters, numbers, logos, watermarks, UI labels or borders anywhere in the image. "
-        "High quality, Instagram-worthy."
-    )
+    if role == "designed":
+        text = (slide.get("image_text") or "").strip()
+        if text:
+            lines.append(
+                "The image must include this Korean text as part of the design (speech bubbles, handwriting, doodle labels or "
+                f"a headline, as fitting the style), written exactly as given, character by character: «{text}». "
+                "Keep every Korean character correct and legible. Do not add any other text, watermark or logo."
+            )
+        else:
+            lines.append("Do not add any text, watermark or logo.")
+    else:
+        lines.append(
+            {
+                "photo": "Use the full frame.",
+                "overlay": "Keep the lower third simple and slightly darker so text can be placed there later.",
+                "panel": "Wide framing with the key subject centered.",
+                "center": "Keep the middle calm and uncluttered so a sentence can be placed on top later.",
+            }[role]
+            + " Do not draw any readable text, letters, numbers, logos or watermarks (text is added separately)."
+        )
+    lines.append("High quality, polished, Instagram-ready.")
+    return "\n".join(lines)
 
 
 def _image_call(parts: list[dict[str, Any]], aspect: str) -> bytes:
@@ -425,8 +469,9 @@ def _image_call(parts: list[dict[str, Any]], aspect: str) -> bytes:
             raise GeminiError("이미지가 응답에 없습니다.")
         except GeminiError as exc:
             last = exc
-            # 모델을 찾을 수 없을 때만 구형 모델로 다시 시도합니다.
-            if "not found" not in str(exc).lower() and "not supported" not in str(exc).lower():
+            # 모델이 없거나 할당량이 없으면 다른 이미지 모델로 한 번 더 시도합니다.
+            msg = str(exc).lower()
+            if not any(k in msg for k in ("not found", "not supported", "quota", "exhausted")):
                 break
     raise GeminiError(str(last))
 
@@ -439,11 +484,21 @@ def render_visual(
     style: str = "",
     instruction: str = "",
     references: list[bytes] | None = None,
+    art_style: str = "",
+    post_format: str = "",
 ) -> tuple[bytes, str]:
     """(이미지, 엔진). 사진이 있으면 연출 편집, 없으면(-1) 새로 생성. 실패하면 기본 보정/배경.
     references 는 색감·분위기만 참고할 스타일 이미지 (첫 이미지 = 편집할 사진)."""
     references = references or []
-    prompt = _visual_prompt(slide, topic=topic, style=style, instruction=instruction, has_photo=photo is not None)
+    prompt = _visual_prompt(
+        slide,
+        topic=topic,
+        style=style,
+        instruction=instruction,
+        has_photo=photo is not None,
+        art_style=art_style,
+        post_format=post_format,
+    )
     if references:
         which = f"The last {len(references)} attached image(s)" if photo is not None else f"The {len(references)} attached image(s)"
         prompt += (
@@ -546,8 +601,8 @@ def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", **_
     role = slide["role"]
     title, body, cta = slide.get("title", ""), slide.get("body", ""), slide.get("cta", "")
 
-    if role == "photo" or not (title or body):
-        return to_jpeg(_cover_fit(photo, SIZE), 92)
+    if role in ("designed", "photo") or not (title or body):
+        return to_jpeg(_cover_fit(photo, SIZE), 92)  # designed 는 글자까지 이미지 모델이 그림
 
     if role == "panel":
         photo_h = int(H * 0.62)

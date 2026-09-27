@@ -427,7 +427,7 @@ function MediaStrip({ assets, onRedo }: { assets: Asset[]; onRedo?: (index: numb
   );
 }
 
-const ROLE_LABEL: Record<string, string> = { photo: "사진", overlay: "사진+글", panel: "정보", center: "강조" };
+const ROLE_LABEL: Record<string, string> = { designed: "디자인", photo: "사진", overlay: "사진+글", panel: "정보", center: "강조" };
 
 function AudioTrack({ asset }: { asset: Asset }) {
   return (

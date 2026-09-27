@@ -274,13 +274,13 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           <Field
             label="연출 방향 (선택)"
             htmlFor="cn-style"
-            hint="비워두면 Gemini가 주제를 조사해 장마다 직접 장면을 연출해요. 맞는 사진이 없으면 글 내용대로 이미지를 새로 만들어요."
+            hint="형식(인스타툰·손글씨 메모·인터뷰·이벤트 포스터·카드뉴스 등)과 그림체·구도를 적으면 최우선으로 따라요. 말풍선·손글씨처럼 글자가 그림의 일부인 형식은 이미지 안에 직접 그려요. 비워두면 Gemini가 컨셉에 맞게 정해요."
           >
             <input
               id="cn-style"
               value={style}
               onChange={(e) => setStyle(e.target.value)}
-              placeholder="예) 따뜻한 필름 톤, 런던 느낌, 깔끔한 제품 촬영처럼"
+              placeholder="예) 인스타툰 웹툰으로, 귀여운 캐릭터가 말풍선으로 설명 / 사진 위에 아이패드 손글씨·동그라미·화살표로 메모"
               className={inputClass}
               disabled={busy}
             />

@@ -196,7 +196,12 @@ def render_slide(
         style=job.plan.get("style", ""),
         instruction=instruction,
         references=references,
+        art_style=job.plan.get("art_style", ""),
+        post_format=job.plan.get("format", ""),
     )
+    if slide["role"] == "designed" and engine.startswith("basic") and slide.get("image_text"):
+        # 이미지 생성이 실패하면 그림 속 글자(말풍선·손글씨)가 사라지므로 서버 글자로라도 내용을 살립니다.
+        slide = {**slide, "role": "overlay", "title": slide["image_text"], "body": ""}
     card = svc.compose(
         edited, slide, index=index, total=len(slides), handle=account.username, accent=job.plan.get("accent", "#6c5ce7")
     )
@@ -232,10 +237,23 @@ def finalize(job_id: int, account: Account = Depends(current_account), db: Sessi
     pending = [i for i, a in enumerate(job.assets or []) if not a.get("url")]
     if pending:
         raise HTTPException(status.HTTP_409_CONFLICT, f"아직 만들지 않은 이미지가 있습니다: {pending}")
-    engines = {a["meta"].get("engine", "") for a in job.assets}
+    failed = [a["meta"].get("engine", "") for a in job.assets if str(a["meta"].get("engine", "")).startswith("basic")]
     notes = [job.error] if job.error else []
-    if any(e.startswith("basic") for e in engines):
-        notes.append("일부 이미지는 Gemini 이미지 연출에 실패해 기본 보정으로 만들었습니다.")
+    if failed:
+        reason = failed[0].removeprefix("basic (").removesuffix(")")
+        low = reason.lower()
+        if "quota" in low or "exhausted" in low:
+            hint = (
+                "Gemini 이미지 모델 사용 한도가 없습니다 (무료 등급은 이미지 생성 한도가 0). "
+                "Google AI Studio 에서 결제를 설정해 유료 등급으로 바꿔야 이미지 연출·생성이 동작합니다."
+            )
+        elif "not found" in low or "not supported" in low:
+            hint = "설정한 Gemini 이미지 모델을 쓸 수 없습니다. GEMINI_IMAGE_MODEL 을 확인하세요."
+        else:
+            hint = f"원인: {reason[:200]}"
+        notes.append(
+            f"{len(failed)}/{len(job.assets)}장은 이미지 생성에 실패해 원본 사진 보정(또는 빈 배경)으로 대신 만들었습니다. {hint}"
+        )
     job.error = " / ".join(notes)
     if job.status == "generating":
         job.status = "ready"
