@@ -64,6 +64,23 @@ function Sidebar({ me }: { me: Me }) {
   const pathname = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
 
+  async function deleteAccount() {
+    if (
+      !window.confirm(
+        `@${me.username} 연결을 해제하고 이 서비스에 저장된 모든 데이터(토큰, 생성 기록, 인사이트 기록, 자동 응답·댓글 분석 기록)를 삭제할까요?\n되돌릴 수 없습니다. Instagram 에 게시된 게시물은 그대로 남습니다.`,
+      )
+    )
+      return;
+    setLoggingOut(true);
+    try {
+      const r = await api<{ confirmation_code: string }>("/auth/account", { method: "DELETE" });
+      window.location.href = `/data-deletion?code=${r.confirmation_code}`;
+    } catch (e) {
+      setLoggingOut(false);
+      window.alert(e instanceof Error ? e.message : "삭제하지 못했습니다.");
+    }
+  }
+
   async function logout() {
     setLoggingOut(true);
     try {
@@ -120,6 +137,21 @@ function Sidebar({ me }: { me: Me }) {
         >
           <IconLogout width={16} height={16} /> 로그아웃
         </button>
+        <button
+          onClick={deleteAccount}
+          disabled={loggingOut}
+          className="mt-1 w-full rounded-lg px-2 py-1.5 text-left text-[12px] text-fg-3 hover:bg-bad/10 hover:text-bad"
+        >
+          연결 해제 및 데이터 삭제
+        </button>
+        <div className="mt-2 flex gap-3 px-2 text-[11px] text-fg-3">
+          <Link href="/privacy" className="hover:text-fg">
+            개인정보처리방침
+          </Link>
+          <Link href="/data-deletion" className="hover:text-fg">
+            데이터 삭제 안내
+          </Link>
+        </div>
       </div>
     </aside>
   );

@@ -226,3 +226,16 @@ class CommentSentiment(Base):
     classified_by: Mapped[str] = mapped_column(String(32), default="")  # gemini | rules
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DataDeletionRequest(Base):
+    """Meta 데이터 삭제 콜백·앱 내 삭제 요청 기록. 확인 코드로 처리 상태를 조회합니다.
+    (삭제된 계정의 개인정보는 남기지 않고 코드와 시각만 보관합니다.)"""
+
+    __tablename__ = "data_deletion_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    source: Mapped[str] = mapped_column(String(32), default="")  # meta_deletion | meta_deauthorize | in_app
+    status: Mapped[str] = mapped_column(String(16), default="completed")  # completed | not_found
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

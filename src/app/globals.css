@@ -142,3 +142,34 @@ body {
   font-feature-settings: "tnum" 0;
   font-variant-numeric: proportional-nums;
 }
+
+/* 개인정보처리방침·데이터 삭제 안내 본문 */
+.legal a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.legal ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.legal ul > li + li {
+  margin-top: 0.35rem;
+}
+.legal table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.legal th,
+.legal td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.legal th {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-weight: 600;
+}

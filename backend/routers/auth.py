@@ -19,7 +19,8 @@ from urllib.parse import urlencode
 from ..config import settings
 from ..db import get_db
 from ..deps import current_account, graph_for
-from ..models import Account
+from ..models import Account, DataDeletionRequest
+from ..services import account_data
 from ..security import SESSION_COOKIE, SESSION_MAX_AGE, encrypt, sign_session
 from ..services.meta_graph import IG_AUTHORIZE_URL, IG_SCOPES, SCOPES, GraphClient, GraphError
 
@@ -111,6 +112,8 @@ def _link_instagram(code: str) -> _Linked:
         token=token,
         expires_at=_expires_at(long_lived.get("expires_in")),
         granted=granted,
+        # 앱 범위 사용자 ID — Meta 데이터 삭제·승인 취소 콜백이 이 ID 로 올 수 있어 보관합니다.
+        fb_user_id=str(me.get("id") or ""),
     )
 
 
@@ -280,6 +283,54 @@ def list_accounts(account: Account = Depends(current_account)) -> dict:
             for p in pages
         ]
     }
+
+
+@router.delete("/account")
+def delete_my_account(
+    account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> JSONResponse:
+    """연결 해제 및 데이터 삭제 — 토큰, 생성물, 인사이트 기록, 댓글·자동 응답 기록을 모두 지웁니다."""
+    account_data.delete_account(db, account)
+    record = account_data.record_in_app(db)
+    db.commit()
+    resp = JSONResponse({"ok": True, "confirmation_code": record.code})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
+@router.post("/data-deletion")
+async def meta_data_deletion(request: Request, db: Session = Depends(get_db)) -> JSONResponse:
+    """Meta '데이터 삭제 요청 URL' 콜백. 확인 URL 과 코드를 돌려줘야 합니다."""
+    form = await request.form()
+    payload = account_data.parse_signed_request(str(form.get("signed_request") or ""))
+    if payload is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "signed_request 검증 실패")
+    record = account_data.delete_by_platform_user(db, str(payload.get("user_id") or ""), source="meta_deletion")
+    return JSONResponse(
+        {
+            "url": f"{settings.public_base_url.rstrip('/')}/data-deletion?code={record.code}",
+            "confirmation_code": record.code,
+        }
+    )
+
+
+@router.post("/deauthorize")
+async def meta_deauthorize(request: Request, db: Session = Depends(get_db)) -> dict:
+    """Meta '승인 취소 콜백 URL' — 사용자가 앱 연결을 끊으면 데이터를 삭제합니다."""
+    form = await request.form()
+    payload = account_data.parse_signed_request(str(form.get("signed_request") or ""))
+    if payload is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "signed_request 검증 실패")
+    account_data.delete_by_platform_user(db, str(payload.get("user_id") or ""), source="meta_deauthorize")
+    return {"ok": True}
+
+
+@router.get("/data-deletion/status")
+def data_deletion_status(code: str = Query(min_length=4, max_length=64), db: Session = Depends(get_db)) -> dict:
+    record = db.scalar(select(DataDeletionRequest).where(DataDeletionRequest.code == code))
+    if record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "해당 확인 코드를 찾을 수 없습니다.")
+    return {"code": record.code, "status": record.status, "requested_at": record.created_at.isoformat()}
 
 
 @router.post("/logout")

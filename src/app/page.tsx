@@ -108,7 +108,15 @@ export default function Home() {
         ))}
       </section>
 
-      <p className="mt-auto pt-16 text-[12px] leading-relaxed text-fg-3">
+      <nav className="mt-auto flex gap-4 pt-16 text-[12px] text-fg-3">
+        <Link href="/privacy" className="hover:text-fg">
+          개인정보처리방침
+        </Link>
+        <Link href="/data-deletion" className="hover:text-fg">
+          데이터 삭제 안내
+        </Link>
+      </nav>
+      <p className="pt-3 text-[12px] leading-relaxed text-fg-3">
         Instagram 프로페셔널(비즈니스/크리에이터) 계정이어야 합니다{viaFacebook && " (Facebook 페이지 연결 필요)"}. Meta 정책상 프로필을 조회한
         개별 계정 목록은 제공되지 않으며, 집계 수치와 댓글·멘션을 남긴 계정만 확인할 수 있습니다.
       </p>
