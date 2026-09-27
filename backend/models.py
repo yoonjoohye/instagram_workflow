@@ -111,6 +111,9 @@ class InsightSnapshot(Base):
     total_interactions: Mapped[int] = mapped_column(Integer, default=0)
     website_clicks: Mapped[int] = mapped_column(Integer, default=0)
     followers_count: Mapped[int] = mapped_column(Integer, default=0)
+    # reach 외 지표는 API 가 일자별로 주지 않아 하루 단위 합계로 따로 채웁니다.
+    # 1 이면 그 날의 profile_views 등이 실제 값(0 포함), 0 이면 아직 수집 전.
+    totals_synced: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

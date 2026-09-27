@@ -128,20 +128,26 @@ function TrendCard({ overview, loading }: { overview?: Overview; loading: boolea
       })),
     [overview],
   );
-  const visible = all.filter((s) => !hidden.has(s.key) && s.points.length);
+  // reach 외 지표는 일자별 값이 쌓인 뒤부터 그려집니다 (Instagram 이 일자별로 주지 않음).
+  const available = all.filter((s) => s.points.length);
+  const visible = available.filter((s) => !hidden.has(s.key));
 
   const toggle = (key: string) =>
     setHidden((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
-      else if (all.length - next.size > 1) next.add(key); // 최소 한 계열은 남깁니다
+      else if (available.length - next.size > 1) next.add(key); // 최소 한 계열은 남깁니다
       return next;
     });
 
   return (
     <Card
       title="일자별 노출 추이"
-      subtitle="도달 · 프로필 조회 · 참여 계정 (범례를 눌러 계열을 끄고 켤 수 있습니다)"
+      subtitle={
+        available.length < all.length
+          ? "프로필 조회·참여 계정의 일자별 값은 매일 수집되며 쌓이는 대로 표시됩니다."
+          : "범례를 눌러 계열을 끄고 켤 수 있습니다."
+      }
       action={
         <Segmented
           size="sm"
@@ -156,12 +162,12 @@ function TrendCard({ overview, loading }: { overview?: Overview; loading: boolea
       }
     >
       <div className="mb-3">
-        <Legend items={all} hidden={hidden} onToggle={toggle} />
+        <Legend items={available} hidden={hidden} onToggle={toggle} />
       </div>
       {loading ? (
         <Skeleton className="h-[260px]" />
       ) : asTable ? (
-        <SeriesTable series={all} />
+        <SeriesTable series={available} />
       ) : (
         <LineChart series={visible} />
       )}

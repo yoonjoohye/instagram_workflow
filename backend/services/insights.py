@@ -11,11 +11,13 @@ Meta 는 '누가 내 프로필을 방문했는지'(계정 단위)를 제공하�
 from __future__ import annotations
 
 import datetime as dt
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from .meta_graph import GraphClient, GraphError
 
-# metric_type=total_value 로 한 번에 받을 수 있는 일별 지표.
+# 대시보드 지표. Instagram API 는 reach 만 일자별(time_series)로 주고,
+# 나머지는 기간 합계(total_value)로만 줍니다 — time_series 로 요청하면 빈 배열이 옵니다.
 DAILY_METRICS = [
     "reach",
     "profile_views",
@@ -23,15 +25,15 @@ DAILY_METRICS = [
     "total_interactions",
     "website_clicks",
 ]
+TIME_SERIES_METRICS = ["reach"]
 
-# 계정 종류/규모에 따라 지원되지 않는 지표가 섞여 있으면 요청 전체가 실패합니다.
-# 그래서 실패 시 지표를 하나씩 줄여가며 재시도합니다.
 DEMOGRAPHIC_BREAKDOWNS = ["city", "country", "age", "gender"]
 
 
-def _day_range(days: int) -> tuple[int, int]:
+def _day_range(days: int, *, offset_days: int = 0) -> tuple[int, int]:
+    """오늘 0시(UTC) 기준 [since, until). offset_days 만큼 과거로 민 구간도 만들 수 있습니다."""
     now = dt.datetime.now(dt.timezone.utc)
-    until = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    until = now.replace(hour=0, minute=0, second=0, microsecond=0) - dt.timedelta(days=offset_days)
     since = until - dt.timedelta(days=days)
     return int(since.timestamp()), int(until.timestamp())
 
@@ -39,11 +41,41 @@ def _day_range(days: int) -> tuple[int, int]:
 def daily_timeseries(
     client: GraphClient, ig_user_id: str, *, days: int = 30
 ) -> dict[str, list[dict[str, Any]]]:
-    """일자별 시계열. {metric: [{date, value}, ...]}"""
+    """일자별 시계열. {metric: [{date, value}, ...]} — 일자별 제공 지표(reach)만 채워집니다."""
     since, until = _day_range(days)
-    metrics = list(DAILY_METRICS)
-    series: dict[str, list[dict[str, Any]]] = {}
+    series: dict[str, list[dict[str, Any]]] = {m: [] for m in DAILY_METRICS}
+    try:
+        data = client.get(
+            f"{ig_user_id}/insights",
+            {
+                "metric": ",".join(TIME_SERIES_METRICS),
+                "period": "day",
+                "metric_type": "time_series",
+                "since": since,
+                "until": until,
+            },
+        )
+    except GraphError:
+        return series
 
+    for row in data.get("data", []):
+        series[row.get("name")] = [
+            {"date": (v.get("end_time") or "")[:10], "value": v.get("value", 0)}
+            for v in row.get("values", [])
+        ]
+    return series
+
+
+def range_totals(
+    client: GraphClient, ig_user_id: str, *, since: int, until: int
+) -> dict[str, int | None]:
+    """[since, until) 구간 합계. 지원되지 않는 지표는 None.
+
+    reach 의 total_value 는 기간 내 '고유' 계정 수라 일별 도달의 합보다 작습니다.
+    """
+    metrics = list(DAILY_METRICS)
+    out: dict[str, int | None] = {m: None for m in DAILY_METRICS}
+    # 계정 종류에 따라 지원되지 않는 지표가 섞이면 요청 전체가 실패하므로 하나씩 줄여가며 재시도합니다.
     while metrics:
         try:
             data = client.get(
@@ -51,32 +83,29 @@ def daily_timeseries(
                 {
                     "metric": ",".join(metrics),
                     "period": "day",
-                    "metric_type": "time_series",
+                    "metric_type": "total_value",
                     "since": since,
                     "until": until,
                 },
             )
         except GraphError:
-            # 지원되지 않는 지표를 하나 떨어뜨리고 다시 시도
-            dropped = metrics.pop()
-            series.setdefault(dropped, [])
+            metrics.pop()
             continue
-
         for row in data.get("data", []):
-            name = row.get("name")
-            values = [
-                {
-                    "date": (v.get("end_time") or "")[:10],
-                    "value": v.get("value", 0),
-                }
-                for v in row.get("values", [])
-            ]
-            series[name] = values
+            out[row.get("name")] = int((row.get("total_value") or {}).get("value") or 0)
         break
+    return out
 
-    for metric in DAILY_METRICS:
-        series.setdefault(metric, [])
-    return series
+
+def day_totals(client: GraphClient, ig_user_id: str, day: dt.date) -> dict[str, int | None]:
+    """하루치 합계 — cron 이 매일 쌓아서 reach 외 지표의 일자별 추이를 만듭니다."""
+    start = dt.datetime(day.year, day.month, day.day, tzinfo=dt.timezone.utc)
+    return range_totals(
+        client,
+        ig_user_id,
+        since=int(start.timestamp()),
+        until=int((start + dt.timedelta(days=1)).timestamp()),
+    )
 
 
 def follower_demographics(client: GraphClient, ig_user_id: str) -> dict[str, list[dict[str, Any]]]:
@@ -152,14 +181,22 @@ def interacting_accounts(
     """댓글/멘션을 남긴 계정 목록 — API 가 알려주는 유일한 '식별된 방문자'."""
     found: dict[str, dict[str, Any]] = {}
 
-    for media in recent_media(client, ig_user_id, limit=media_limit):
+    def fetch_comments(media: dict[str, Any]) -> dict[str, Any]:
+        if not media.get("comments_count"):
+            return {}  # 댓글 없는 게시물은 호출하지 않습니다.
         try:
-            comments = client.get(
+            return client.get(
                 f"{media['id']}/comments",
                 {"fields": "id,username,text,timestamp,like_count", "limit": 50},
             )
         except GraphError:
-            continue
+            return {}
+
+    medias = recent_media(client, ig_user_id, limit=media_limit)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        all_comments = list(pool.map(fetch_comments, medias))
+
+    for media, comments in zip(medias, all_comments):
         for c in comments.get("data", []):
             username = c.get("username")
             if not username:

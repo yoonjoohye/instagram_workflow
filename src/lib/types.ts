@@ -86,7 +86,7 @@ export type Overview = {
     media_count: number;
     profile_picture_url: string;
   };
-  totals: Record<MetricKey, number>;
+  totals: Record<MetricKey, number | null>;
   trends: Record<MetricKey, number | null>;
   series: Record<MetricKey, Point[]>;
   note: string;
