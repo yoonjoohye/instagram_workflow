@@ -4,6 +4,7 @@ import Link from "next/link";
 import { LOGIN_URL, useApi } from "@/lib/api";
 import type { Health, Me } from "@/lib/types";
 import { IconChart, IconInstagram, IconReply, IconSpark } from "@/components/icons";
+import { Logo } from "@/components/Logo";
 import { Notice, Spinner } from "@/components/ui";
 
 const FEATURES = [
@@ -36,7 +37,7 @@ export default function Home() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-4xl flex-col px-4 py-10 sm:px-6 sm:py-16">
       <div className="flex items-center gap-2 text-sm font-semibold">
-        <IconInstagram className="text-accent" />
+        <Logo size={24} />
         Instagram Auto Studio
       </div>
 

@@ -7,6 +7,7 @@ import { api, LOGIN_URL, useApi } from "@/lib/api";
 import { fmtCompact } from "@/lib/format";
 import type { Me } from "@/lib/types";
 import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark } from "./icons";
+import { Logo } from "@/components/Logo";
 import { Avatar, cx, Notice, Spinner } from "./ui";
 
 const MeContext = createContext<{ me: Me; refreshMe: () => void } | null>(null);
@@ -95,7 +96,7 @@ function Sidebar({ me }: { me: Me }) {
     <aside className="sticky top-0 z-20 border-b border-line bg-surface-1 md:flex md:h-dvh md:flex-col md:border-r md:border-b-0">
       <div className="flex items-center justify-between gap-3 px-4 py-3 md:px-5 md:py-5">
         <Link href="/admin" className="flex items-center gap-2 text-sm font-semibold">
-          <IconInstagram className="text-accent" />
+          <Logo size={24} />
           Auto Studio
         </Link>
         <button onClick={logout} className="text-fg-3 hover:text-fg md:hidden" aria-label="로그아웃">
@@ -185,7 +186,7 @@ function LoginGate({ message }: { message?: string }) {
   return (
     <div className="flex min-h-dvh items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-2xl border border-line bg-surface-1 p-7 text-center">
-        <IconInstagram className="mx-auto text-accent" width={28} height={28} />
+        <Logo size={44} className="mx-auto" />
         <h1 className="mt-4 text-lg font-semibold">로그인이 필요합니다</h1>
         <p className="mt-1.5 text-[13px] leading-relaxed text-fg-2">
           Instagram 비즈니스·크리에이터 계정을 연결하세요.

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Logo } from "@/components/Logo";
 import type { ReactNode } from "react";
 
 export const SERVICE_NAME = "Instagram Auto Studio";
@@ -27,8 +28,8 @@ export function Contact() {
 export function LegalPage({ title, children }: { title: string; children: ReactNode }) {
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6 sm:py-16">
-      <Link href="/" className="text-sm font-semibold text-fg-2 hover:text-fg">
-        ← {SERVICE_NAME}
+      <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-fg-2 hover:text-fg">
+        ← <Logo size={20} /> {SERVICE_NAME}
       </Link>
       <h1 className="mt-6 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
       <p className="mt-2 text-sm text-fg-3">시행일: {EFFECTIVE_DATE}</p>
