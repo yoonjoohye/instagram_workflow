@@ -39,7 +39,7 @@ def health() -> dict:
         "ok": True,
         "meta_configured": settings.meta_configured,
         "auth_mode": settings.auth_mode,
-        # 카드뉴스 구성·사진 편집과 댓글 감정 분석에 쓰는 엔진
+        # 게시물 구성·이미지 연출과 댓글 감정 분석에 쓰는 엔진
         "ai_engine": "gemini" if settings.gemini_api_key else "basic",
         "public_base_url": settings.public_base_url,
         "redirect_uri": settings.redirect_uri,

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useMe } from "@/components/AdminShell";
-import { CardNewsForm } from "@/components/CardNewsForm";
+import { PostForm } from "@/components/PostForm";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconMusic, IconSpark } from "@/components/icons";
 import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Skeleton, Spinner, StatusDot } from "@/components/ui";
@@ -57,7 +57,7 @@ function Studio() {
     <>
       <PageHeader
         title="만들기"
-        description="내 사진을 올리면 Gemini가 표지·내용·결론 카드뉴스와 캡션을 만들고, 검수 후 Instagram 에 게시합니다."
+        description="주제와 컨셉을 적고 사진을 올리면 Gemini가 그 컨셉대로 이미지와 캡션을 만들고, 검수 후 Instagram 에 게시합니다."
         action={
           job && (
             <Button variant="secondary" size="sm" onClick={() => router.push("/admin/studio")}>
@@ -74,7 +74,7 @@ function Studio() {
         </div>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <CardNewsForm onCreated={onCreated} />
+        <PostForm onCreated={onCreated} />
         {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}
       </div>
     </>
@@ -219,10 +219,10 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
         <MediaStrip
           assets={visual}
           onRedo={
-            job.provider.startsWith("cardnews") && !locked
+            (job.provider.startsWith("studio") || job.provider.startsWith("cardnews")) && !locked
               ? async (i) => {
                   const instruction = window.prompt(
-                    "이 슬라이드의 사진을 어떻게 다시 편집할까요? (비우면 처음 지시대로 다시 만들어요)\n예) 더 밝게, 흑백으로, 배경 사람 지우기",
+                    "이 이미지를 어떻게 다시 만들까요? (비우면 처음 연출대로 다시 만들어요)\n예) 더 밝게, 흑백으로, 배경 사람 지우기, 노을 지는 해변으로",
                     "",
                   );
                   if (instruction === null) return;
@@ -427,7 +427,7 @@ function MediaStrip({ assets, onRedo }: { assets: Asset[]; onRedo?: (index: numb
   );
 }
 
-const ROLE_LABEL: Record<string, string> = { cover: "표지", content: "내용", conclusion: "결론" };
+const ROLE_LABEL: Record<string, string> = { photo: "사진", overlay: "사진+글", panel: "정보", center: "강조" };
 
 function AudioTrack({ asset }: { asset: Asset }) {
   return (

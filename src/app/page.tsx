@@ -9,8 +9,8 @@ import { Notice, Spinner } from "@/components/ui";
 const FEATURES = [
   {
     icon: IconSpark,
-    title: "내 사진으로 카드뉴스",
-    body: "사진을 올리면 Gemini가 표지·내용·결론 카드와 캡션·해시태그를 만들고, 검수 후 바로 게시합니다.",
+    title: "주제대로 게시물 제작",
+    body: "주제와 컨셉을 적으면 Gemini가 조사하고, 사진을 연출하거나 새로 만들어 캡션·해시태그까지 완성합니다. 검수 후 바로 게시.",
   },
   {
     icon: IconChart,
@@ -45,7 +45,7 @@ export default function Home() {
           쓰면, 만들어지고, 올라갑니다.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-fg-2 sm:text-lg">
-          Instagram 계정을 연결하고 사진과 주제만 올리세요. 카드뉴스 제작부터 게시, 댓글 자동 응답, 성과 분석까지 한곳에서 끝납니다.
+          Instagram 계정을 연결하고 사진과 주제만 올리세요. 게시물 제작부터 게시, 댓글 자동 응답, 성과 분석까지 한곳에서 끝납니다.
         </p>
 
         <div className="mt-8 flex flex-wrap items-center gap-3">

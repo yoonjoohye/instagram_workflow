@@ -1,7 +1,8 @@
-"""내 사진으로 카드뉴스 만들기: 업로드 → 구성 설계 → 슬라이드별 AI 편집·합성 → 검수 후 게시.
+"""사진과 주제로 게시물 만들기: 업로드 → 조사 → 구성·연출 설계 → 장별 이미지 연출·글자 합성 → 검수 후 게시.
 
-Vercel 함수는 요청당 60초 제한이 있어 슬라이드를 한 장씩 요청해 만듭니다.
-결과는 기존 작업(GenerationJob, CAROUSEL)으로 저장되어 스튜디오에서 검수·게시합니다.
+Vercel 함수는 요청당 60초 제한이 있어 이미지를 한 장씩 요청해 만듭니다.
+결과는 작업(GenerationJob)으로 저장되고 1장이면 IMAGE, 여러 장이면 CAROUSEL 로 게시됩니다.
+(경로 이름 /cardnews 는 내부용입니다.)
 """
 from __future__ import annotations
 
@@ -80,7 +81,7 @@ class Source(BaseModel):
 
 
 class PlanIn(BaseModel):
-    upload_ids: list[str] = Field(min_length=1, max_length=svc.MAX_PHOTOS)
+    upload_ids: list[str] = Field(default_factory=list, max_length=svc.MAX_PHOTOS)  # 없으면 전부 새로 생성
     prompt: str = Field(min_length=2, max_length=2000)
     tone: str = Field(default="친근한", max_length=64)
     style: str = Field(default="", max_length=300)  # 연출 방향 (선택)
@@ -105,8 +106,8 @@ def _blobs(db: Session, account: Account, ids: list[str]) -> list[MediaBlob]:
 
 def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
     job = db.get(GenerationJob, job_id)
-    if not job or job.account_id != account.id or not (job.plan or {}).get("upload_ids"):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "카드뉴스 작업을 찾을 수 없습니다.")
+    if not job or job.account_id != account.id or not isinstance(job.plan, dict) or not job.plan.get("slides"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
     return job
 
 
@@ -136,10 +137,10 @@ def plan(body: PlanIn, account: Account = Depends(current_account), db: Session 
     job = GenerationJob(
         account_id=account.id,
         prompt=body.prompt,
-        media_kind="CAROUSEL",
+        media_kind="CAROUSEL" if len(slides) > 1 else "IMAGE",
         tone=body.tone,
         status="generating",
-        provider=f"cardnews/{engine}",
+        provider=f"studio/{engine}",
         error=warning,
         caption=design["caption"],
         # 양식 안에 해시태그 칸이 있으면 이미 캡션에 들어갔으므로 따로 붙이지 않습니다.
@@ -172,15 +173,15 @@ def render_slide(
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ) -> dict:
-    """슬라이드 한 장을 AI 편집 + 글자 합성해 만듭니다 (다시 만들기에도 사용)."""
+    """한 장을 이미지 연출(편집·생성) + 글자 합성해 만듭니다 (다시 만들기에도 사용)."""
     job = _own_job(db, account, job_id)
     if job.status == "published":
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 게시된 작업입니다.")
     slides = svc.slide_list(job.plan)
     if not 0 <= index < len(slides):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "슬라이드 번호가 올바르지 않습니다.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "이미지 번호가 올바르지 않습니다.")
     slide = slides[index]
-    uploads = _blobs(db, account, job.plan["upload_ids"])
+    uploads = _blobs(db, account, job.plan.get("upload_ids") or [])
     photo = slide.get("photo", -1)
     source = uploads[photo].data if isinstance(photo, int) and 0 <= photo < len(uploads) else None
 
@@ -228,11 +229,11 @@ def finalize(job_id: int, account: Account = Depends(current_account), db: Sessi
     job = _own_job(db, account, job_id)
     pending = [i for i, a in enumerate(job.assets or []) if not a.get("url")]
     if pending:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"아직 만들지 않은 슬라이드가 있습니다: {pending}")
+        raise HTTPException(status.HTTP_409_CONFLICT, f"아직 만들지 않은 이미지가 있습니다: {pending}")
     engines = {a["meta"].get("engine", "") for a in job.assets}
     notes = [job.error] if job.error else []
     if any(e.startswith("basic") for e in engines):
-        notes.append("일부 슬라이드는 Gemini 이미지 편집에 실패해 기본 보정으로 만들었습니다.")
+        notes.append("일부 이미지는 Gemini 이미지 연출에 실패해 기본 보정으로 만들었습니다.")
     job.error = " / ".join(notes)
     if job.status == "generating":
         job.status = "ready"

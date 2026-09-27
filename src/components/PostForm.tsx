@@ -6,7 +6,7 @@ import type { Job } from "@/lib/types";
 import { IconSpark } from "./icons";
 import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
 
-const MAX_PHOTOS = 8; // 표지 + 사진 8장 + 결론 = 캐러셀 최대 10장
+const MAX_PHOTOS = 8; // 올릴 수 있는 사진 수 (게시물은 최대 10장까지 Gemini가 구성)
 const TONES = ["친근한", "전문적인", "감성적인", "유머러스한", "정보 전달형"];
 const MAX_REFS = 3;
 const DEFAULT_FORMAT = `[후킹 2줄]
@@ -49,7 +49,7 @@ async function uploadPhoto(file: File): Promise<string> {
   return data.id as string;
 }
 
-export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
+export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [prompt, setPrompt] = useState("");
   const [tone, setTone] = useState("친근한");
@@ -112,7 +112,6 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!photos.length) return setError("사진을 1장 이상 올려 주세요.");
     if (prompt.trim().length < 2) return setError("주제를 입력해 주세요.");
     setError(undefined);
     try {
@@ -150,7 +149,7 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
       const total = plan.slides.length;
       for (let i = 0; i < total; i++) {
         const role = plan.slides[i].role;
-        setStep({ label: role === "cover" ? "표지 만드는 중" : role === "conclusion" ? "결론 만드는 중" : "내용 슬라이드 만드는 중", done: i, total });
+        setStep({ label: role === "photo" ? `이미지 ${i + 1}장째 만드는 중` : `이미지 ${i + 1}장째 만들고 글 얹는 중`, done: i, total });
         try {
           await api(`/cardnews/${plan.job.id}/slides/${i}`, { method: "POST", json: {} });
         } catch {
@@ -168,16 +167,28 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
 
   return (
     <Card
-      title="내 사진으로 카드뉴스"
+      title="사진과 주제로 게시물 만들기"
       subtitle={
         <span className="inline-flex flex-wrap items-center gap-1.5">
-          표지 → 내용 → 결론 슬라이드와 캡션을 Gemini가 만들어요
+          주제·컨셉에 맞춰 Gemini가 장수·구성·이미지·캡션을 정해요. 맞는 사진이 없으면 새로 만들어요
           <Badge tone="accent">Gemini</Badge>
         </span>
       }
       className="h-fit"
     >
       <form onSubmit={submit} className="space-y-5">
+        <Field label="주제 · 컨셉" htmlFor="cn-prompt" hint="무엇을, 어떤 느낌으로 올릴지 자유롭게 적어 주세요. 이 컨셉을 끝까지 유지해요.">
+          <textarea
+            id="cn-prompt"
+            rows={3}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={"예) 스탈링 뱅크 개설 방법을 영국 유학생 눈높이로 쉽게 정리\n예) 런던 브런치 카페 감성 기록 — 필름 사진 느낌, 글은 짧게"}
+            className={cx(inputClass, "resize-y")}
+            disabled={busy}
+          />
+        </Field>
+
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -224,7 +235,7 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
             onClick={() => inputRef.current?.click()}
             className="w-full rounded-md py-3 text-[13px] text-fg-2 hover:bg-surface-2 disabled:opacity-50"
           >
-            {photos.length ? `+ 사진 추가 (${photos.length}/${MAX_PHOTOS})` : "사진을 끌어다 놓거나 눌러서 선택 (최대 8장)"}
+            {photos.length ? `+ 사진 추가 (${photos.length}/${MAX_PHOTOS})` : "사진을 끌어다 놓거나 눌러서 선택 (선택 · 최대 8장)"}
           </button>
           <input
             ref={inputRef}
@@ -238,18 +249,8 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
             }}
           />
         </div>
-        <p className="-mt-3 text-[12px] text-fg-3">올린 순서가 기본 순서예요. Gemini가 이야기 흐름에 맞게 다시 배치할 수 있어요.</p>
+        <p className="-mt-3 text-[12px] text-fg-3">사진은 선택이에요. Gemini가 컨셉에 맞는 사진만 골라 쓰고, 필요한 장면은 글 내용대로 새로 만들어요.</p>
 
-        <Field label="주제 · 목적" htmlFor="cn-prompt" hint="예) 성수동 카페 투어 추천 3곳 — 주말 데이트 코스로 소개">
-          <textarea
-            id="cn-prompt"
-            rows={3}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            className={cx(inputClass, "resize-y")}
-            disabled={busy}
-          />
-        </Field>
 
         <Field label="톤">
           <div className="flex flex-wrap gap-1.5">
@@ -290,7 +291,7 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
           <Field
             label="연출 방향 (선택)"
             htmlFor="cn-style"
-            hint="비워두면 Gemini가 주제를 조사해 슬라이드마다 직접 장면을 연출해요. 필요하면 사진이 없는 설명용 이미지도 새로 만들어요."
+            hint="비워두면 Gemini가 주제를 조사해 장마다 직접 장면을 연출해요. 맞는 사진이 없으면 글 내용대로 이미지를 새로 만들어요."
           >
             <input
               id="cn-style"
@@ -341,7 +342,7 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
             />
           </div>
           <p className="text-[12px] text-fg-3">
-            참고 이미지는 색감·조명·구도·분위기만 따라가요. 카드뉴스 슬라이드로 들어가지는 않아요.
+            참고 이미지는 색감·조명·구도·분위기만 따라가요. 게시물 이미지로 들어가지는 않아요.
           </p>
         </div>
 
@@ -393,11 +394,11 @@ export function CardNewsForm({ onCreated }: { onCreated: (job: Job) => void }) {
             <div className="h-2 overflow-hidden rounded-full bg-surface-2">
               <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(step.done / Math.max(step.total, 1)) * 100}%` }} />
             </div>
-            <p className="text-[12px] text-fg-3">주제 조사와 슬라이드 연출에 몇 분 걸릴 수 있어요. 창을 닫지 마세요.</p>
+            <p className="text-[12px] text-fg-3">주제 조사와 이미지 연출에 몇 분 걸릴 수 있어요. 창을 닫지 마세요.</p>
           </div>
         ) : (
-          <Button type="submit" variant="primary" className="w-full" disabled={!photos.length}>
-            <IconSpark width={16} height={16} /> 카드뉴스 만들기
+          <Button type="submit" variant="primary" className="w-full" disabled={prompt.trim().length < 2}>
+            <IconSpark width={16} height={16} /> 게시물 만들기
           </Button>
         )}
       </form>

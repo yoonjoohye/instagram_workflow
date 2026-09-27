@@ -17,7 +17,7 @@ export default function DataDeletionPage() {
       </Suspense>
 
       <p>
-        {SERVICE_NAME}에 저장된 정보(계정 정보, 암호화된 액세스 토큰, 업로드한 사진·카드 이미지와 작업 기록, 인사이트 기록, 댓글·DM 자동 응답 기록, 댓글 감정 분석 결과)는
+        {SERVICE_NAME}에 저장된 정보(계정 정보, 암호화된 액세스 토큰, 업로드한 사진·게시물 이미지와 작업 기록, 인사이트 기록, 댓글·DM 자동 응답 기록, 댓글 감정 분석 결과)는
         아래 방법 중 하나로 언제든 모두 삭제할 수 있습니다. 삭제는 즉시 처리되며 되돌릴 수 없습니다. 이미 Instagram 에 게시된 게시물·답글·DM 은
         Instagram 에 남으며, Instagram 앱에서 직접 삭제할 수 있습니다.
       </p>
@@ -54,7 +54,7 @@ export default function DataDeletionPage() {
 
       <Section title="English">
         <p>
-          You can delete all data {SERVICE_NAME} stores about your account (profile, encrypted access token, uploaded photos and card images, insight
+          You can delete all data {SERVICE_NAME} stores about your account (profile, encrypted access token, uploaded photos and post images, insight
           history, comment/DM auto-reply logs and comment sentiment results) at any time: (1) sign in and choose &ldquo;연결 해제 및 데이터
           삭제&rdquo; (Disconnect and delete data) in the sidebar; (2) remove the app in Instagram under Settings → Website permissions → Apps and
           websites — Meta notifies our data deletion callback and your data is deleted automatically, and you receive a confirmation code you can check

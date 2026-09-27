@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # 댓글 감정 분석(긍정/보통/부정). 비워두면 한국어 키워드·이모지 규칙으로 분류합니다.
     gemini_api_key: str = ""
     gemini_model: str = "gemini-flash-lite-latest"
-    # 카드뉴스: 사진 분석·구성은 gemini_text_model, 사진 AI 편집은 gemini_image_model
+    # 게시물 만들기: 조사·구성은 gemini_text_model, 이미지 연출(편집·생성)은 gemini_image_model
     gemini_text_model: str = "gemini-flash-latest"
     gemini_image_model: str = "gemini-3.1-flash-image"
 

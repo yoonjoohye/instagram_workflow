@@ -79,7 +79,7 @@ class GenerationJob(Base):
     caption: Mapped[str] = mapped_column(Text, default="")
     hashtags: Mapped[Any] = mapped_column(JSON, default=list)
     assets: Mapped[Any] = mapped_column(JSON, default=list)  # [{type,url,thumbnail_url,meta}]
-    plan: Mapped[Any] = mapped_column(JSON, default=dict)  # 카드뉴스 설계안 (표지·내용·결론)
+    plan: Mapped[Any] = mapped_column(JSON, default=dict)  # 게시물 설계안 (컨셉·장별 레이아웃·글·연출)
 
     ig_container_id: Mapped[str] = mapped_column(String(64), default="")
     ig_media_id: Mapped[str] = mapped_column(String(64), default="", index=True)
@@ -221,7 +221,7 @@ class DataDeletionRequest(Base):
 
 
 class MediaBlob(Base):
-    """업로드한 사진과 카드뉴스 결과 이미지.
+    """업로드한 사진과 게시물 결과 이미지.
 
     Instagram 게시 API 는 공개 URL 에서 이미지를 가져가므로 /api/py/media/<id>.jpg 로
     제공합니다. id 는 추측 불가능한 무작위 값입니다.

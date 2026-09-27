@@ -1,12 +1,10 @@
-"""내 사진으로 만드는 콘텐츠 마케팅 카드뉴스 (표지 → 내용 → 결론).
+"""사진과 주제로 만드는 Instagram 게시물 (고정 틀 없이 사용자 컨셉을 따름).
 
-1) research      : Gemini + Google 검색으로 주제를 조사 (사실·절차·주의사항, 출처)
-2) plan          : 조사 결과·사진·주제로 슬라이드 구성·문구·슬라이드별 연출 지시를 설계하고,
-                   캡션은 양식의 [칸]별로 받아 서버가 양식 그대로 조립
-3) render_visual : Gemini 이미지 모델이 연출 지시대로 사진을 재구성하거나(사진 있음), 새로 생성(-1)
-4) compose       : 이미지 위에 한글 제목·본문을 서버에서 합성 (AI 이미지 모델은 한글을 자주 깨뜨림)
-
-Gemini 키가 없거나 호출이 실패하면 기본 구성과 기본 보정(Pillow)으로 대신 만듭니다.
+1) research      : Gemini + Google 검색으로 주제를 조사 (정보가 필요한 경우, 출처 보관)
+2) plan          : 컨셉·사진·조사 내용으로 장수(1~10)와 장별 레이아웃(photo/overlay/panel/center), 글, 연출 지시를 설계.
+                   컨셉에 맞지 않는 사진은 쓰지 않고, 필요한 장면은 새 이미지 생성(-1). 캡션은 양식의 [칸]별로 받아 서버가 조립
+3) render_visual : Gemini 이미지 모델이 연출 지시대로 사진을 재구성하거나 새로 생성
+4) compose       : 레이아웃대로 한글 글자를 서버에서 합성 (AI 이미지 모델은 한글을 자주 깨뜨림). 고정 문구·배지 없음
 """
 from __future__ import annotations
 
@@ -27,7 +25,7 @@ log = logging.getLogger(__name__)
 
 SIZE = (1080, 1350)  # Instagram 세로 4:5
 MAX_PHOTOS = 8  # 업로드 최대 장수
-MAX_CONTENT = 8  # 표지 + 내용 8장 + 결론 = 캐러셀 최대 10장
+MAX_SLIDES = 10  # Instagram 캐러셀 최대 장수
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
@@ -113,16 +111,15 @@ def _text_of(data: dict) -> str:
 
 
 # ── 1) 주제 조사 (Google 검색) ────────────────────────────────────────
-_RESEARCH_PROMPT = """너는 인스타그램 콘텐츠 마케팅 카드뉴스의 리서처야. Google 검색으로 아래 주제를 조사해 카드뉴스에 쓸 사실을 정리해.
+_RESEARCH_PROMPT = """너는 인스타그램 게시물 리서처야. Google 검색으로 아래 주제를 조사해 게시물에 쓸 내용을 정리해.
 
-주제/목적: {prompt}
+주제/컨셉: {prompt}
 사용자가 준 확정 정보(그대로 신뢰): {notes}
 
-정리 형식 (한국어, 사실만, 추측 금지):
-1) 한 줄 요약
-2) 핵심 사실 6~10개 — 정의, 특징·장점, 절차/방법(단계별), 조건·수수료·주의사항, 최신 변경 사항 등 주제에 필요한 것
-3) 독자가 가장 궁금해할 질문 3개
-확인되지 않는 내용은 쓰지 말고, 날짜가 중요한 정보에는 기준 시점을 적어."""
+주제가 정보·방법·제품·서비스처럼 사실이 중요한 내용이면:
+1) 한 줄 요약  2) 핵심 사실 6~10개 (정의, 특징, 절차·방법, 조건·비용·주의사항, 최신 변경)  3) 독자가 궁금해할 질문 3개
+주제가 감성·일상·여행 기록처럼 분위기가 중요한 내용이면: 관련 배경 지식과 표현에 쓸 만한 사실 몇 줄만.
+한국어로, 확인된 사실만 쓰고 추측하지 마. 날짜가 중요한 정보에는 기준 시점을 적어."""
 
 
 def research(prompt: str, notes: str) -> tuple[dict[str, Any], str]:
@@ -179,25 +176,34 @@ def fill_template(template: str, parts: list[str], hashtags: list[str]) -> tuple
     return PLACEHOLDER.sub(repl, template).strip(), used_hashtags
 
 
-_PLAN_PROMPT = """너는 인스타그램 콘텐츠 마케팅 카드뉴스 기획자이자 아트 디렉터야.
-주제와 조사 자료, 첨부한 사진 {n}장(번호는 0부터 첨부 순서)을 보고 저장·공유하고 싶어지는 정보성 캐러셀을 설계해.
-{refs}
+_PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터야. 사용자가 요청한 주제와 컨셉을 그대로 살려 게시물을 설계해.
+정해진 구성이나 장수는 없어. 컨셉에 가장 잘 맞는 형식을 네가 판단해 — 사진 한 장, 감성 사진 여러 장, 정보 정리형,
+단계별 안내, 비교, 인용 한 줄 등 무엇이든 가능해.
 
-주제/목적: {prompt}
+주제/컨셉(가장 중요, 끝까지 유지): {prompt}
 톤: {tone}
 사용자 확정 정보(그대로 사용, 바꾸지 마): {notes}
-연출 방향(사용자 요청, 없으면 네가 판단): {style}
+연출 방향(사용자 요청, 없으면 컨셉에 맞게 네가 판단): {style}
 
-조사 자료 (Google 검색 결과 요약 — 여기에 없는 사실은 지어내지 마):
+첨부 사진: {n}장 (번호는 0부터 첨부 순서){refs}
+
+조사 자료 (Google 검색 요약 — 정보가 필요한 경우에만 쓰고, 여기에 없는 사실은 지어내지 마):
 {research}
 
 슬라이드 규칙
-- 흐름: cover(후킹) → slides(핵심 정보 3~{max_slides}장, 한 장에 한 메시지) → conclusion(요약·행동 유도).
-- 텍스트: cover.title 18자 이내, subtitle 30자 이내 / slides.heading 16자 이내, body 2~3문장 70자 이내 / conclusion.title 18자, body 60자, cta 12자 이내.
-- 사진 배정: photo 에 사용할 사진 번호. 첨부한 모든 사진을 slides 에 최소 한 번씩 써. 설명에 꼭 필요한데 맞는 사진이 없으면 photo 를 -1 로 두고 새 이미지를 만들게 해.
-- visual: 이미지 생성 AI 에게 줄 영어 연출 지시 2~4문장. 이 슬라이드의 메시지를 한눈에 보여주는 구체적인 장면·소품·구도·조명·색감을 적어.
-  사진이 있으면(photo ≥ 0) 그 사진을 바탕으로 무엇을 어떻게 바꿔 메시지를 살릴지(배경 교체, 관련 소품 추가, 재구성 등), 없으면(-1) 처음부터 그릴 장면을 적어.
-  읽을 수 있는 글자·숫자·로고는 절대 넣지 말라고 적고, cover 는 아래쪽 40% 가 단순하고 어둡게, conclusion 은 전체가 차분하게 해서 글자를 얹을 공간을 남겨.
+- slides 는 1~{max_slides}장. 컨셉에 필요한 만큼만 (억지로 늘리지 마). 1장이면 단일 사진 게시물이 돼.
+- 첨부 사진은 컨셉에 맞는 것만 골라 써. 맞지 않는 사진은 쓰지 않아도 돼.
+  장면에 맞는 사진이 없으면 photo 를 -1 로 두고, 글 내용을 그대로 보여주는 이미지를 새로 만들게 해.
+- layout 은 슬라이드마다 골라:
+  photo   = 이미지만 (글자 없음, title/body 비움)
+  overlay = 이미지 아래쪽에 제목과 짧은 문장
+  panel   = 위 이미지 + 아래 글 영역 (정보·설명이 긴 장)
+  center  = 이미지 위 가운데에 큰 문장 (인용·강조·핵심 한 줄)
+- title 은 20자 이내, body 는 80자 이내(없어도 됨). 컨셉의 말투를 따라. cta 는 행동 유도 버튼이 꼭 필요할 때만(12자 이내), 아니면 빈 문자열.
+- visual: 이미지 생성 AI 에게 줄 영어 지시 2~4문장. 이 장의 내용을 한눈에 보여주는 구체적인 장면·피사체·소품·구도·조명·색감.
+  사진을 쓰면(photo ≥ 0) 그 사진을 바탕으로 컨셉에 맞게 무엇을 어떻게 바꿀지, 새로 만들면(-1) 처음부터 그릴 장면을 적어.
+  전체 슬라이드의 색감과 분위기가 하나의 컨셉으로 이어지게 해. 읽을 수 있는 글자·숫자·로고는 넣지 말라고 적어.
+  overlay 는 아래쪽, center 는 가운데에 글자가 올라갈 단순한 공간을 남기라고 적어.
 
 캡션 규칙 (매우 중요)
 - 아래 캡션 양식에는 채워야 할 칸이 {k}개 있어: {names}
@@ -209,40 +215,33 @@ _PLAN_PROMPT = """너는 인스타그램 콘텐츠 마케팅 카드뉴스 기획
 캡션 양식:
 {template}"""
 
+LAYOUTS = ("photo", "overlay", "panel", "center")
+
 
 def _plan_schema(k: int) -> dict[str, Any]:
-    visual = {"type": "STRING"}
     return {
         "type": "OBJECT",
         "properties": {
-            "cover": {
-                "type": "OBJECT",
-                "properties": {"photo": {"type": "INTEGER"}, "title": {"type": "STRING"}, "subtitle": {"type": "STRING"}, "visual": visual},
-                "required": ["photo", "title", "subtitle", "visual"],
-            },
+            "concept": {"type": "STRING"},
             "slides": {
                 "type": "ARRAY",
                 "items": {
                     "type": "OBJECT",
-                    "properties": {"photo": {"type": "INTEGER"}, "heading": {"type": "STRING"}, "body": {"type": "STRING"}, "visual": visual},
-                    "required": ["photo", "heading", "body", "visual"],
+                    "properties": {
+                        "photo": {"type": "INTEGER"},
+                        "layout": {"type": "STRING", "enum": list(LAYOUTS)},
+                        "title": {"type": "STRING"},
+                        "body": {"type": "STRING"},
+                        "cta": {"type": "STRING"},
+                        "visual": {"type": "STRING"},
+                    },
+                    "required": ["photo", "layout", "title", "body", "cta", "visual"],
                 },
-            },
-            "conclusion": {
-                "type": "OBJECT",
-                "properties": {
-                    "photo": {"type": "INTEGER"},
-                    "title": {"type": "STRING"},
-                    "body": {"type": "STRING"},
-                    "cta": {"type": "STRING"},
-                    "visual": visual,
-                },
-                "required": ["photo", "title", "body", "cta", "visual"],
             },
             "caption_parts": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": k, "maxItems": k},
             "hashtags": {"type": "ARRAY", "items": {"type": "STRING"}},
         },
-        "required": ["cover", "slides", "conclusion", "caption_parts", "hashtags"],
+        "required": ["concept", "slides", "caption_parts", "hashtags"],
     }
 
 
@@ -268,14 +267,14 @@ def plan_cardnews(
         tone=tone or "친근한",
         notes=notes.strip() or "없음",
         style=style.strip() or "없음",
-        research=research_notes.strip() or "(조사 자료 없음 — 사진과 사용자 정보만 사용)",
-        max_slides=MAX_CONTENT,
+        research=research_notes.strip() or "(조사 자료 없음)",
+        max_slides=MAX_SLIDES,
         k=len(names),
         names=", ".join(f"[{x}]" for x in names) or "(없음 — caption_parts 에 캡션 전체를 1개로)",
         template=template,
         refs=(
-            f"그 뒤에 첨부한 {len(references)}장은 연출 '참고 이미지'야. 슬라이드 사진으로 배정하지 말고(사진 번호 아님), "
-            "모든 visual 을 쓸 때 참고 이미지의 색감·조명·구도·분위기·스타일을 따라가도록 구체적으로 반영해."
+            f"\n그 뒤에 첨부한 {len(references)}장은 연출 '참고 이미지'야. 슬라이드 사진으로 배정하지 말고(사진 번호 아님), "
+            "모든 visual 에 참고 이미지의 색감·조명·구도·분위기·스타일을 구체적으로 반영해."
             if references
             else ""
         ),
@@ -289,13 +288,13 @@ def plan_cardnews(
         data = _gemini(
             settings.gemini_text_model,
             parts,
-            {"temperature": 0.6, "responseMimeType": "application/json", "responseSchema": _plan_schema(max(1, len(names)))},
+            {"temperature": 0.7, "responseMimeType": "application/json", "responseSchema": _plan_schema(max(1, len(names)))},
             timeout=55.0,
         )
         raw = json.loads(_text_of(data))
         design = _sanitize_plan(raw, n)
     except (GeminiError, ValueError, KeyError, TypeError) as exc:
-        log.warning("cardnews plan fallback: %s", exc)
+        log.warning("post plan fallback: %s", exc)
         design, engine, warning = fallback_plan(n, prompt), "template", f"Gemini 구성 실패로 기본 구성 사용: {exc}"
         raw = {"caption_parts": []}
     else:
@@ -326,95 +325,85 @@ def _clip(value: Any, limit: int) -> str:
 
 
 def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
-    """사진 번호·길이를 보정하고, 모든 사진이 내용 슬라이드에 최소 한 번 쓰이게 합니다. (-1 = 새 이미지 생성)"""
-
-    def idx(v: Any, default: int) -> int:
-        if v == -1:
-            return -1
-        return v if isinstance(v, int) and 0 <= v < n else default
+    """사진 번호·레이아웃·길이를 보정합니다. 컨셉에 맞지 않는 사진은 쓰지 않아도 됩니다 (-1 = 새 이미지 생성)."""
 
     def slide(s: dict[str, Any]) -> dict[str, Any]:
+        photo = s.get("photo")
+        photo = photo if isinstance(photo, int) and 0 <= photo < n else -1
+        layout = s.get("layout") if s.get("layout") in LAYOUTS else "overlay"
+        title, body = _clip(s.get("title"), 26), _clip(s.get("body"), 100)
+        if layout != "photo" and not (title or body):
+            layout = "photo"  # 글이 없으면 이미지만
         return {
-            "photo": idx(s.get("photo"), -1),
-            "heading": _clip(s.get("heading"), 20),
-            "body": _clip(s.get("body"), 90),
-            "visual": _clip(s.get("visual") or s.get("edit"), 600),
+            "photo": photo,
+            "layout": layout,
+            "title": "" if layout == "photo" else title,
+            "body": "" if layout == "photo" else body,
+            "cta": _clip(s.get("cta"), 16) if layout in ("overlay", "center") else "",
+            "visual": _clip(s.get("visual"), 700),
         }
 
-    slides = [slide(s) for s in (raw.get("slides") or []) if isinstance(s, dict)]
-    used = {s["photo"] for s in slides if s["photo"] >= 0}
-    for p in range(n):  # 빠진 사진은 뒤에 붙입니다
-        if p not in used:
-            slides.append({"photo": p, "heading": f"포인트 {len(slides) + 1}", "body": "", "visual": ""})
-    cover, concl = raw.get("cover") or {}, raw.get("conclusion") or {}
+    slides = [slide(s) for s in (raw.get("slides") or []) if isinstance(s, dict)][:MAX_SLIDES]
+    if not slides:
+        slides = fallback_plan(n, "")["slides"]
     return {
-        "cover": {
-            "photo": idx(cover.get("photo"), 0 if n else -1),
-            "title": _clip(cover.get("title"), 24),
-            "subtitle": _clip(cover.get("subtitle"), 40),
-            "visual": _clip(cover.get("visual") or cover.get("edit"), 600),
-        },
-        "slides": slides[:MAX_CONTENT],
-        "conclusion": {
-            "photo": idx(concl.get("photo"), n - 1 if n else -1),
-            "title": _clip(concl.get("title"), 24),
-            "body": _clip(concl.get("body"), 80),
-            "cta": _clip(concl.get("cta"), 16),
-            "visual": _clip(concl.get("visual") or concl.get("edit"), 600),
-        },
+        "concept": _clip(raw.get("concept"), 200),
+        "slides": slides,
         "hashtags": [str(t).lstrip("#").strip() for t in (raw.get("hashtags") or []) if str(t).strip()][:20],
     }
 
 
 def fallback_plan(n: int, prompt: str) -> dict[str, Any]:
-    topic = _clip(prompt.splitlines()[0] if prompt else "오늘의 기록", 22)
-    return {
-        "cover": {"photo": 0, "title": topic, "subtitle": "끝까지 넘겨 보세요 👉", "visual": ""},
-        "slides": [{"photo": i, "heading": f"포인트 {i + 1}", "body": "", "visual": ""} for i in range(n)],
-        "conclusion": {"photo": n - 1, "title": "오늘의 정리", "body": topic, "cta": "저장하고 다시 보기", "visual": ""},
-        "hashtags": [],
-    }
+    """Gemini 없이: 올린 사진을 순서대로 쓰고, 첫 장에만 주제를 얹습니다 (고정 문구 없음)."""
+    topic = _clip(prompt.splitlines()[0] if prompt else "", 26)
+    if n == 0:
+        return {"concept": topic, "slides": [{"photo": -1, "layout": "center" if topic else "photo", "title": topic, "body": "", "cta": "", "visual": ""}], "hashtags": []}
+    slides = [{"photo": i, "layout": "photo", "title": "", "body": "", "cta": "", "visual": ""} for i in range(min(n, MAX_SLIDES))]
+    if topic:
+        slides[0].update(layout="overlay", title=topic)
+    return {"concept": topic, "slides": slides, "hashtags": []}
 
 
 def slide_list(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    """렌더링 순서: 표지 → 내용 → 결론."""
-    return (
-        [{"role": "cover", **plan["cover"]}]
-        + [{"role": "content", **s} for s in plan["slides"]]
-        + [{"role": "conclusion", **plan["conclusion"]}]
-    )
+    """렌더링 순서. role 은 레이아웃 (예전 작업의 cover/content/conclusion 구조도 읽습니다)."""
+    if "cover" in plan:  # 이전 형식 호환
+        legacy = (
+            [{"role": "overlay", **plan["cover"], "body": plan["cover"].get("subtitle", "")}]
+            + [{"role": "panel", **s, "title": s.get("heading", "")} for s in plan.get("slides", [])]
+            + [{"role": "center", **plan["conclusion"]}]
+        )
+        return legacy
+    return [{"role": s["layout"], **s} for s in plan["slides"]]
 
 
 # ── 3) 이미지 연출 (편집 · 생성) ─────────────────────────────────────────
-# 내용 슬라이드는 위쪽 62% 에 이미지가 들어가므로 가로형, 표지·결론은 세로 4:5.
-ASPECT = {"cover": "4:5", "content": "4:3", "conclusion": "4:5"}
+# panel 은 위쪽 62% 에 이미지가 들어가므로 가로형, 나머지는 세로 4:5.
+ASPECT = {"photo": "4:5", "overlay": "4:5", "panel": "4:3", "center": "4:5"}
 
 
 def _visual_prompt(slide: dict[str, Any], *, topic: str, style: str, instruction: str, has_photo: bool) -> str:
-    message = " — ".join(
-        p for p in (slide.get("title") or slide.get("heading"), slide.get("subtitle") or slide.get("body")) if p
-    )
-    direction = instruction.strip() or slide.get("visual", "").strip() or "Show the subject clearly with natural, appealing light."
+    message = " — ".join(p for p in (slide.get("title"), slide.get("body")) if p)
+    direction = instruction.strip() or slide.get("visual", "").strip() or f"Depict: {message or topic}."
     base = (
         "Use the provided photo as the base. Keep its main subject recognizable, but you may re-compose the scene, "
-        "replace or clean up the background, adjust lighting and color, and add relevant objects so the image clearly "
-        "conveys the message."
+        "replace or clean up the background, adjust lighting and color, and add relevant objects so the image fits the concept."
         if has_photo
-        else "Create a new photorealistic image from scratch."
+        else "Create a new photorealistic image from scratch that shows exactly what this slide is about."
     )
     layout = {
-        "cover": "Keep the lower 40% of the frame simple and darker so a title can be placed there.",
-        "content": "Wide framing with the key subject centered.",
-        "conclusion": "Calm, uncluttered composition with soft contrast so text can sit on top.",
+        "photo": "Use the full frame.",
+        "overlay": "Keep the lower third of the frame simple and slightly darker so text can be placed there.",
+        "panel": "Wide framing with the key subject centered.",
+        "center": "Calm, uncluttered composition with soft contrast in the middle so a sentence can sit on top.",
     }[slide["role"]]
     return (
-        f"You are the art director of an Instagram content-marketing card-news post about: {topic}. "
-        f"This slide says (Korean): {message}. "
-        f"{base} Creative direction: {direction} "
+        f"You are the creative director of an Instagram post. The user's concept (keep it consistent across all images): {topic}. "
+        + (f"This image carries the message (Korean): {message}. " if message else "")
+        + f"{base} Creative direction: {direction} "
         + (f"Overall style requested by the user: {style}. " if style.strip() else "")
         + f"{layout} "
         "Absolutely no readable text, letters, numbers, logos, watermarks, UI labels or borders anywhere in the image. "
-        "High quality, realistic, Instagram-worthy."
+        "High quality, Instagram-worthy."
     )
 
 
@@ -548,63 +537,67 @@ def _draw_lines(draw, lines, font, x, y, fill, gap) -> int:
     return y
 
 
-def compose(photo: bytes, slide: dict[str, Any], *, index: int, total: int, handle: str, accent: str = "#6c5ce7") -> bytes:
+def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", **_: Any) -> bytes:
+    """레이아웃별로 이미지 위에 이 장의 글만 얹습니다 (배지·번호·쪽수·계정명 같은 고정 요소 없음)."""
     W, H = SIZE
     pad = 84
-    if slide["role"] == "content":
-        # 위 62% 사진 + 아래 밝은 패널
+    role = slide["role"]
+    title, body, cta = slide.get("title", ""), slide.get("body", ""), slide.get("cta", "")
+
+    if role == "photo" or not (title or body):
+        return to_jpeg(_cover_fit(photo, SIZE), 92)
+
+    if role == "panel":
         photo_h = int(H * 0.62)
         canvas = Image.new("RGB", SIZE, (250, 250, 248))
         canvas.paste(_cover_fit(photo, (W, photo_h)), (0, 0))
         draw = ImageDraw.Draw(canvas)
-        badge_font = _font("ExtraBold", 34)
-        num = f"{index:02d}"
-        draw.rounded_rectangle((pad, photo_h + 56, pad + 92, photo_h + 56 + 56), radius=28, fill=accent)
-        draw.text((pad + 46, photo_h + 84), num, font=badge_font, fill="white", anchor="mm")
-        y = photo_h + 140
-        y = _draw_lines(draw, _wrap(draw, slide.get("heading", ""), _font("ExtraBold", 58), W - pad * 2, 2), _font("ExtraBold", 58), pad, y, (17, 17, 17), 1.25)
-        _draw_lines(draw, _wrap(draw, slide.get("body", ""), _font("Medium", 36), W - pad * 2, 3), _font("Medium", 36), pad, y + 14, (80, 80, 84), 1.45)
-        foot = _font("Medium", 26)
-        draw.text((pad, H - 64), f"@{handle}", font=foot, fill=(140, 140, 146))
-        draw.text((W - pad, H - 64), f"{index + 1} / {total}", font=foot, fill=(140, 140, 146), anchor="ra")
+        draw.rectangle((pad, photo_h + 64, pad + 56, photo_h + 70), fill=accent)
+        y = photo_h + 100
+        tf, bf = _font("ExtraBold", 58), _font("Medium", 36)
+        y = _draw_lines(draw, _wrap(draw, title, tf, W - pad * 2, 2), tf, pad, y, (17, 17, 17), 1.25) if title else y
+        if body:
+            _draw_lines(draw, _wrap(draw, body, bf, W - pad * 2, 4), bf, pad, y + 14, (80, 80, 84), 1.45)
         return to_jpeg(canvas, 92)
 
     base = _cover_fit(photo, SIZE).convert("RGBA")
-    if slide["role"] == "cover":
-        base = Image.alpha_composite(base, _gradient(SIZE, 0.38, 0, 225))
+    if role == "overlay":
+        base = Image.alpha_composite(base, _gradient(SIZE, 0.45, 0, 220))
         draw = ImageDraw.Draw(base)
-        title_font, sub_font = _font("ExtraBold", 92), _font("Medium", 40)
-        title = _wrap(draw, slide.get("title", ""), title_font, W - pad * 2, 3)
-        sub = _wrap(draw, slide.get("subtitle", ""), sub_font, W - pad * 2, 2)
-        block = len(title) * int(title_font.size * 1.18) + 24 + len(sub) * int(sub_font.size * 1.4)
-        y = H - pad - 40 - block
-        draw.rounded_rectangle((pad, y - 76, pad + 150, y - 30), radius=23, fill=accent)
-        draw.text((pad + 75, y - 53), "CARD NEWS", font=_font("ExtraBold", 22), fill="white", anchor="mm")
-        y = _draw_lines(draw, title, title_font, pad, y, "white", 1.18)
-        _draw_lines(draw, sub, sub_font, pad, y + 24, (235, 235, 240), 1.4)
-        draw.text((pad, pad - 20), f"@{handle}", font=_font("Medium", 28), fill=(255, 255, 255, 230))
+        tf, bf = _font("ExtraBold", 84), _font("Medium", 40)
+        tl = _wrap(draw, title, tf, W - pad * 2, 3) if title else []
+        bl = _wrap(draw, body, bf, W - pad * 2, 3) if body else []
+        cta_h = 84 + 32 if cta else 0
+        block = len(tl) * int(tf.size * 1.18) + (24 if tl and bl else 0) + len(bl) * int(bf.size * 1.4) + cta_h
+        y = H - pad - block
+        y = _draw_lines(draw, tl, tf, pad, y, "white", 1.18)
+        y = _draw_lines(draw, bl, bf, pad, y + (24 if tl and bl else 0), (235, 235, 240), 1.4)
+        if cta:
+            cf = _font("ExtraBold", 32)
+            cw = int(draw.textlength(cta, font=cf)) + 80
+            draw.rounded_rectangle((pad, y + 32, pad + cw, y + 32 + 76), radius=38, fill=accent)
+            draw.text((pad + cw // 2, y + 32 + 38), cta, font=cf, fill="white", anchor="mm")
         return to_jpeg(base, 92)
 
-    # conclusion: 사진 위 어두운 막 + 가운데 정렬
+    # center: 이미지 위 어두운 막 + 가운데 큰 문장
     base = base.filter(ImageFilter.GaussianBlur(2))
-    base = Image.alpha_composite(base, Image.new("RGBA", SIZE, (8, 8, 12, 168)))
+    base = Image.alpha_composite(base, Image.new("RGBA", SIZE, (8, 8, 12, 150)))
     draw = ImageDraw.Draw(base)
-    title_font, body_font, cta_font = _font("ExtraBold", 76), _font("Medium", 38), _font("ExtraBold", 34)
-    title = _wrap(draw, slide.get("title", ""), title_font, W - pad * 2, 2)
-    body = _wrap(draw, slide.get("body", ""), body_font, W - pad * 2, 3)
-    block = len(title) * int(title_font.size * 1.2) + 36 + len(body) * int(body_font.size * 1.45) + 60 + 84
+    tf, bf, cf = _font("ExtraBold", 76), _font("Medium", 38), _font("ExtraBold", 32)
+    tl = _wrap(draw, title, tf, W - pad * 2, 3) if title else []
+    bl = _wrap(draw, body, bf, W - pad * 2, 4) if body else []
+    block = len(tl) * int(tf.size * 1.2) + (36 if tl and bl else 0) + len(bl) * int(bf.size * 1.45) + (60 + 76 if cta else 0)
     y = (H - block) // 2
-    for line in title:
-        draw.text((W // 2, y), line, font=title_font, fill="white", anchor="ma")
-        y += int(title_font.size * 1.2)
-    y += 36
-    for line in body:
-        draw.text((W // 2, y), line, font=body_font, fill=(230, 230, 236), anchor="ma")
-        y += int(body_font.size * 1.45)
-    cta = slide.get("cta") or "저장하고 다시 보기"
-    cw = int(draw.textlength(cta, font=cta_font)) + 96
-    y += 60
-    draw.rounded_rectangle(((W - cw) // 2, y, (W + cw) // 2, y + 84), radius=42, fill=accent)
-    draw.text((W // 2, y + 42), cta, font=cta_font, fill="white", anchor="mm")
-    draw.text((W // 2, H - 72), f"@{handle}", font=_font("Medium", 28), fill=(210, 210, 216), anchor="ma")
+    for line in tl:
+        draw.text((W // 2, y), line, font=tf, fill="white", anchor="ma")
+        y += int(tf.size * 1.2)
+    y += 36 if tl and bl else 0
+    for line in bl:
+        draw.text((W // 2, y), line, font=bf, fill=(230, 230, 236), anchor="ma")
+        y += int(bf.size * 1.45)
+    if cta:
+        cw = int(draw.textlength(cta, font=cf)) + 80
+        y += 60
+        draw.rounded_rectangle(((W - cw) // 2, y, (W + cw) // 2, y + 76), radius=38, fill=accent)
+        draw.text((W // 2, y + 38), cta, font=cf, fill="white", anchor="mm")
     return to_jpeg(base, 92)
