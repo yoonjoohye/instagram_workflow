@@ -165,6 +165,10 @@ class AutoReplyRule(Base):
     link_url: Mapped[str] = mapped_column(Text, default="")
     link_message: Mapped[str] = mapped_column(Text, default="")
     not_following_message: Mapped[str] = mapped_column(Text, default="")
+    # 스튜디오 밖에서 올린 게시물의 규칙을 목록에 보여주기 위한 표시용 정보
+    post_caption: Mapped[str] = mapped_column(Text, default="")
+    post_thumbnail: Mapped[str] = mapped_column(Text, default="")
+    post_permalink: Mapped[str] = mapped_column(Text, default="")
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(

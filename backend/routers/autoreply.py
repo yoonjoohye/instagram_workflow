@@ -9,7 +9,7 @@ from ..config import settings
 from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, AutoReplyRule, CommentReply, GenerationJob
-from ..schemas import AutoReplyIn, AutoReplyToggle
+from ..schemas import AutoReplyIn, AutoReplyMediaIn, AutoReplyToggle
 from ..services.autoreply import DEFAULTS
 from ..services.meta_graph import GraphError
 
@@ -40,7 +40,24 @@ def _rule_dict(rule: AutoReplyRule | None, job: GenerationJob | None = None) -> 
             "permalink": job.permalink,
             "thumbnail_url": (visual or {}).get("thumbnail_url") or (visual or {}).get("url", ""),
         }
+    elif rule is not None and (rule.post_caption or rule.post_thumbnail):
+        base["post"] = {
+            "prompt": rule.post_caption.split("\n")[0] or "(캡션 없음)",
+            "status": "published",
+            "permalink": rule.post_permalink,
+            "thumbnail_url": rule.post_thumbnail,
+        }
     return base
+
+
+def _apply(rule: AutoReplyRule, body: AutoReplyIn) -> None:
+    rule.enabled = int(body.enabled)
+    rule.keywords = ",".join(k.strip() for k in body.keywords.split(",") if k.strip())
+    rule.public_reply = body.public_reply
+    rule.dm_prompt = body.dm_prompt
+    rule.link_url = body.link_url.strip()
+    rule.link_message = body.link_message
+    rule.not_following_message = body.not_following_message
 
 
 def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
@@ -116,16 +133,59 @@ def save_job_rule(
         db.add(rule)
     # 게시 전이면 비어 있고, 게시되면 workflow.publish 가 채웁니다.
     rule.ig_media_id = job.ig_media_id or ""
-    rule.enabled = int(body.enabled)
-    rule.keywords = ",".join(k.strip() for k in body.keywords.split(",") if k.strip())
-    rule.public_reply = body.public_reply
-    rule.dm_prompt = body.dm_prompt
-    rule.link_url = body.link_url.strip()
-    rule.link_message = body.link_message
-    rule.not_following_message = body.not_following_message
+    _apply(rule, body)
     db.commit()
     db.refresh(rule)
     return _rule_dict(rule, job)
+
+
+def _media_rule(db: Session, account: Account, media_id: str) -> AutoReplyRule | None:
+    return db.scalar(
+        select(AutoReplyRule).where(
+            AutoReplyRule.account_id == account.id, AutoReplyRule.ig_media_id == media_id
+        )
+    )
+
+
+@router.get("/media/{media_id}")
+def get_media_rule(
+    media_id: str, account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> dict:
+    """게시물 ID 기준 규칙 — 스튜디오 밖에서 올린 기존 게시물용 (스튜디오 게시물도 같은 규칙을 찾습니다)."""
+    rule = _media_rule(db, account, media_id)
+    job = db.get(GenerationJob, rule.job_id) if rule and rule.job_id else None
+    data = _rule_dict(rule, job)
+    data["ig_media_id"] = media_id
+    return data
+
+
+@router.put("/media/{media_id}")
+def save_media_rule(
+    media_id: str,
+    body: AutoReplyMediaIn,
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+) -> dict:
+    rule = _media_rule(db, account, media_id)
+    if rule is None:
+        # 스튜디오에서 게시한 게시물이면 그 작업에 연결합니다.
+        job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.account_id == account.id, GenerationJob.ig_media_id == media_id
+            )
+        )
+        rule = db.scalar(select(AutoReplyRule).where(AutoReplyRule.job_id == job.id)) if job else None
+        if rule is None:
+            rule = AutoReplyRule(account_id=account.id, job_id=job.id if job else None)
+            db.add(rule)
+    rule.ig_media_id = media_id
+    _apply(rule, body)
+    rule.post_caption = body.post_caption
+    rule.post_thumbnail = body.post_thumbnail
+    rule.post_permalink = body.post_permalink
+    db.commit()
+    db.refresh(rule)
+    return _rule_dict(rule, db.get(GenerationJob, rule.job_id) if rule.job_id else None)
 
 
 @router.patch("/rules/{rule_id}")

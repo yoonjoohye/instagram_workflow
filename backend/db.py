@@ -41,6 +41,11 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 # create_all 은 기존 테이블에 컬럼을 추가하지 않으므로, 나중에 생긴 컬럼은 여기서 보강합니다.
 _ADDED_COLUMNS = {
     "insight_snapshots": {"totals_synced": "INTEGER DEFAULT 0"},
+    "auto_reply_rules": {
+        "post_caption": "TEXT DEFAULT ''",
+        "post_thumbnail": "TEXT DEFAULT ''",
+        "post_permalink": "TEXT DEFAULT ''",
+    },
 }
 
 

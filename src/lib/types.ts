@@ -121,6 +121,8 @@ export type IgPost = {
   timestamp: string;
   like_count?: number;
   comments_count?: number;
+  is_comment_enabled?: boolean;
+  auto_reply?: { id: number; enabled: boolean } | null;
   insights: Partial<
     Record<
       | "reach"

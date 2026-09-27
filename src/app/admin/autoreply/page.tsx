@@ -91,7 +91,7 @@ export default function AutoReplyPage() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <Card title="게시물별 규칙" subtitle="규칙은 스튜디오의 각 게시물 화면에서 만들고 수정합니다.">
+        <Card title="게시물별 규칙" subtitle="스튜디오 게시 화면이나 게시물 성과의 '자동 응답' 버튼에서 만들고 수정합니다.">
           {rules.loading && !rules.data ? (
             <Skeleton className="h-40" />
           ) : !rules.data?.data.length ? (
@@ -123,7 +123,7 @@ export default function AutoReplyPage() {
                       {r.enabled ? "켜짐" : "꺼짐"}
                     </Button>
                     <Link
-                      href={`/admin/studio?job=${r.job_id}`}
+                      href={r.job_id ? `/admin/studio?job=${r.job_id}` : `/admin/posts?autoreply=${r.ig_media_id}`}
                       className="inline-flex h-8 items-center rounded-lg px-2 text-[13px] text-fg-2 hover:bg-surface-2"
                     >
                       수정

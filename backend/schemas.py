@@ -39,5 +39,16 @@ class AutoReplyIn(BaseModel):
     not_following_message: str = Field(default="", max_length=1000)
 
 
+class AutoReplyMediaIn(AutoReplyIn):
+    # 표시용 게시물 정보 (게시물 성과 화면에서 함께 보냅니다)
+    post_caption: str = Field(default="", max_length=500)
+    post_thumbnail: str = Field(default="", max_length=2000)
+    post_permalink: str = Field(default="", max_length=500)
+
+
+class CommentsToggle(BaseModel):
+    enabled: bool
+
+
 class AutoReplyToggle(BaseModel):
     enabled: bool

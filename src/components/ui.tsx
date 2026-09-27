@@ -1,6 +1,6 @@
 "use client";
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -243,6 +243,59 @@ export function Field({ label, hint, children, htmlFor }: { label: ReactNode; hi
       </label>
       {children}
       {hint && <p className="text-[12px] text-fg-3">{hint}</p>}
+    </div>
+  );
+}
+
+/** 가운데 뜨는 대화상자. 배경 클릭·Esc 로 닫힙니다. */
+export function Dialog({
+  open,
+  onClose,
+  title,
+  subtitle,
+  children,
+  footer,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-6" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="flex max-h-[92dvh] w-full max-w-xl flex-col rounded-t-2xl border border-line bg-surface-1 shadow-2xl sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold">{title}</h2>
+            {subtitle && <div className="mt-0.5 text-[13px] text-fg-3">{subtitle}</div>}
+          </div>
+          <button onClick={onClose} className="text-fg-3 hover:text-fg" aria-label="닫기">
+            ✕
+          </button>
+        </header>
+        <div className="overflow-y-auto px-5 py-4">{children}</div>
+        {footer && <footer className="border-t border-line px-5 py-3">{footer}</footer>}
+      </div>
     </div>
   );
 }

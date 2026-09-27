@@ -143,7 +143,7 @@ def recent_media(client: GraphClient, ig_user_id: str, *, limit: int = 12) -> li
         f"{ig_user_id}/media",
         {
             "fields": "id,caption,media_type,media_product_type,media_url,thumbnail_url,"
-            "permalink,timestamp,like_count,comments_count",
+            "permalink,timestamp,like_count,comments_count,is_comment_enabled",
             "limit": limit,
         },
     )

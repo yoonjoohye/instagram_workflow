@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import current_account, graph_for
-from ..models import Account, InsightSnapshot, KnownVisitor
+from ..models import Account, AutoReplyRule, InsightSnapshot, KnownVisitor
+from ..schemas import CommentsToggle
 from ..security import encrypt
 from ..services import insights as svc
 from ..services.meta_graph import GraphError
@@ -250,6 +251,7 @@ def _persist_visitors(db: Session, account: Account, rows: list[dict]) -> None:
 def posts(
     limit: int = Query(default=12, ge=1, le=50),
     account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
 ) -> dict:
     """최근 게시물 + 게시물별 성과."""
     with graph_for(account) as client:
@@ -260,7 +262,45 @@ def posts(
         # 게시물별 인사이트 호출을 동시에 보냅니다 (순차로는 12개에 ~9초).
         with ThreadPoolExecutor(max_workers=6) as pool:
             insights = list(pool.map(lambda m: svc.media_insights(client, m), media))
-    return {"data": [{**m, "insights": i} for m, i in zip(media, insights)]}
+    rules = {
+        r.ig_media_id: r
+        for r in db.scalars(
+            select(AutoReplyRule).where(
+                AutoReplyRule.account_id == account.id, AutoReplyRule.ig_media_id != ""
+            )
+        ).all()
+    }
+    return {
+        "data": [
+            {
+                **m,
+                "insights": i,
+                "auto_reply": (
+                    {"id": rules[m["id"]].id, "enabled": bool(rules[m["id"]].enabled)}
+                    if m["id"] in rules
+                    else None
+                ),
+            }
+            for m, i in zip(media, insights)
+        ]
+    }
+
+
+@router.post("/posts/{media_id}/comments")
+def set_comments_enabled(
+    media_id: str,
+    body: CommentsToggle,
+    account: Account = Depends(current_account),
+) -> dict:
+    """게시물 댓글 켜기/끄기 — Instagram API 가 기존 게시물에 허용하는 유일한 수정입니다.
+    (캡션 수정은 API 에 없고, 삭제는 Facebook 로그인 방식에서만 지원됩니다.)"""
+    with graph_for(account) as client:
+        try:
+            client.post(media_id, {"comment_enabled": "true" if body.enabled else "false"})
+            current = client.get(media_id, {"fields": "is_comment_enabled"})
+        except GraphError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+    return {"id": media_id, "is_comment_enabled": bool(current.get("is_comment_enabled", body.enabled))}
 
 
 @router.get("/cron/sync-insights")
