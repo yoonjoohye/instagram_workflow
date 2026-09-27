@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, toApiError } from "@/lib/api";
+import { api, toApiError, useApi } from "@/lib/api";
 import type { Job } from "@/lib/types";
 import { IconSpark } from "./icons";
 import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
@@ -57,6 +57,8 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [format, setFormat] = useState("");
   const refInput = useRef<HTMLInputElement>(null);
   const [accent, setAccent] = useState("#6c5ce7");
+  const [font, setFont] = useState("auto");
+  const fonts = useApi<{ data: { key: string; label: string; preview: string }[] }>("/cardnews/fonts");
   const [step, setStep] = useState<Step | null>(null);
   const [error, setError] = useState<string>();
   const [dragging, setDragging] = useState(false);
@@ -140,6 +142,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           research_notes: research.notes,
           sources: research.sources,
           accent,
+          font,
         },
       });
       const total = plan.slides.length;
@@ -245,6 +248,41 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           </p>
         </div>
 
+
+        <Field label="글씨체" hint="자동이면 Gemini가 형식에 맞게 골라요 (손글씨 메모 → 손글씨체, 날림 요청 → 날림체 등). 연출 방향에 글씨체를 적어도 돼요.">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setFont("auto")}
+              aria-pressed={font === "auto"}
+              className={cx(
+                "flex h-14 items-center justify-center rounded-lg border text-[13px] font-medium",
+                font === "auto" ? "border-accent bg-accent/8 text-fg" : "border-line-strong text-fg-2 hover:bg-surface-2",
+              )}
+            >
+              ✨ 자동 (Gemini가 선택)
+            </button>
+            {(fonts.data?.data ?? []).map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                disabled={busy}
+                onClick={() => setFont(f.key)}
+                aria-pressed={font === f.key}
+                title={f.label}
+                className={cx(
+                  "flex h-14 flex-col items-start justify-center overflow-hidden rounded-lg border px-2 text-left",
+                  font === f.key ? "border-accent bg-accent/8" : "border-line-strong hover:bg-surface-2",
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={f.preview} alt="" className="h-6 w-auto max-w-full object-contain object-left" loading="lazy" />
+                <span className="mt-0.5 truncate text-[11px] text-fg-3">{f.label}</span>
+              </button>
+            ))}
+          </div>
+        </Field>
 
         <div
           onDragOver={(e) => {

@@ -59,7 +59,7 @@ Gemini 키가 없으면 올린 사진을 기본 보정해 게시물로 만듭니
 5. **합성**: 레이아웃대로 한글 글자를 Pretendard 폰트로 얹음 (고정 배지·번호·계정명 없음) → 검수(장별 다시 만들기) → 게시
 
 업로드·결과 이미지는 DB 에 보관되고 `/api/py/media/<id>.jpg` 로 제공되어 Instagram 이 가져갑니다. 슬라이드는 Vercel 함수 시간 제한(60초) 때문에 한 장씩 요청해 만듭니다.
-폰트: Pretendard (SIL Open Font License, `backend/assets/fonts/LICENSE.txt`).
+글씨체 10종(모두 SIL Open Font License, `backend/assets/fonts/`): 프리텐다드, 블랙한산스, 도현, 주아, 나눔펜·개구(손글씨), 나눔붓(붓 손글씨), 동해독도(날림체), 송명(궁서 느낌), 나눔명조. 자동이면 Gemini가 형식에 맞게 고르고, 직접 고를 수도 있습니다. (궁서체는 Microsoft 소유 폰트라 포함할 수 없어 송명체로 대신합니다.)
 
 ## 댓글 자동 응답 (팔로워 전용 링크)
 

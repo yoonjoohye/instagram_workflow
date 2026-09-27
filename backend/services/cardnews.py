@@ -206,6 +206,11 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
   'real photo with white hand-drawn iPad marker doodles and Korean handwriting' / 'natural film photography, warm grain').
   연출 방향과 참고 이미지를 가장 크게 반영하고, 요청이 그림체면 실사로 바꾸지 마.
 
+3) font: 서버가 글자를 얹는 장(overlay/panel/center)에 쓸 글씨체를 골라. 연출 방향에 글씨체 언급이 있으면 그대로 따르고, 없으면 형식에 맞게:
+  {fonts}
+  손글씨 메모면 nanum_pen/gaegu, 날림체면 east_sea_dokdo, 붓글씨·전통·궁서 느낌이면 nanum_brush/song_myung, 우아하면 nanum_myeongjo,
+  강한 제목은 black_han_sans/do_hyeon, 귀여우면 jua, 깔끔한 정보형은 pretendard. designed 장의 글자 느낌도 이 글씨체와 맞춰 art_style 에 적어.
+
 슬라이드 규칙
 - slides 는 1~{max_slides}장. 형식과 컨셉에 필요한 만큼만. 1장이면 단일 게시물이 돼.
 - 첨부 사진은 컨셉에 맞는 것만 골라 써 (웹툰처럼 그림체면 사진을 그 그림체로 다시 그리는 참고로 써). 맞는 사진이 없으면 photo 를 -1 로 두고 새로 만들게 해.
@@ -253,6 +258,7 @@ def _plan_schema(k: int) -> dict[str, Any]:
             "concept": {"type": "STRING"},
             "format": {"type": "STRING"},
             "art_style": {"type": "STRING"},
+            "font": {"type": "STRING", "enum": list(FONTS)},
             "slides": {
                 "type": "ARRAY",
                 "items": {
@@ -272,7 +278,7 @@ def _plan_schema(k: int) -> dict[str, Any]:
             "caption_parts": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": k, "maxItems": k},
             "hashtags": {"type": "ARRAY", "items": {"type": "STRING"}},
         },
-        "required": ["requirements", "concept", "format", "art_style", "slides", "caption_parts", "hashtags"],
+        "required": ["requirements", "concept", "format", "art_style", "font", "slides", "caption_parts", "hashtags"],
     }
 
 
@@ -302,6 +308,7 @@ def plan_cardnews(
         k=len(names),
         names=", ".join(f"[{x}]" for x in names) or "(없음 — caption_parts 에 캡션 전체를 1개로)",
         template=template,
+        fonts=" / ".join(f"{k}({v['label']})" for k, v in FONTS.items()),
         refs=(
             f"\n그 뒤에 첨부한 {len(references)}장은 연출 '참고 이미지'야. 슬라이드 사진으로 배정하지 말고(사진 번호 아님), "
             "모든 visual 에 참고 이미지의 색감·조명·구도·분위기·스타일을 구체적으로 반영해."
@@ -388,6 +395,7 @@ def _sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
         "concept": _clip(raw.get("concept"), 200),
         "format": _clip(raw.get("format"), 60),
         "art_style": _clip(raw.get("art_style"), 400),
+        "font": font_key(raw.get("font")),
         "slides": slides,
         "hashtags": [str(t).lstrip("#").strip() for t in (raw.get("hashtags") or []) if str(t).strip()][:20],
     }
@@ -430,6 +438,7 @@ def _visual_prompt(
     has_photo: bool,
     art_style: str = "",
     post_format: str = "",
+    font: str = "",
 ) -> str:
     """이미지 모델 지시문. 사용자 연출 방향을 맨 앞(최우선)에, 게시물 전체 그림체를 모든 장에 공통으로."""
     role = slide["role"]
@@ -461,6 +470,8 @@ def _visual_prompt(
             lines.append(
                 "The image must include this Korean text as part of the design (speech bubbles, handwriting, doodle labels or "
                 f"a headline, as fitting the style), written exactly as given, character by character: «{text}». "
+                + (f"Lettering style: {FONTS[font]['desc']}. " if font in FONTS else "")
+                + ""
                 "Keep every Korean character correct and legible. Do not add any other text, watermark or logo."
             )
         else:
@@ -512,6 +523,7 @@ def render_visual(
     references: list[bytes] | None = None,
     art_style: str = "",
     post_format: str = "",
+    font: str = "",
 ) -> tuple[bytes, str]:
     """(이미지, 엔진). 사진이 있으면 연출 편집, 없으면(-1) 새로 생성. 실패하면 기본 보정/배경.
     references 는 색감·분위기만 참고할 스타일 이미지 (첫 이미지 = 편집할 사진)."""
@@ -524,6 +536,7 @@ def render_visual(
         has_photo=photo is not None,
         art_style=art_style,
         post_format=post_format,
+        font=font,
     )
     if references:
         which = f"The last {len(references)} attached image(s)" if photo is not None else f"The {len(references)} attached image(s)"
@@ -559,8 +572,42 @@ def basic_enhance(photo: bytes) -> bytes:
 
 
 # ── 4) 카드 합성 ───────────────────────────────────────────────────────
-def _font(weight: str, size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(FONT_DIR / f"Pretendard-{weight}.otf"), size)
+# 글자를 서버가 얹는 장에 쓰는 글씨체 (모두 SIL OFL — 상업적 사용 가능).
+# scale: 손글씨체는 같은 크기에서 작아 보여 키웁니다. desc: 이미지 모델이 글자를 그릴 때 참고할 설명.
+FONTS: dict[str, dict[str, Any]] = {
+    "pretendard": {"label": "프리텐다드 · 기본 고딕", "title": "Pretendard-ExtraBold.otf", "body": "Pretendard-Medium.otf", "scale": 1.0, "desc": "clean modern Korean sans-serif"},
+    "black_han_sans": {"label": "블랙한산스 · 굵은 제목", "title": "BlackHanSans-Regular.ttf", "body": "Pretendard-Medium.otf", "scale": 1.0, "desc": "very heavy bold Korean display type"},
+    "do_hyeon": {"label": "도현 · 각진 제목", "title": "DoHyeon-Regular.ttf", "body": "DoHyeon-Regular.ttf", "scale": 1.05, "desc": "blocky condensed Korean display type"},
+    "jua": {"label": "주아 · 둥글고 귀여운", "title": "Jua-Regular.ttf", "body": "Jua-Regular.ttf", "scale": 1.0, "desc": "rounded cute Korean type"},
+    "nanum_pen": {"label": "나눔펜 · 손글씨", "title": "NanumPenScript-Regular.ttf", "body": "NanumPenScript-Regular.ttf", "scale": 1.4, "desc": "casual Korean pen handwriting"},
+    "gaegu": {"label": "개구 · 귀여운 손글씨", "title": "Gaegu-Bold.ttf", "body": "Gaegu-Bold.ttf", "scale": 1.2, "desc": "cute rounded Korean handwriting"},
+    "nanum_brush": {"label": "나눔붓 · 붓 손글씨", "title": "NanumBrushScript-Regular.ttf", "body": "NanumBrushScript-Regular.ttf", "scale": 1.35, "desc": "Korean brush-pen handwriting"},
+    "east_sea_dokdo": {"label": "동해독도 · 날림체", "title": "EastSeaDokdo-Regular.ttf", "body": "EastSeaDokdo-Regular.ttf", "scale": 1.45, "desc": "rough, quick scribbled Korean handwriting"},
+    "song_myung": {"label": "송명 · 궁서 느낌 붓 명조", "title": "SongMyung-Regular.ttf", "body": "SongMyung-Regular.ttf", "scale": 1.05, "desc": "traditional Korean brush serif (Gungseo-like)"},
+    "nanum_myeongjo": {"label": "나눔명조 · 명조", "title": "NanumMyeongjo-ExtraBold.ttf", "body": "NanumMyeongjo-Regular.ttf", "scale": 1.0, "desc": "elegant Korean serif (Myeongjo)"},
+}
+DEFAULT_FONT = "pretendard"
+
+
+def font_key(key: str | None) -> str:
+    return key if key in FONTS else DEFAULT_FONT
+
+
+def _font(kind: str, size: int, key: str = DEFAULT_FONT) -> ImageFont.FreeTypeFont:
+    """kind: 'title' | 'body' (예전 호출의 'ExtraBold'/'Medium' 도 받음)."""
+    spec = FONTS[font_key(key)]
+    kind = "title" if kind in ("title", "ExtraBold") else "body"
+    return ImageFont.truetype(str(FONT_DIR / spec[kind]), int(size * spec["scale"]))
+
+
+def font_preview(key: str, text: str = "가나다 손글씨 Aa 123") -> bytes:
+    """폼에서 고를 때 보여줄 미리보기 (실제 합성과 같은 렌더링)."""
+    img = Image.new("RGB", (560, 96), (252, 252, 251))
+    draw = ImageDraw.Draw(img)
+    draw.text((20, 48), text, font=_font("title", 44, key), fill=(17, 17, 17), anchor="lm")
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
 
 
 def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width: int, max_lines: int) -> list[str]:
@@ -620,7 +667,7 @@ def _draw_lines(draw, lines, font, x, y, fill, gap) -> int:
     return y
 
 
-def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", **_: Any) -> bytes:
+def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", font: str = DEFAULT_FONT, **_: Any) -> bytes:
     """레이아웃별로 이미지 위에 이 장의 글만 얹습니다 (배지·번호·쪽수·계정명 같은 고정 요소 없음)."""
     W, H = SIZE
     pad = 84
@@ -637,7 +684,7 @@ def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", **_
         draw = ImageDraw.Draw(canvas)
         draw.rectangle((pad, photo_h + 64, pad + 56, photo_h + 70), fill=accent)
         y = photo_h + 100
-        tf, bf = _font("ExtraBold", 58), _font("Medium", 36)
+        tf, bf = _font("title", 58, font), _font("body", 36, font)
         y = _draw_lines(draw, _wrap(draw, title, tf, W - pad * 2, 2), tf, pad, y, (17, 17, 17), 1.25) if title else y
         if body:
             _draw_lines(draw, _wrap(draw, body, bf, W - pad * 2, 4), bf, pad, y + 14, (80, 80, 84), 1.45)
@@ -647,7 +694,7 @@ def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", **_
     if role == "overlay":
         base = Image.alpha_composite(base, _gradient(SIZE, 0.45, 0, 220))
         draw = ImageDraw.Draw(base)
-        tf, bf = _font("ExtraBold", 84), _font("Medium", 40)
+        tf, bf = _font("title", 84, font), _font("body", 40, font)
         tl = _wrap(draw, title, tf, W - pad * 2, 3) if title else []
         bl = _wrap(draw, body, bf, W - pad * 2, 3) if body else []
         cta_h = 84 + 32 if cta else 0
@@ -656,7 +703,7 @@ def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", **_
         y = _draw_lines(draw, tl, tf, pad, y, "white", 1.18)
         y = _draw_lines(draw, bl, bf, pad, y + (24 if tl and bl else 0), (235, 235, 240), 1.4)
         if cta:
-            cf = _font("ExtraBold", 32)
+            cf = _font("title", 32, font)
             cw = int(draw.textlength(cta, font=cf)) + 80
             draw.rounded_rectangle((pad, y + 32, pad + cw, y + 32 + 76), radius=38, fill=accent)
             draw.text((pad + cw // 2, y + 32 + 38), cta, font=cf, fill="white", anchor="mm")
@@ -666,7 +713,7 @@ def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", **_
     base = base.filter(ImageFilter.GaussianBlur(2))
     base = Image.alpha_composite(base, Image.new("RGBA", SIZE, (8, 8, 12, 150)))
     draw = ImageDraw.Draw(base)
-    tf, bf, cf = _font("ExtraBold", 76), _font("Medium", 38), _font("ExtraBold", 32)
+    tf, bf, cf = _font("title", 76, font), _font("body", 38, font), _font("title", 32, font)
     tl = _wrap(draw, title, tf, W - pad * 2, 3) if title else []
     bl = _wrap(draw, body, bf, W - pad * 2, 4) if body else []
     block = len(tl) * int(tf.size * 1.2) + (36 if tl and bl else 0) + len(bl) * int(bf.size * 1.45) + (60 + 76 if cta else 0)

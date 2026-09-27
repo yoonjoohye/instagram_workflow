@@ -93,6 +93,7 @@ class PlanIn(BaseModel):
     sources: list[Source] = Field(default_factory=list, max_length=20)
     reference_ids: list[str] = Field(default_factory=list, max_length=3)  # 연출 참고 이미지
     accent: str = Field(default="#6c5ce7", pattern=r"^#[0-9a-fA-F]{6}$")
+    font: str = Field(default="auto", max_length=40)  # auto = Gemini 가 형식에 맞게 선택
 
 
 class RenderIn(BaseModel):
@@ -111,6 +112,23 @@ def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
     if not job or job.account_id != account.id or not isinstance(job.plan, dict) or not job.plan.get("slides"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
     return job
+
+
+@router.get("/cardnews/fonts")
+def fonts() -> dict:
+    """고를 수 있는 글씨체 목록 (미리보기 이미지 주소 포함)."""
+    return {
+        "data": [
+            {"key": k, "label": v["label"], "preview": f"/api/py/cardnews/fonts/{k}.png"} for k, v in svc.FONTS.items()
+        ]
+    }
+
+
+@router.get("/cardnews/fonts/{key}.png")
+def font_preview(key: str) -> Response:
+    if key not in svc.FONTS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "없는 글씨체입니다.")
+    return Response(svc.font_preview(key), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.post("/cardnews/research")
@@ -155,6 +173,8 @@ def plan(body: PlanIn, account: Account = Depends(current_account), db: Session 
             "reference_ids": body.reference_ids,
             "style": body.style,
             "accent": body.accent,
+            # 사용자가 고른 글씨체가 있으면 Gemini 선택보다 우선
+            "font": svc.font_key(body.font) if body.font in svc.FONTS else design.get("font", svc.DEFAULT_FONT),
             "topic": body.prompt,
             "sources": [s.model_dump() for s in body.sources],
         },
@@ -200,13 +220,12 @@ def render_slide(
         references=references,
         art_style=job.plan.get("art_style", ""),
         post_format=job.plan.get("format", ""),
+        font=job.plan.get("font", ""),
     )
     if slide["role"] == "designed" and engine.startswith("basic") and slide.get("image_text"):
         # 이미지 생성이 실패하면 그림 속 글자(말풍선·손글씨)가 사라지므로 서버 글자로라도 내용을 살립니다.
         slide = {**slide, "role": "overlay", "title": slide["image_text"], "body": ""}
-    card = svc.compose(
-        edited, slide, index=index, total=len(slides), handle=account.username, accent=job.plan.get("accent", "#6c5ce7")
-    )
+    card = svc.compose(edited, slide, accent=job.plan.get("accent", "#6c5ce7"), font=job.plan.get("font", svc.DEFAULT_FONT))
     blob = _save_blob(db, account, card, *svc.SIZE, kind="slide")
 
     assets = list(job.assets or [])
