@@ -1,6 +1,9 @@
 """Graph API 얇은 래퍼.
 
-문서: https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login
+로그인 방식(settings.auth_mode)에 따라 호스트가 달라집니다.
+  facebook : graph.facebook.com  — https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login
+  instagram: graph.instagram.com — https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login
+게시/인사이트/댓글 엔드포인트 모양은 두 방식이 같아서 나머지 코드는 공유합니다.
 """
 from __future__ import annotations
 
@@ -27,6 +30,17 @@ SCOPES = [
     "business_management",
 ]
 
+# Instagram API with Instagram Login 이 요구하는 권한.
+IG_SCOPES = [
+    "instagram_business_basic",
+    "instagram_business_content_publish",
+    "instagram_business_manage_insights",
+    "instagram_business_manage_comments",
+]
+
+IG_AUTHORIZE_URL = "https://www.instagram.com/oauth/authorize"
+IG_TOKEN_URL = "https://api.instagram.com/oauth/access_token"
+
 
 class GraphError(RuntimeError):
     def __init__(self, message: str, *, status: int = 502, payload: Any = None):
@@ -45,7 +59,9 @@ def _raise_for_graph(resp: httpx.Response) -> dict[str, Any]:
         msg = err.get("error_user_msg") or err.get("message") or "알 수 없는 Graph API 오류"
         raise GraphError(msg, status=resp.status_code, payload=err)
     if resp.status_code >= 400:
-        raise GraphError(f"Graph API 오류 ({resp.status_code})", status=resp.status_code, payload=data)
+        # api.instagram.com 은 {"error_type", "code", "error_message"} 형태로 오류를 돌려줍니다.
+        msg = data.get("error_message") if isinstance(data, dict) else None
+        raise GraphError(msg or f"Graph API 오류 ({resp.status_code})", status=resp.status_code, payload=data)
     return data
 
 
@@ -126,9 +142,58 @@ class GraphClient:
         )
         return [p for p in data.get("data", []) if p.get("instagram_business_account")]
 
-    def ig_profile(self, ig_user_id: str) -> dict[str, Any]:
+    # ── Instagram 로그인 OAuth ─────────────────────────────────────────
+    def ig_exchange_code(self, code: str) -> dict[str, Any]:
+        """authorization code → 단기 Instagram 토큰(1시간). {access_token, user_id, permissions}"""
+        resp = httpx.post(
+            IG_TOKEN_URL,
+            data={
+                "client_id": settings.instagram_app_id,
+                "client_secret": settings.instagram_app_secret,
+                "grant_type": "authorization_code",
+                "redirect_uri": settings.redirect_uri,
+                "code": code,
+            },
+            timeout=30.0,
+        )
+        data = _raise_for_graph(resp)
+        # 응답이 {"data": [{...}]} 로 감싸져 오는 경우도 있습니다.
+        if isinstance(data.get("data"), list) and data["data"]:
+            data = data["data"][0]
+        if "error_message" in data:
+            raise GraphError(data["error_message"], status=400, payload=data)
+        return data
+
+    def ig_exchange_long_lived(self, short_token: str) -> dict[str, Any]:
+        """단기 토큰 → 장기 토큰(60일). {access_token, expires_in}"""
         return self.get(
-            ig_user_id,
+            "access_token",
+            {
+                "grant_type": "ig_exchange_token",
+                "client_secret": settings.instagram_app_secret,
+                "access_token": short_token,
+            },
+        )
+
+    def ig_refresh(self) -> dict[str, Any]:
+        """장기 토큰 연장(발급 24시간 이후, 만료 전에만 가능). {access_token, expires_in}"""
+        return self.get("refresh_access_token", {"grant_type": "ig_refresh_token"})
+
+    def ig_me(self) -> dict[str, Any]:
+        """user_id 가 게시·인사이트 엔드포인트에 쓰는 IG 프로페셔널 계정 ID 입니다."""
+        return self.get(
+            "me",
+            {
+                "fields": "id,user_id,username,name,account_type,profile_picture_url,"
+                "followers_count,follows_count,media_count"
+            },
+        )
+
+    def ig_profile(self, ig_user_id: str) -> dict[str, Any]:
+        # Instagram 로그인 토큰은 본인 계정만 조회하므로 /me 로 읽습니다.
+        target = "me" if settings.auth_mode == "instagram" else ig_user_id
+        return self.get(
+            target,
             {
                 "fields": "id,username,name,biography,website,profile_picture_url,"
                 "followers_count,follows_count,media_count"

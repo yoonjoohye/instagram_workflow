@@ -31,6 +31,7 @@ export default function Home() {
   // Next 프록시는 백엔드 연결 실패를 500 으로 돌려주므로 0 과 5xx 를 모두 "백엔드 꺼짐"으로 봅니다.
   const backendDown = Boolean(health.error && (health.error.status === 0 || health.error.status >= 500));
   const loginBlocked = backendDown || health.data?.meta_configured === false;
+  const viaFacebook = health.data?.auth_mode === "facebook";
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-4xl flex-col px-4 py-10 sm:px-6 sm:py-16">
@@ -72,14 +73,18 @@ export default function Home() {
             </a>
           )}
           {!loggedIn && !me.loading && !loginBlocked && (
-            <span className="text-[13px] text-fg-3">Facebook 로그인으로 비즈니스·크리에이터 계정을 연결합니다.</span>
+            <span className="text-[13px] text-fg-3">
+              {viaFacebook
+                ? "Facebook 로그인으로 비즈니스·크리에이터 계정을 연결합니다."
+                : "Instagram 로그인으로 비즈니스·크리에이터 계정을 연결합니다."}
+            </span>
           )}
         </div>
 
         {health.data && !health.data.meta_configured && (
           <div className="mt-6 max-w-xl">
             <Notice tone="warn" title="Meta 앱이 아직 설정되지 않았습니다">
-              <code>.env</code> 에 <code>META_APP_ID</code>, <code>META_APP_SECRET</code> 를 넣고 백엔드를 다시 시작하세요. OAuth
+              환경변수에 <code>INSTAGRAM_APP_ID</code>, <code>INSTAGRAM_APP_SECRET</code> 를 넣고 다시 배포(로컬은 백엔드 재시작)하세요. OAuth
               리디렉션 URI 는 <code className="break-all">{health.data.redirect_uri}</code> 입니다.
             </Notice>
           </div>
@@ -104,7 +109,7 @@ export default function Home() {
       </section>
 
       <p className="mt-auto pt-16 text-[12px] leading-relaxed text-fg-3">
-        Instagram 프로페셔널(비즈니스/크리에이터) 계정이 Facebook 페이지에 연결되어 있어야 합니다. Meta 정책상 프로필을 조회한
+        Instagram 프로페셔널(비즈니스/크리에이터) 계정이어야 합니다{viaFacebook && " (Facebook 페이지 연결 필요)"}. Meta 정책상 프로필을 조회한
         개별 계정 목록은 제공되지 않으며, 집계 수치와 댓글·멘션을 남긴 계정만 확인할 수 있습니다.
       </p>
     </main>

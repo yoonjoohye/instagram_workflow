@@ -4,7 +4,7 @@ Instagram 계정을 연결하고 프롬프트를 입력하면 사진·영상·�
 
 - **프론트엔드**: Next.js 15 (App Router) + Tailwind CSS v4 — `src/`
 - **백엔드**: FastAPI (Vercel Python 함수) — `backend/`, 엔트리포인트 `api/index.py`
-- **외부 연동**: Instagram Graph API (Facebook 로그인), Higgsfield(미디어 생성), Claude API(캡션)
+- **외부 연동**: Instagram Graph API (Instagram 로그인 또는 Facebook 로그인), Higgsfield(미디어 생성), Claude API(캡션)
 
 ## 화면
 
@@ -24,27 +24,31 @@ Instagram 계정을 연결하고 프롬프트를 입력하면 사진·영상·�
 ```bash
 npm install
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
-cp .env.example .env   # APP_SECRET, META_APP_ID, META_APP_SECRET 등 채우기
+cp .env.example .env   # APP_SECRET, INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET 등 채우기
 
 npm run dev:api        # FastAPI  → http://127.0.0.1:8000
 npm run dev            # Next.js  → http://localhost:3000 (/api/py/* 는 8000 으로 프록시)
 ```
 
-Meta 앱의 유효한 OAuth 리디렉션 URI에 `http://localhost:3000/api/py/auth/callback` 을 등록하세요.
+Meta 앱의 리디렉션 URL에 `http://localhost:3000/api/py/auth/callback` 을 등록하세요 (Instagram 로그인은 HTTPS 만 허용하므로 로컬 로그인 테스트는 Facebook 로그인 방식이나 터널(ngrok 등)을 쓰세요).
 Higgsfield·Anthropic 키가 없으면 목업 미디어와 템플릿 캡션으로 동작합니다.
 
 ## Vercel 배포
 
 1. 이 저장소를 Vercel 프로젝트로 import 합니다 (Framework: Next.js).
 2. **Storage → Neon(Postgres)** 을 연결합니다 → `DATABASE_URL` 자동 주입. (Vercel 에서는 SQLite 를 쓸 수 없습니다.)
-3. 환경변수를 등록합니다: `APP_SECRET`, `META_APP_ID`, `META_APP_SECRET`, `CRON_SECRET`, (선택) `HIGGSFIELD_*`, `ANTHROPIC_API_KEY`.
+3. 환경변수를 등록합니다: `APP_SECRET`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, `CRON_SECRET`, (선택) `HIGGSFIELD_*`, `ANTHROPIC_API_KEY`.
    `PUBLIC_BASE_URL` 을 비워두면 프로덕션 도메인(`https://<project>.vercel.app`)을 자동으로 사용합니다.
-4. Meta 앱 설정
-   - Facebook 로그인 → 유효한 OAuth 리디렉션 URI: `https://<project>.vercel.app/api/py/auth/callback`
-   - 앱 설정 → 기본 → 앱 도메인: `<project>.vercel.app`
-5. 재배포합니다. 인사이트 스냅샷은 `vercel.json` 의 cron 이 매일 03:00(UTC)에 적재합니다.
+4. Meta 앱 설정 (Instagram 로그인)
+   - 사용 사례 "Instagram에서 메시지 및 콘텐츠 관리" → **Instagram 로그인을 통한 API 설정**
+   - "Instagram 비즈니스 로그인 설정" → 리디렉션 URL: `https://<project>.vercel.app/api/py/auth/callback`
+   - 같은 화면 상단의 **Instagram 앱 ID / 시크릿 코드** → `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET`
+   - Webhooks 는 필요 없습니다.
+5. 재배포합니다. `vercel.json` 의 cron 이 매일 03:00(UTC)에 인사이트 스냅샷을 적재하고 Instagram 토큰(60일)을 연장합니다.
+
+> Facebook 로그인 방식을 쓰려면 `INSTAGRAM_APP_*` 대신 `META_APP_ID` / `META_APP_SECRET` 을 넣고, Facebook 로그인 for Business 의 유효한 OAuth 리디렉션 URI 에 같은 콜백 주소를 등록합니다. 이 방식은 Instagram 계정이 Facebook 페이지에 연결되어 있어야 합니다.
 
 ## Instagram 계정 조건
 
-- 비즈니스 또는 크리에이터 계정이며 Facebook 페이지에 연결되어 있어야 합니다.
-- Meta 앱이 개발 모드일 때는 앱 관리자·테스터로 등록된 Facebook 계정만 로그인할 수 있습니다.
+- 비즈니스 또는 크리에이터 계정이어야 합니다.
+- Meta 앱이 개발 모드일 때는 앱 역할에 등록된 계정만 로그인할 수 있습니다. Instagram 로그인은 **앱 역할 → Instagram 테스터**로 계정을 추가하고, Instagram 앱의 설정 → 웹사이트 권한에서 초대를 수락하세요.

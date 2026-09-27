@@ -11,6 +11,7 @@ from ..config import settings
 from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, InsightSnapshot, KnownVisitor
+from ..security import encrypt
 from ..services import insights as svc
 from ..services.meta_graph import GraphError
 
@@ -209,6 +210,11 @@ def cron_sync(request: Request, db: Session = Depends(get_db)) -> dict:
 
     synced, failed = 0, []
     for account in db.scalars(select(Account)).all():
+        if settings.auth_mode == "instagram":
+            try:
+                _refresh_ig_token(db, account)
+            except GraphError as exc:  # 갱신 실패해도 현재 토큰이 살아 있으면 동기화는 계속합니다.
+                failed.append({"account": account.username, "error": f"토큰 갱신 실패: {exc}"})
         try:
             with graph_for(account) as client:
                 series = svc.daily_timeseries(client, account.ig_user_id, days=7)
@@ -220,6 +226,25 @@ def cron_sync(request: Request, db: Session = Depends(get_db)) -> dict:
         except Exception as exc:  # 한 계정 실패가 전체를 막지 않도록
             failed.append({"account": account.username, "error": str(exc)})
     return {"synced": synced, "failed": failed}
+
+
+IG_TOKEN_REFRESH_WINDOW = dt.timedelta(days=20)
+
+
+def _refresh_ig_token(db: Session, account: Account) -> None:
+    """Instagram 로그인 토큰은 60일 뒤 만료되므로 만료 20일 전부터 매일 연장합니다."""
+    now = dt.datetime.now(dt.timezone.utc)
+    expires = account.token_expires_at
+    if expires is not None and expires.tzinfo is None:  # SQLite 는 tz 정보를 잃습니다.
+        expires = expires.replace(tzinfo=dt.timezone.utc)
+    if expires is not None and expires - now > IG_TOKEN_REFRESH_WINDOW:
+        return
+    with graph_for(account) as client:
+        refreshed = client.ig_refresh()
+    account.access_token_enc = encrypt(refreshed["access_token"])
+    if refreshed.get("expires_in"):
+        account.token_expires_at = now + dt.timedelta(seconds=int(refreshed["expires_in"]))
+    db.commit()
 
 
 @router.get("/insights/history")

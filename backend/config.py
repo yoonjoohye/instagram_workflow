@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     meta_app_secret: str = ""
     meta_api_version: str = "v23.0"
 
+    # Instagram 로그인(Instagram API with Instagram Login) 용 자격증명.
+    # Meta 앱 대시보드 → Instagram → "Instagram 로그인을 통한 API 설정" 상단의
+    # Instagram 앱 ID / 시크릿 코드 (앱 설정 > 기본의 Meta 앱 ID 와 다른 값입니다).
+    # 둘 다 있으면 Instagram 로그인, 없으면 Facebook 로그인으로 동작합니다.
+    instagram_app_id: str = ""
+    instagram_app_secret: str = ""
+
     higgsfield_api_key_id: str = ""
     higgsfield_api_key_secret: str = ""
     higgsfield_base_url: str = "https://api.higgsfield.ai"
@@ -42,8 +49,15 @@ class Settings(BaseSettings):
         return self
 
     @property
+    def auth_mode(self) -> str:
+        """instagram: Instagram 계정으로 바로 로그인 (Facebook 페이지 불필요)
+        facebook : Facebook 로그인 → 페이지에 연결된 IG 계정"""
+        return "instagram" if self.instagram_app_id and self.instagram_app_secret else "facebook"
+
+    @property
     def graph_base(self) -> str:
-        return f"https://graph.facebook.com/{self.meta_api_version}"
+        host = "graph.instagram.com" if self.auth_mode == "instagram" else "graph.facebook.com"
+        return f"https://{host}/{self.meta_api_version}"
 
     @property
     def oauth_dialog(self) -> str:
@@ -55,7 +69,8 @@ class Settings(BaseSettings):
 
     @property
     def meta_configured(self) -> bool:
-        return bool(self.meta_app_id and self.meta_app_secret)
+        """현재 로그인 방식에 필요한 앱 자격증명이 갖춰졌는지."""
+        return self.auth_mode == "instagram" or bool(self.meta_app_id and self.meta_app_secret)
 
     @property
     def higgsfield_configured(self) -> bool:

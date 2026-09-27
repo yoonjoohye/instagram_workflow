@@ -21,6 +21,7 @@ export type Me = {
 export type Health = {
   ok: boolean;
   meta_configured: boolean;
+  auth_mode: "instagram" | "facebook";
   media_engine: string;
   caption_engine: "claude" | "template";
   public_base_url: string;

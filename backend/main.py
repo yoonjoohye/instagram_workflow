@@ -39,6 +39,7 @@ def health() -> dict:
     return {
         "ok": True,
         "meta_configured": settings.meta_configured,
+        "auth_mode": settings.auth_mode,
         "media_engine": active_engine_name(),
         "caption_engine": "claude" if settings.anthropic_api_key else "template",
         "public_base_url": settings.public_base_url,

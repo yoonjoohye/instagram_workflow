@@ -156,7 +156,7 @@ function LoginGate({ message }: { message?: string }) {
         <IconInstagram className="mx-auto text-accent" width={28} height={28} />
         <h1 className="mt-4 text-lg font-semibold">로그인이 필요합니다</h1>
         <p className="mt-1.5 text-[13px] leading-relaxed text-fg-2">
-          Facebook 로그인으로 Instagram 비즈니스·크리에이터 계정을 연결하세요.
+          Instagram 비즈니스·크리에이터 계정을 연결하세요.
         </p>
         <Suspense fallback={null}>
           <GateError fallback={message} />
