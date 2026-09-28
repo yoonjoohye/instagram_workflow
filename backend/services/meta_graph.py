@@ -41,7 +41,9 @@ IG_SCOPES = [
     "instagram_business_manage_messages",
 ]
 
-IG_AUTHORIZE_URL = "https://www.instagram.com/oauth/authorize"
+# 끝의 '/' 가 중요합니다: 인스타그램 앱의 유니버설 링크 설정은 '/oauth/authorize/*' 만 앱에서 열지 않도록
+# 제외하고 있어, '/' 없이 보내면 휴대폰에서 앱이 열려 허용 화면 없이 멈춥니다.
+IG_AUTHORIZE_URL = "https://www.instagram.com/oauth/authorize/"
 IG_TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 
 
