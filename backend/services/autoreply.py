@@ -28,12 +28,28 @@ from .meta_graph import GraphClient, GraphError
 
 log = logging.getLogger(__name__)
 
-DEFAULTS = {
-    "public_reply": "댓글 감사합니다! 😊",
-    "link_message": "팔로우해 주셔서 감사해요! 🎁\n요청하신 링크입니다 👇",
-    "not_following_message": "링크는 팔로워분들께만 보내드리고 있어요. 팔로우 후 이 대화에 다시 메시지를 보내주세요!",
-    "dm_prompt": "댓글 감사합니다! 이 메시지에 아무 답장이나 보내주시면 안내해 드릴게요 🙌",
+# 새 규칙의 기본 문구 (규칙을 처음 만드는 사람의 화면 언어로 채워 줍니다)
+DEFAULTS_BY_LANG = {
+    "ko": {
+        "public_reply": "댓글 감사합니다! 😊",
+        "link_message": "팔로우해 주셔서 감사해요! 🎁\n요청하신 링크입니다 👇",
+        "not_following_message": "링크는 팔로워분들께만 보내드리고 있어요. 팔로우 후 이 대화에 다시 메시지를 보내주세요!",
+        "dm_prompt": "댓글 감사합니다! 이 메시지에 아무 답장이나 보내주시면 안내해 드릴게요 🙌",
+    },
+    "en": {
+        "public_reply": "Thanks for your comment! 😊",
+        "link_message": "Thanks for following! 🎁\nHere's the link you asked for 👇",
+        "not_following_message": "The link is for followers only. Follow us, then send a message in this chat again!",
+        "dm_prompt": "Thanks for your comment! Reply to this message with anything and we'll send you the details 🙌",
+    },
+    "ja": {
+        "public_reply": "コメントありがとうございます！😊",
+        "link_message": "フォローありがとうございます！🎁\nご希望のリンクはこちらです 👇",
+        "not_following_message": "リンクはフォロワーの方にだけお送りしています。フォローしてから、このチャットにもう一度メッセージを送ってください！",
+        "dm_prompt": "コメントありがとうございます！このメッセージに何か返信していただければご案内します 🙌",
+    },
 }
+DEFAULTS = DEFAULTS_BY_LANG["ko"]  # 예전 규칙에서 문구가 비어 있을 때의 대체 문구
 
 # DM 답장을 기다리는 상태 — 이 상태의 기록에 대해서만 이어서 DM 을 보냅니다.
 WAITING = ("dm_sent", "awaiting_follow")

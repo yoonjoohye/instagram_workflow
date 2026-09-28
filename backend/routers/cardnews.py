@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import secrets
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,6 +17,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from ..config import settings
 from ..db import get_db
 from ..deps import current_account
+from ..i18n import lang_of, norm_lang
 from ..models import Account, GenerationJob, MediaBlob
 from ..services import cardnews as svc
 from .workflow import _job_dict
@@ -75,6 +76,7 @@ class ResearchIn(BaseModel):
     notes: str = Field(default="", max_length=3000)  # (예전 필드) 사용자 확정 정보
     caption_format: str = Field(default="", max_length=2000)  # 캡션 양식 — 안에 적힌 사실도 확정 정보
     style: str = Field(default="", max_length=2000)  # 연출 방향 — 조사 방향도 여기에 맞춤
+    language: str | None = Field(default=None, max_length=8)  # 화면 언어 (ko|en|ja) — 조사 요약을 이 언어로
 
 
 class Source(BaseModel):
@@ -94,6 +96,8 @@ class PlanIn(BaseModel):
     reference_ids: list[str] = Field(default_factory=list, max_length=3)  # 연출 참고 이미지
     accent: str = Field(default="#6c5ce7", pattern=r"^#[0-9a-fA-F]{6}$")
     font: str = Field(default="auto", max_length=40)  # auto = Gemini 가 형식에 맞게 선택
+    # 화면 언어 (ko|en|ja). 게시물 글은 사용자가 주제를 쓴 언어를 따르고, 애매할 때만 이 언어.
+    language: str | None = Field(default=None, max_length=8)
 
 
 class RenderIn(BaseModel):
@@ -119,34 +123,41 @@ def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
 
 
 @router.get("/cardnews/fonts")
-def fonts() -> dict:
-    """고를 수 있는 글씨체 목록 (미리보기 이미지 주소 포함)."""
+def fonts(request: Request) -> dict:
+    """고를 수 있는 글씨체 목록 (미리보기 이미지 주소 포함). 이름은 화면 언어로."""
+    lang = lang_of(request)
     return {
         "data": [
-            {"key": k, "label": v["label"], "preview": f"/api/py/cardnews/fonts/{k}.png"} for k, v in svc.FONTS.items()
+            {"key": k, "label": svc.font_label(k, lang), "preview": f"/api/py/cardnews/fonts/{k}.png?lang={lang}"}
+            for k in svc.FONTS
         ]
     }
 
 
 @router.get("/cardnews/fonts/{key}.png")
-def font_preview(key: str) -> Response:
+def font_preview(key: str, lang: str = "ko") -> Response:
     if key not in svc.FONTS:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "없는 글씨체입니다.")
-    return Response(svc.font_preview(key), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+    return Response(
+        svc.font_preview(key, lang=norm_lang(lang)), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"}
+    )
 
 
 @router.post("/cardnews/research")
-def research(body: ResearchIn, account: Account = Depends(current_account)) -> dict:
+def research(body: ResearchIn, request: Request, account: Account = Depends(current_account)) -> dict:
     """Gemini + Google 검색으로 주제를 조사합니다 (Vercel 시간 제한 때문에 설계와 나눠 호출)."""
     # 캡션 양식에 적은 사실(추천인 코드 등)도 확정 정보로 조사에 넘깁니다.
     result, warning = svc.research(
-        body.prompt, "\n".join(p for p in (body.notes, body.caption_format) if p.strip()), body.style
+        body.prompt,
+        "\n".join(p for p in (body.notes, body.caption_format) if p.strip()),
+        body.style,
+        language=norm_lang(body.language or lang_of(request)),
     )
     return {**result, "warning": warning}
 
 
 @router.post("/cardnews/plan", status_code=status.HTTP_201_CREATED)
-def plan(body: PlanIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+def plan(body: PlanIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
     """사진과 주제로 게시물 구성(장 수·장별 사진·레이아웃)과 캡션·해시태그를 설계합니다."""
     blobs = _blobs(db, account, body.upload_ids)
     refs = _blobs(db, account, body.reference_ids)
@@ -159,6 +170,7 @@ def plan(body: PlanIn, account: Account = Depends(current_account), db: Session 
             caption_format=body.caption_format,
             notes=body.notes,
             research_notes=body.research_notes,
+            language=norm_lang(body.language or lang_of(request)),
         )
     except svc.GeminiError as exc:
         # 엉뚱한 기본 구성으로 만들지 않고 멈춥니다.

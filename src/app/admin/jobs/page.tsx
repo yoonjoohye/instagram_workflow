@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { IconExternal, IconMusic } from "@/components/icons";
 import { Badge, Button, Empty, Notice, PageHeader, Segmented, Skeleton, StatusDot } from "@/components/ui";
+import { useT } from "@/i18n/client";
+import type { MessageKey } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
 import { fmtRelative, KIND_LABEL, mediaSrc, STATUS_LABEL } from "@/lib/format";
 import { statusTone } from "@/lib/status";
@@ -11,14 +13,15 @@ import type { Job, JobStatus, ListOf } from "@/lib/types";
 
 type Filter = "all" | "ready" | "published" | "failed";
 
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "전체" },
-  { value: "ready", label: "검수 대기" },
-  { value: "published", label: "게시됨" },
-  { value: "failed", label: "실패" },
+const FILTERS: { value: Filter; label: MessageKey }[] = [
+  { value: "all", label: "jobs.filterAll" },
+  { value: "ready", label: "jobs.filterReady" },
+  { value: "published", label: "jobs.filterPublished" },
+  { value: "failed", label: "jobs.filterFailed" },
 ];
 
 export default function JobsPage() {
+  const t = useT();
   const jobs = useApi<ListOf<Job>>("/workflow/jobs?limit=100");
   const [filter, setFilter] = useState<Filter>("all");
   const [error, setError] = useState<string>();
@@ -27,7 +30,7 @@ export default function JobsPage() {
   const counts = (s: JobStatus) => (jobs.data?.data ?? []).filter((j) => j.status === s).length;
 
   async function remove(job: Job) {
-    if (!window.confirm("이 작업을 삭제할까요? 이미 게시된 Instagram 게시물은 지워지지 않습니다.")) return;
+    if (!window.confirm(t("jobs.confirmDelete"))) return;
     try {
       await api(`/workflow/jobs/${job.id}`, { method: "DELETE" });
       jobs.setData({ data: (jobs.data?.data ?? []).filter((j) => j.id !== job.id) });
@@ -39,24 +42,24 @@ export default function JobsPage() {
   return (
     <>
       <PageHeader
-        title="작업함"
-        description="프롬프트로 만든 콘텐츠의 생성·검수·게시 기록"
+        title={t("jobs.title")}
+        description={t("jobs.description")}
         action={
           <>
             <Segmented
-              ariaLabel="상태 필터"
+              ariaLabel={t("jobs.filterAria")}
               value={filter}
               onChange={setFilter}
               options={FILTERS.map((f) => ({
                 value: f.value,
-                label: f.value === "all" ? f.label : `${f.label} ${counts(f.value as JobStatus)}`,
+                label: f.value === "all" ? t(f.label) : t("jobs.filterCount", { label: t(f.label), n: counts(f.value as JobStatus) }),
               }))}
             />
             <Link
               href="/admin/studio"
               className="inline-flex h-10 items-center rounded-lg bg-accent px-4 text-sm font-medium text-on-accent hover:opacity-90"
             >
-              + 새로 만들기
+              {t("jobs.create")}
             </Link>
           </>
         }
@@ -75,9 +78,9 @@ export default function JobsPage() {
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <Empty title={filter === "all" ? "아직 만든 콘텐츠가 없습니다" : "해당 상태의 작업이 없습니다"}>
+        <Empty title={filter === "all" ? t("jobs.emptyAll") : t("jobs.emptyFiltered")}>
           <Link href="/admin/studio" className="underline">
-            프롬프트로 첫 게시물 만들기
+            {t("jobs.createFirst")}
           </Link>
         </Empty>
       ) : (
@@ -92,6 +95,7 @@ export default function JobsPage() {
 }
 
 function JobCard({ job, onDelete }: { job: Job; onDelete: () => void }) {
+  const t = useT();
   const cover = job.assets.find((a) => a.type !== "audio");
   const visualCount = job.assets.filter((a) => a.type !== "audio").length;
   const hasMusic = job.assets.some((a) => a.type === "audio");
@@ -107,10 +111,10 @@ function JobCard({ job, onDelete }: { job: Job; onDelete: () => void }) {
         <div className="absolute top-2 left-2 flex gap-1">
           <span className="rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white">
             {KIND_LABEL[job.media_kind]}
-            {visualCount > 1 && ` · ${visualCount}장`}
+            {visualCount > 1 && t("jobs.imageCount", { n: visualCount })}
           </span>
           {hasMusic && (
-            <span className="inline-flex items-center rounded bg-black/60 px-1.5 py-0.5 text-white" title="배경음악 포함">
+            <span className="inline-flex items-center rounded bg-black/60 px-1.5 py-0.5 text-white" title={t("jobs.hasMusic")}>
               <IconMusic width={12} height={12} />
             </span>
           )}
@@ -131,7 +135,7 @@ function JobCard({ job, onDelete }: { job: Job; onDelete: () => void }) {
             href={`/admin/studio?job=${job.id}`}
             className="inline-flex h-8 items-center rounded-lg border border-line-strong px-3 text-[13px] font-medium hover:bg-surface-2"
           >
-            {job.status === "published" ? "열기" : job.status === "failed" ? "다시 시도" : "검수·게시"}
+            {job.status === "published" ? t("jobs.open") : job.status === "failed" ? t("jobs.retry") : t("jobs.review")}
           </Link>
           {job.permalink && (
             <a
@@ -143,8 +147,8 @@ function JobCard({ job, onDelete }: { job: Job; onDelete: () => void }) {
               Instagram <IconExternal />
             </a>
           )}
-          <Button variant="ghost" size="sm" className="ml-auto" onClick={onDelete} aria-label="삭제">
-            삭제
+          <Button variant="ghost" size="sm" className="ml-auto" onClick={onDelete} aria-label={t("common.delete")}>
+            {t("common.delete")}
           </Button>
         </div>
       </div>

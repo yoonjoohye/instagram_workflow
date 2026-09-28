@@ -1,7 +1,8 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fmtCompact, fmtInt, fmtPct, fmtShortDate } from "@/lib/format";
+import { translate } from "@/i18n/core";
+import { fmtCompact, fmtInt, fmtPct, fmtShortDate, getFormatLocale } from "@/lib/format";
 import type { Point } from "@/lib/types";
 import { cx } from "./ui";
 
@@ -98,7 +99,7 @@ export function LineChart({ series, height = 260 }: { series: LineSeries[]; heig
     setHover(Math.min(n - 1, Math.max(0, i)));
   }
 
-  const label = `${series.map((s) => s.label).join(", ")} 일자별 추이`;
+  const label = translate(getFormatLocale(), "common.dailyTrend", { names: series.map((s) => s.label).join(", ") });
 
   return (
     <div ref={wrapRef} className="relative w-full" style={{ height }}>
@@ -183,7 +184,7 @@ export function LineChart({ series, height = 260 }: { series: LineSeries[]; heig
       )}
 
       {width > 0 && n === 0 && (
-        <div className="flex h-full items-center justify-center text-sm text-fg-3">표시할 데이터가 없습니다.</div>
+        <div className="flex h-full items-center justify-center text-sm text-fg-3">{translate(getFormatLocale(), "common.noChartData")}</div>
       )}
     </div>
   );
@@ -259,13 +260,13 @@ export function StatTile({
       </p>
       <p className="mt-1 text-[12px] text-fg-3">
         {delta == null ? (
-          "비교 데이터 없음"
+          translate(getFormatLocale(), "common.noCompare")
         ) : (
           <>
             <span className={cx("font-medium", delta > 0 ? "text-good" : delta < 0 ? "text-bad" : "text-fg-2")}>
               {delta > 0 ? "▲" : delta < 0 ? "▼" : "–"} {fmtPct(Math.abs(delta))}
             </span>{" "}
-            직전 기간 대비
+            {translate(getFormatLocale(), "common.vsPrev")}
           </>
         )}
       </p>
@@ -282,7 +283,7 @@ export function BarList({
   rows,
   format = fmtInt,
   labelWidth = 120,
-  emptyText = "데이터가 없습니다.",
+  emptyText,
 }: {
   rows: BarRow[];
   format?: (n: number) => string;
@@ -290,7 +291,7 @@ export function BarList({
   emptyText?: string;
 }) {
   const max = Math.max(1, ...rows.map((r) => r.value));
-  if (!rows.length) return <p className="py-6 text-center text-sm text-fg-3">{emptyText}</p>;
+  if (!rows.length) return <p className="py-6 text-center text-sm text-fg-3">{emptyText ?? translate(getFormatLocale(), "common.noData")}</p>;
   return (
     <ul className="space-y-2">
       {rows.map((r) => (

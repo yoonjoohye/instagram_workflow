@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { translate } from "@/i18n/core";
+import { getFormatLocale } from "@/lib/format";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -186,7 +188,7 @@ export function Notice({
         {children && <div className="text-fg-2">{children}</div>}
       </div>
       {onClose && (
-        <button onClick={onClose} className="text-fg-3 hover:text-fg" aria-label="닫기">
+        <button onClick={onClose} className="text-fg-3 hover:text-fg" aria-label={translate(getFormatLocale(), "common.close")}>
           ✕
         </button>
       )}
@@ -293,7 +295,7 @@ export function Dialog({
             <h2 className="text-[15px] font-semibold">{title}</h2>
             {subtitle && <div className="mt-0.5 text-[13px] text-fg-3">{subtitle}</div>}
           </div>
-          <button onClick={onClose} className="text-fg-3 hover:text-fg" aria-label="닫기">
+          <button onClick={onClose} className="text-fg-3 hover:text-fg" aria-label={translate(getFormatLocale(), "common.close")}>
             ✕
           </button>
         </header>

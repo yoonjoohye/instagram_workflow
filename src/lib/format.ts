@@ -1,11 +1,26 @@
+import { DEFAULT_LOCALE, INTL_LOCALE, type Locale } from "@/i18n/config";
+import { translate, type MessageKey, type Vars } from "@/i18n/core";
 import type { IgPost, JobStatus, MediaKind, MetricKey } from "./types";
 
-const intFmt = new Intl.NumberFormat("ko-KR");
-const compactFmt = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+// 화면 언어 (I18nProvider 가 렌더할 때 맞춰 둡니다). 날짜·숫자·라벨 형식이 이 언어를 따릅니다.
+let current: Locale = DEFAULT_LOCALE;
+let intFmt = new Intl.NumberFormat(INTL_LOCALE[current]);
+let compactFmt = new Intl.NumberFormat(INTL_LOCALE[current], { notation: "compact", maximumFractionDigits: 1 });
+
+export function setFormatLocale(locale: Locale) {
+  if (locale === current) return;
+  current = locale;
+  intFmt = new Intl.NumberFormat(INTL_LOCALE[locale]);
+  compactFmt = new Intl.NumberFormat(INTL_LOCALE[locale], { notation: "compact", maximumFractionDigits: 1 });
+}
+
+export const getFormatLocale = () => current;
+
+const tf = (key: MessageKey, vars?: Vars) => translate(current, key, vars);
 
 export const fmtInt = (n: number | null | undefined) => (n == null ? "—" : intFmt.format(n));
 
-/** 1,284 / 1.2만 처럼 자리수에 따라 줄여서 표시 */
+/** 1,284 / 1.2만 · 12K 처럼 자리수에 따라 줄여서 표시 */
 export const fmtCompact = (n: number | null | undefined) =>
   n == null ? "—" : Math.abs(n) < 10_000 ? intFmt.format(n) : compactFmt.format(n);
 
@@ -19,7 +34,7 @@ export function fmtShortDate(iso: string) {
 
 export function fmtDateTime(iso: string | null | undefined) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("ko-KR", {
+  return new Date(iso).toLocaleString(INTL_LOCALE[current], {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -30,51 +45,31 @@ export function fmtDateTime(iso: string | null | undefined) {
 export function fmtRelative(iso: string | null | undefined) {
   if (!iso) return "—";
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return "방금 전";
-  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
-  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)}일 전`;
-  return new Date(iso).toLocaleDateString("ko-KR");
+  if (diff < 60) return tf("format.justNow");
+  if (diff < 3600) return tf("format.minutesAgo", { n: Math.floor(diff / 60) });
+  if (diff < 86400) return tf("format.hoursAgo", { n: Math.floor(diff / 3600) });
+  if (diff < 86400 * 30) return tf("format.daysAgo", { n: Math.floor(diff / 86400) });
+  return new Date(iso).toLocaleDateString(INTL_LOCALE[current]);
 }
 
-export const METRIC_LABEL: Record<MetricKey, string> = {
-  reach: "도달 계정",
-  profile_views: "프로필 조회",
-  accounts_engaged: "참여 계정",
-  total_interactions: "총 상호작용",
-  website_clicks: "웹사이트 클릭",
-};
+/** 키로 읽으면 현재 언어의 라벨을 돌려주는 표 (METRIC_LABEL[m] 처럼 그대로 씁니다) */
+function labels<K extends string>(prefix: string): Record<K, string> {
+  return new Proxy({} as Record<K, string>, {
+    get: (_, key) => (typeof key === "string" ? translate(current, `format.${prefix}.${key}` as MessageKey) : undefined),
+  });
+}
 
-export const METRIC_HINT: Record<MetricKey, string> = {
-  reach: "게시물·스토리·프로필을 한 번 이상 본 고유 계정 수",
-  profile_views: "프로필이 조회된 횟수",
-  accounts_engaged: "좋아요·댓글·저장·공유 등으로 반응한 고유 계정 수",
-  total_interactions: "좋아요+댓글+저장+공유+답장의 합",
-  website_clicks: "프로필의 웹사이트 링크를 누른 횟수",
-};
-
-export const KIND_LABEL: Record<MediaKind, string> = {
-  IMAGE: "이미지",
-  CAROUSEL: "캐러셀",
-  REELS: "릴스",
-  STORIES: "스토리",
-};
-
-export const STATUS_LABEL: Record<JobStatus, string> = {
-  draft: "초안",
-  generating: "생성 중",
-  ready: "검수 대기",
-  publishing: "발행 중",
-  published: "게시됨",
-  failed: "실패",
-};
+export const METRIC_LABEL = labels<MetricKey>("metric");
+export const METRIC_HINT = labels<MetricKey>("hint");
+export const KIND_LABEL = labels<MediaKind>("kind");
+export const STATUS_LABEL = labels<JobStatus>("status");
 
 export function postKind(p: IgPost): string {
-  if (p.media_product_type === "REELS") return "릴스";
-  if (p.media_product_type === "STORY") return "스토리";
-  if (p.media_type === "CAROUSEL_ALBUM") return "캐러셀";
-  if (p.media_type === "VIDEO") return "동영상";
-  return "이미지";
+  if (p.media_product_type === "REELS") return KIND_LABEL.REELS;
+  if (p.media_product_type === "STORY") return KIND_LABEL.STORIES;
+  if (p.media_type === "CAROUSEL_ALBUM") return KIND_LABEL.CAROUSEL;
+  if (p.media_type === "VIDEO") return tf("format.kind.VIDEO");
+  return KIND_LABEL.IMAGE;
 }
 
 /** 백엔드 compose_caption 과 같은 규칙: 본문 + 빈 줄 + 해시태그 */
@@ -91,46 +86,21 @@ export function parseHashtags(input: string): string[] {
     .filter(Boolean);
 }
 
-/** Instagram API 의 분류 값(dimension) → 화면 라벨 */
-export const DIM_LABEL: Record<string, string> = {
-  FOLLOWER: "팔로워",
-  NON_FOLLOWER: "비팔로워",
-  POST: "게시물(사진)",
-  CAROUSEL_CONTAINER: "캐러셀",
-  REEL: "릴스",
-  STORY: "스토리",
-  AD: "광고",
-  IGTV: "IGTV",
-  LIVE: "라이브",
-  BOOK_NOW: "예약",
-  CALL: "전화",
-  DIRECTION: "길찾기",
-  EMAIL: "이메일",
-  INSTANT_EXPERIENCE: "인스턴트 경험",
-  TEXT: "문자",
-  UNDEFINED: "기타",
-  BIO_LINK_CLICKED: "프로필 링크",
-  OTHER: "기타",
-  SWIPE_FORWARD: "다음 계정으로 넘김",
-  TAP_BACK: "뒤로",
-  TAP_EXIT: "나가기",
-  TAP_FORWARD: "다음으로",
-  F: "여성",
-  M: "남성",
-  U: "미상",
+/** Instagram API 의 분류 값(dimension) → 화면 라벨 (모르는 값은 그대로) */
+export const dimLabel = (key: string) => {
+  const text = tf(`format.dim.${key}` as MessageKey);
+  return text === `format.dim.${key}` ? key : text;
 };
-
-export const dimLabel = (key: string) => DIM_LABEL[key] ?? key;
 
 /** 초 → "1분 5초" / 밀리초 입력도 처리 */
 export function fmtDuration(value: number | null | undefined, unit: "s" | "ms" = "ms") {
   if (value == null) return "—";
   const total = Math.round(unit === "ms" ? value / 1000 : value);
-  if (total < 60) return `${total}초`;
+  if (total < 60) return tf("format.sec", { s: total });
   const m = Math.floor(total / 60);
   const s = total % 60;
-  if (m < 60) return s ? `${m}분 ${s}초` : `${m}분`;
-  return `${Math.floor(m / 60)}시간 ${m % 60}분`;
+  if (m < 60) return s ? tf("format.minSec", { m, s }) : tf("format.min", { m });
+  return tf("format.hourMin", { h: Math.floor(m / 60), m: m % 60 });
 }
 
 /** 우리 서버가 제공하는 이미지(/api/py/media/…)는 접속 도메인과 무관하게 보이도록 상대 주소로 바꿉니다. */

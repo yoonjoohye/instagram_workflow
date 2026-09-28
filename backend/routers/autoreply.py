@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -12,13 +12,15 @@ from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, AutoReplyRule, CommentReply, GenerationJob
 from ..schemas import AutoReplyIn, AutoReplyMediaIn, AutoReplyToggle
-from ..services.autoreply import DEFAULTS
+from ..i18n import lang_of
+from ..services.autoreply import DEFAULTS_BY_LANG
 from ..services.meta_graph import GraphError
 
 router = APIRouter(prefix="/autoreply", tags=["autoreply"])
 
 
-def _rule_dict(rule: AutoReplyRule | None, job: GenerationJob | None = None) -> dict:
+def _rule_dict(rule: AutoReplyRule | None, job: GenerationJob | None = None, lang: str = "ko") -> dict:
+    DEFAULTS = DEFAULTS_BY_LANG.get(lang, DEFAULTS_BY_LANG["en"])
     base = {
         "id": rule.id if rule else None,
         "exists": rule is not None,
@@ -125,11 +127,11 @@ def list_rules(account: Account = Depends(current_account), db: Session = Depend
 
 @router.get("/jobs/{job_id}")
 def get_job_rule(
-    job_id: int, account: Account = Depends(current_account), db: Session = Depends(get_db)
+    job_id: int, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
 ) -> dict:
     job = _own_job(db, account, job_id)
     rule = db.scalar(select(AutoReplyRule).where(AutoReplyRule.job_id == job.id))
-    return _rule_dict(rule, job)
+    return _rule_dict(rule, job, lang_of(request))
 
 
 @router.put("/jobs/{job_id}")
@@ -162,12 +164,12 @@ def _media_rule(db: Session, account: Account, media_id: str) -> AutoReplyRule |
 
 @router.get("/media/{media_id}")
 def get_media_rule(
-    media_id: str, account: Account = Depends(current_account), db: Session = Depends(get_db)
+    media_id: str, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
 ) -> dict:
     """게시물 ID 기준 규칙 — 스튜디오 밖에서 올린 기존 게시물용 (스튜디오 게시물도 같은 규칙을 찾습니다)."""
     rule = _media_rule(db, account, media_id)
     job = db.get(GenerationJob, rule.job_id) if rule and rule.job_id else None
-    data = _rule_dict(rule, job)
+    data = _rule_dict(rule, job, lang_of(request))
     data["ig_media_id"] = media_id
     return data
 

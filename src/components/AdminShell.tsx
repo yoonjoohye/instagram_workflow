@@ -8,6 +8,8 @@ import { fmtCompact } from "@/lib/format";
 import type { Me } from "@/lib/types";
 import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark } from "./icons";
 import { Logo } from "@/components/Logo";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useT } from "@/i18n/client";
 import { Avatar, cx, Dialog, Notice, Spinner } from "./ui";
 
 const MeContext = createContext<{ me: Me; refreshMe: () => void } | null>(null);
@@ -19,20 +21,21 @@ export function useMe() {
 }
 
 const NAV = [
-  { href: "/admin", label: "대시보드", short: "홈", icon: IconChart },
-  { href: "/admin/studio", label: "만들기", short: "만들기", icon: IconSpark },
-  { href: "/admin/jobs", label: "작업함", short: "작업함", icon: IconInbox },
-  { href: "/admin/posts", label: "게시물 성과", short: "성과", icon: IconGrid },
-  { href: "/admin/autoreply", label: "자동 응답", short: "자동응답", icon: IconReply },
-];
+  { href: "/admin", label: "shell.dashboard", short: "shell.dashboardShort", icon: IconChart },
+  { href: "/admin/studio", label: "shell.studio", short: "shell.studioShort", icon: IconSpark },
+  { href: "/admin/jobs", label: "shell.jobs", short: "shell.jobsShort", icon: IconInbox },
+  { href: "/admin/posts", label: "shell.posts", short: "shell.postsShort", icon: IconGrid },
+  { href: "/admin/autoreply", label: "shell.autoreply", short: "shell.autoreplyShort", icon: IconReply },
+] as const;
 
 export function AdminShell({ children }: { children: ReactNode }) {
+  const t = useT();
   const me = useApi<Me>("/auth/me");
 
   if (me.loading && !me.data) {
     return (
       <div className="flex min-h-dvh items-center justify-center gap-2 text-sm text-fg-3">
-        <Spinner /> 계정 정보를 불러오는 중…
+        <Spinner /> {t("shell.loadingAccount")}
       </div>
     );
   }
@@ -62,14 +65,13 @@ export function AdminShell({ children }: { children: ReactNode }) {
 }
 
 function Sidebar({ me }: { me: Me }) {
+  const t = useT();
   const pathname = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
 
   async function deleteAccount() {
     if (
-      !window.confirm(
-        `@${me.username} 연결을 해제하고 이 서비스에 저장된 모든 데이터(토큰, 생성 기록, 인사이트 기록, 자동 응답·댓글 분석 기록)를 삭제할까요?\n되돌릴 수 없습니다. Instagram 에 게시된 게시물은 그대로 남습니다.`,
-      )
+      !window.confirm(t("shell.deleteConfirm", { username: me.username }))
     )
       return;
     setLoggingOut(true);
@@ -78,7 +80,7 @@ function Sidebar({ me }: { me: Me }) {
       window.location.href = `/data-deletion?code=${r.confirmation_code}`;
     } catch (e) {
       setLoggingOut(false);
-      window.alert(e instanceof Error ? e.message : "삭제하지 못했습니다.");
+      window.alert(e instanceof Error ? e.message : t("shell.deleteFailed"));
     }
   }
 
@@ -106,7 +108,7 @@ function Sidebar({ me }: { me: Me }) {
         type="button"
         onClick={() => setAccountOpen(true)}
         className="-mr-1 flex items-center gap-2 rounded-full p-1 hover:bg-surface-2"
-        aria-label="계정 메뉴"
+        aria-label={t("shell.accountMenu")}
       >
         <Avatar src={me.profile_picture_url} name={me.username} size={32} />
       </button>
@@ -114,7 +116,7 @@ function Sidebar({ me }: { me: Me }) {
 
     {/* 휴대폰: 하단 탭바 */}
     <nav
-      aria-label="주 메뉴"
+      aria-label={t("shell.mainMenu")}
       className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
     >
       {NAV.map(({ href, short, icon: Icon }) => (
@@ -128,7 +130,7 @@ function Sidebar({ me }: { me: Me }) {
           )}
         >
           <Icon width={22} height={22} />
-          {short}
+          {t(short)}
         </Link>
       ))}
     </nav>
@@ -137,7 +139,7 @@ function Sidebar({ me }: { me: Me }) {
       open={accountOpen}
       onClose={() => setAccountOpen(false)}
       title={`@${me.username}`}
-      subtitle={`팔로워 ${fmtCompact(me.followers_count)}${me.fb_page_name ? ` · 페이지 ${me.fb_page_name}` : ""}`}
+      subtitle={`${t("shell.followers", { n: fmtCompact(me.followers_count) })}${me.fb_page_name ? ` · ${t("shell.page", { name: me.fb_page_name })}` : ""}`}
     >
       <div className="-mx-2 space-y-1">
         <button
@@ -145,18 +147,19 @@ function Sidebar({ me }: { me: Me }) {
           disabled={loggingOut}
           className="flex h-12 w-full items-center gap-3 rounded-lg px-3 text-[15px] hover:bg-surface-2"
         >
-          <IconLogout width={18} height={18} /> 로그아웃
+          <IconLogout width={18} height={18} /> {t("shell.logout")}
         </button>
         <button
           onClick={deleteAccount}
           disabled={loggingOut}
           className="flex h-12 w-full items-center rounded-lg px-3 text-left text-[14px] text-bad hover:bg-bad/10"
         >
-          연결 해제 및 데이터 삭제
+          {t("shell.deleteAccount")}
         </button>
-        <div className="flex gap-4 px-3 pt-2 pb-1 text-[13px] text-fg-3">
-          <Link href="/privacy">개인정보처리방침</Link>
-          <Link href="/data-deletion">데이터 삭제 안내</Link>
+        <div className="flex flex-wrap items-center gap-4 px-3 pt-2 pb-1 text-[13px] text-fg-3">
+          <LanguageSwitcher className="text-[13px]" />
+          <Link href="/privacy">{t("common.privacy")}</Link>
+          <Link href="/data-deletion">{t("common.dataDeletion")}</Link>
         </div>
       </div>
     </Dialog>
@@ -182,7 +185,7 @@ function Sidebar({ me }: { me: Me }) {
             )}
           >
             <Icon width={16} height={16} />
-            {label}
+            {t(label)}
           </Link>
         ))}
       </nav>
@@ -192,32 +195,33 @@ function Sidebar({ me }: { me: Me }) {
           <Avatar src={me.profile_picture_url} name={me.username} size={36} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-semibold">@{me.username}</p>
-            <p className="truncate text-[12px] text-fg-3">팔로워 {fmtCompact(me.followers_count)}</p>
+            <p className="truncate text-[12px] text-fg-3">{t("shell.followers", { n: fmtCompact(me.followers_count) })}</p>
           </div>
         </div>
-        {me.fb_page_name && <p className="mt-2 truncate text-[12px] text-fg-3">페이지 · {me.fb_page_name}</p>}
+        {me.fb_page_name && <p className="mt-2 truncate text-[12px] text-fg-3">{t("shell.page", { name: me.fb_page_name })}</p>}
         <button
           onClick={logout}
           disabled={loggingOut}
           className="mt-3 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-fg-3 hover:bg-surface-2 hover:text-fg"
         >
-          <IconLogout width={16} height={16} /> 로그아웃
+          <IconLogout width={16} height={16} /> {t("shell.logout")}
         </button>
         <button
           onClick={deleteAccount}
           disabled={loggingOut}
           className="mt-1 w-full rounded-lg px-2 py-1.5 text-left text-[12px] text-fg-3 hover:bg-bad/10 hover:text-bad"
         >
-          연결 해제 및 데이터 삭제
+          {t("shell.deleteAccount")}
         </button>
-        <div className="mt-2 flex gap-3 px-2 text-[11px] text-fg-3">
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 px-2 text-[11px] text-fg-3">
           <Link href="/privacy" className="hover:text-fg">
-            개인정보처리방침
+            {t("common.privacy")}
           </Link>
           <Link href="/data-deletion" className="hover:text-fg">
-            데이터 삭제 안내
+            {t("common.dataDeletion")}
           </Link>
         </div>
+        <LanguageSwitcher className="mt-3 px-2" />
       </div>
     </aside>
     </>
@@ -226,6 +230,7 @@ function Sidebar({ me }: { me: Me }) {
 
 /** 백엔드 OAuth 콜백이 /admin?connected=1 또는 ?error=... 로 돌려보냅니다. */
 function OAuthResultBanner() {
+  const t = useT();
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -237,12 +242,12 @@ function OAuthResultBanner() {
   return (
     <div className="mb-6">
       {error ? (
-        <Notice tone="bad" title="계정 연결 중 문제가 생겼습니다" onClose={dismiss}>
+        <Notice tone="bad" title={t("shell.connectErrorTitle")} onClose={dismiss}>
           {error}
         </Notice>
       ) : (
-        <Notice tone="good" title="Instagram 계정이 연결됐습니다" onClose={dismiss}>
-          이제 프롬프트로 콘텐츠를 만들고 게시할 수 있습니다.
+        <Notice tone="good" title={t("shell.connectedTitle")} onClose={dismiss}>
+          {t("shell.connectedBody")}
         </Notice>
       )}
     </div>
@@ -250,14 +255,13 @@ function OAuthResultBanner() {
 }
 
 function LoginGate({ message }: { message?: string }) {
+  const t = useT();
   return (
     <div className="flex min-h-dvh items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-2xl border border-line bg-surface-1 p-7 text-center">
         <Logo size={44} className="mx-auto" />
-        <h1 className="mt-4 text-lg font-semibold">로그인이 필요합니다</h1>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-fg-2">
-          Instagram 비즈니스·크리에이터 계정을 연결하세요.
-        </p>
+        <h1 className="mt-4 text-lg font-semibold">{t("shell.loginRequired")}</h1>
+        <p className="mt-1.5 text-[13px] leading-relaxed text-fg-2">{t("shell.loginRequiredBody")}</p>
         <Suspense fallback={null}>
           <GateError fallback={message} />
         </Suspense>
@@ -265,10 +269,10 @@ function LoginGate({ message }: { message?: string }) {
           href={LOGIN_URL}
           className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent text-sm font-semibold text-on-accent hover:opacity-90"
         >
-          <IconInstagram /> Instagram 계정 연결하기
+          <IconInstagram /> {t("common.connectInstagram")}
         </a>
         <Link href="/" className="mt-3 inline-block text-[13px] text-fg-3 hover:text-fg">
-          처음 화면으로
+          {t("shell.backHome")}
         </Link>
       </div>
     </div>

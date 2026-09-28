@@ -7,6 +7,9 @@ import { useMe } from "@/components/AdminShell";
 import { PostForm } from "@/components/PostForm";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconMusic, IconSpark } from "@/components/icons";
+import { useT } from "@/i18n/client";
+import type { MessageKey, T } from "@/i18n/core";
+import { rich } from "@/i18n/rich";
 import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
 import { mediaSrc, composeCaption, fmtDateTime, KIND_LABEL, parseHashtags, STATUS_LABEL } from "@/lib/format";
@@ -26,6 +29,7 @@ export default function StudioPage() {
 }
 
 function Studio() {
+  const t = useT();
   const params = useSearchParams();
   const router = useRouter();
   const jobId = params.get("job");
@@ -60,19 +64,19 @@ function Studio() {
   return (
     <>
       <PageHeader
-        title="만들기"
-        description="주제와 컨셉을 적고 사진을 올리면 Gemini가 그 컨셉대로 이미지와 캡션을 만들고, 검수 후 Instagram 에 게시합니다."
+        title={t("studio.title")}
+        description={t("studio.description")}
         action={
           job && (
             <Button variant="secondary" size="sm" onClick={() => router.push("/admin/studio")}>
-              + 새로 만들기
+              {t("studio.newPost")}
             </Button>
           )
         }
       />
       {jobError && (
         <div className="mb-6">
-          <Notice tone="bad" title="작업을 불러오지 못했습니다">
+          <Notice tone="bad" title={t("studio.jobLoadFailed")}>
             {jobError}
           </Notice>
         </div>
@@ -90,6 +94,7 @@ function Studio() {
 // ───────────────────────────────────────────────────────────── 검수 + 발행
 
 function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void }) {
+  const t = useT();
   const { me } = useMe();
   const quota = useApi<Quota>("/workflow/quota");
   const [caption, setCaption] = useState("");
@@ -121,13 +126,15 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
     return (
       <div className="flex min-h-[420px] flex-col items-center justify-center rounded-xl border border-dashed border-line-strong p-8 text-center">
         <IconSpark className="text-fg-3" width={28} height={28} />
-        <p className="mt-3 text-sm font-medium text-fg-2">생성된 콘텐츠가 여기에 표시됩니다</p>
+        <p className="mt-3 text-sm font-medium text-fg-2">{t("studio.emptyTitle")}</p>
         <p className="mt-1 max-w-xs text-[13px] text-fg-3">
-          미디어와 캡션을 확인·수정한 뒤 게시하세요. 이전 작업은{" "}
-          <Link href="/admin/jobs" className="underline">
-            작업함
-          </Link>
-          에서 열 수 있습니다.
+          {rich(t("studio.emptyBody"), {
+            link: (c) => (
+              <Link href="/admin/jobs" className="underline">
+                {c}
+              </Link>
+            ),
+          })}
         </p>
       </div>
     );
@@ -166,8 +173,8 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
   }
 
   async function publish() {
-    const arLine = arForm && autoReplyOn(arForm) ? `\n댓글 자동 응답: ${autoReplySummary(arForm)}` : "";
-    if (!window.confirm(`@${me.username} 계정에 ${KIND_LABEL[job!.media_kind]}(으)로 지금 게시합니다.${arLine}\n계속할까요?`)) return;
+    const arLine = arForm && autoReplyOn(arForm) ? t("studio.publishConfirmAutoReply", { summary: autoReplySummary(arForm, t) }) : "";
+    if (!window.confirm(t("studio.publishConfirm", { username: me.username, kind: KIND_LABEL[job!.media_kind], autoReply: arLine }))) return;
     // 게시 전에 캡션과 자동 응답을 먼저 저장해, 게시되는 순간부터 자동 응답이 동작하게 합니다.
     if ((dirty || arDirty) && !(await save())) return;
     setPublishing(true);
@@ -195,23 +202,23 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
       <Card
         title={
           <span className="flex items-center gap-2">
-            {KIND_LABEL[job.media_kind]} 미리보기
+            {t("studio.previewTitle", { kind: KIND_LABEL[job.media_kind] })}
             <Badge tone={tone} icon={<StatusDot tone={tone} />}>
               {STATUS_LABEL[job.status]}
             </Badge>
           </span>
         }
-        subtitle={`${fmtDateTime(job.created_at)} · 엔진 ${job.provider}`}
+        subtitle={t("studio.jobMeta", { date: fmtDateTime(job.created_at), provider: job.provider })}
       >
         {job.status === "published" && (
           <div className="mb-4">
-            <Notice tone="good" title="게시됐습니다">
+            <Notice tone="good" title={t("studio.publishedTitle")}>
               {job.permalink ? (
                 <a href={job.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">
-                  Instagram 에서 보기 <IconExternal />
+                  {t("studio.viewOnInstagram")} <IconExternal />
                 </a>
               ) : (
-                "잠시 후 게시물 성과 탭에서 확인할 수 있습니다."
+                t("studio.publishedLater")
               )}
             </Notice>
           </div>
@@ -241,7 +248,7 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
         {!!job.requirements?.length && (
           <details open className="mt-4 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2">
             <summary className="cursor-pointer text-[13px] font-medium text-fg">
-              연출 요구사항 반영 {job.requirements.length}개 — Gemini가 이해한 요청과 반영 위치
+              {t("studio.requirements", { n: job.requirements.length })}
             </summary>
             <ul className="mt-2 space-y-1.5">
               {job.requirements.map((r, i) => (
@@ -257,7 +264,7 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
         {!!job.sources?.length && (
           <details className="mt-4 rounded-lg border border-line px-3 py-2">
             <summary className="cursor-pointer text-[13px] font-medium text-fg-2">
-              Gemini가 조사에 참고한 자료 {job.sources.length}개 — 사실 확인용
+              {t("studio.sources", { n: job.sources.length })}
             </summary>
             <ul className="mt-2 space-y-1">
               {job.sources.map((src) => (
@@ -277,16 +284,16 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
       </Card>
 
       <Card
-        title="캡션 · 게시"
-        subtitle={job.media_kind === "STORIES" ? "스토리에는 캡션과 댓글 자동 응답이 적용되지 않습니다." : undefined}
+        title={t("studio.captionTitle")}
+        subtitle={job.media_kind === "STORIES" ? t("studio.storiesNoCaption") : undefined}
       >
         <div className="space-y-4">
           <Field
-            label="본문"
+            label={t("studio.captionBody")}
             htmlFor="caption"
             hint={
               <span className={cx(overCaption && "font-medium text-bad")}>
-                최종 {finalCaption.length.toLocaleString()} / {CAPTION_LIMIT.toLocaleString()}자
+                {t("studio.captionCount", { n: finalCaption.length.toLocaleString(), max: CAPTION_LIMIT.toLocaleString() })}
               </span>
             }
           >
@@ -300,11 +307,11 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
             />
           </Field>
           <Field
-            label="해시태그"
+            label={t("studio.hashtags")}
             htmlFor="tags"
             hint={
               <span className={cx(overTags && "font-medium text-bad")}>
-                {hashtags.length} / {HASHTAG_LIMIT}개 · 공백이나 쉼표로 구분
+                {t("studio.hashtagCount", { n: hashtags.length, max: HASHTAG_LIMIT })}
               </span>
             }
           >
@@ -312,7 +319,7 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
           </Field>
 
           <details className="rounded-lg border border-line bg-surface-2 px-3 py-2">
-            <summary className="cursor-pointer text-[13px] font-medium text-fg-2">게시될 형태 미리보기</summary>
+            <summary className="cursor-pointer text-[13px] font-medium text-fg-2">{t("studio.postPreview")}</summary>
             <div className="mt-3 flex gap-3">
               <Avatar src={me.profile_picture_url} name={me.username} size={28} />
               <p className="text-[13px] leading-relaxed whitespace-pre-wrap">
@@ -325,15 +332,15 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
             (arForm ? (
               <div>
                 <p className="mb-2 text-[13px] font-semibold">
-                  댓글 자동 응답
+                  {t("studio.autoReply")}
                   <span className="ml-1.5 text-[12px] font-normal text-fg-3">
-                    {job.status === "published" ? "바꾸면 새 댓글부터 적용됩니다." : "게시와 함께 설정됩니다."}
+                    {job.status === "published" ? t("studio.autoReplyAfterPublish") : t("studio.autoReplyWithPublish")}
                   </span>
                 </p>
                 <AutoReplyFields form={arForm} onChange={setArForm} />
               </div>
             ) : arRule.error ? (
-              <Notice tone="bad">자동 응답 설정을 불러오지 못했습니다: {arRule.error.message}</Notice>
+              <Notice tone="bad">{t("studio.autoReplyLoadFailed", { message: arRule.error.message })}</Notice>
             ) : (
               <Skeleton className="h-14" />
             ))}
@@ -341,7 +348,7 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
           {locked && arDirty && (
             <div className="flex justify-end">
               <Button onClick={save} loading={saving} disabled={!arValid}>
-                {saved ? "저장됨 ✓" : "자동 응답 저장"}
+                {saved ? t("common.saved") : t("studio.saveAutoReply")}
               </Button>
             </div>
           )}
@@ -351,7 +358,9 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
               <div className="text-[12px] text-fg-3">
                 {quota.data ? (
                   <>
-                    24시간 발행 한도 <span className="tnum font-medium text-fg-2">{quota.data.remaining}</span> / {quota.data.total} 남음
+                    {rich(t("studio.quota", { remaining: quota.data.remaining, total: quota.data.total }), {
+                      b: (c) => <span className="tnum font-medium text-fg-2">{c}</span>,
+                    })}
                   </>
                 ) : quota.loading ? (
                   <Spinner />
@@ -361,11 +370,11 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
                 {job.media_kind === "REELS" && (
                   <label className="mr-2 flex items-center gap-2 text-[13px] text-fg-2">
                     <input type="checkbox" checked={shareToFeed} onChange={(e) => setShareToFeed(e.target.checked)} className="accent-[var(--accent)]" />
-                    피드에도 공유
+                    {t("studio.shareToFeed")}
                   </label>
                 )}
                 <Button onClick={save} disabled={!(dirty || arDirty) || !arValid || publishing} loading={saving}>
-                  {saved ? "저장됨 ✓" : "저장"}
+                  {saved ? t("common.saved") : t("common.save")}
                 </Button>
                 <Button
                   variant="primary"
@@ -373,14 +382,14 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
                   loading={publishing}
                   disabled={overCaption || overTags || !arValid || visual.length === 0 || quota.data?.remaining === 0}
                 >
-                  {publishing ? "게시 중…" : job.status === "failed" ? "다시 게시" : "Instagram 에 게시"}
+                  {publishing ? t("studio.publishing") : job.status === "failed" ? t("studio.republish") : t("studio.publish")}
                 </Button>
               </div>
             </div>
           )}
           {publishing && (
             <p className="text-right text-[12px] text-fg-3">
-              영상은 Instagram 쪽 처리가 끝날 때까지 최대 1분 정도 기다립니다.
+              {t("studio.videoWait")}
             </p>
           )}
           {error && <Notice tone="bad">{error}</Notice>}
@@ -393,9 +402,9 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
 
 type RedoFn = (index: number, instruction: string, fromCurrent: boolean) => Promise<void>;
 
-async function fetchFile(url: string, name: string): Promise<File> {
+async function fetchFile(url: string, name: string, t: T): Promise<File> {
   const res = await fetch(mediaSrc(url));
-  if (!res.ok) throw new Error(`이미지를 받지 못했습니다 (${res.status})`);
+  if (!res.ok) throw new Error(t("studio.fetchImageFailed", { status: res.status }));
   const blob = await res.blob();
   return new File([blob], name, { type: blob.type || "image/jpeg" });
 }
@@ -425,14 +434,15 @@ async function saveFiles(files: File[]) {
   }
 }
 
-async function downloadImage(url: string, name: string) {
-  await saveFiles([await fetchFile(url, name)]);
+async function downloadImage(url: string, name: string, t: T) {
+  await saveFiles([await fetchFile(url, name, t)]);
 }
 
 function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; onRedo?: RedoFn; filePrefix?: string }) {
+  const t = useT();
   const [error, setError] = useState<string>();
   const [downloadingAll, setDownloadingAll] = useState(false);
-  if (!assets.length) return <p className="py-8 text-center text-sm text-fg-3">미디어가 없습니다.</p>;
+  if (!assets.length) return <p className="py-8 text-center text-sm text-fg-3">{t("studio.noMedia")}</p>;
   const single = assets.length === 1;
   const fileName = (a: Asset, i: number) => `${filePrefix}-${i + 1}.${a.type === "video" ? "mp4" : "jpg"}`;
   const ready = assets.filter((a) => a.url);
@@ -442,7 +452,7 @@ function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; 
     setError(undefined);
     try {
       const files = await Promise.all(
-        assets.map((a, i) => (a.url ? fetchFile(a.url, fileName(a, i)) : null)),
+        assets.map((a, i) => (a.url ? fetchFile(a.url, fileName(a, i), t) : null)),
       );
       await saveFiles(files.filter((f): f is File => f !== null));
     } catch (e) {
@@ -458,7 +468,7 @@ function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; 
       {!single && ready.length > 1 && (
         <div className="mb-2 flex justify-end">
           <Button variant="ghost" size="sm" onClick={downloadAll} disabled={downloadingAll}>
-            {downloadingAll ? <Spinner className="size-3" /> : "↓"} 전체 다운로드 ({ready.length}장)
+            {downloadingAll ? <Spinner className="size-3" /> : "↓"} {t("studio.downloadAll", { n: ready.length })}
           </Button>
         </div>
       )}
@@ -497,6 +507,7 @@ function MediaItem({
   onRedo?: RedoFn;
   onError: (message?: string) => void;
 }) {
+  const t = useT();
   const canEditCurrent = a.type === "image" && Boolean(a.url);
   const lastPrompt = typeof a.meta?.prompt === "string" ? a.meta.prompt : "";
   const [open, setOpen] = useState(false);
@@ -526,7 +537,7 @@ function MediaItem({
     setDownloading(true);
     onError(undefined);
     try {
-      await downloadImage(a.url, fileName);
+      await downloadImage(a.url, fileName, t);
     } catch (e) {
       onError(toApiError(e).message);
     } finally {
@@ -546,17 +557,17 @@ function MediaItem({
           <video src={mediaSrc(a.url)} poster={mediaSrc(a.thumbnail_url) || undefined} controls playsInline className="block max-h-[520px] w-full object-contain" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={mediaSrc(a.url)} alt={`생성된 이미지 ${i + 1}`} className="block max-h-[520px] w-full object-contain" />
+          <img src={mediaSrc(a.url)} alt={t("studio.imageAlt", { n: i + 1 })} className="block max-h-[520px] w-full object-contain" />
         )}
         {!single && (
           <figcaption className="tnum absolute top-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">
             {i + 1}/{total}
-            {typeof a.meta?.role === "string" && ` · ${ROLE_LABEL[a.meta.role] ?? ""}`}
+            {typeof a.meta?.role === "string" && ` · ${ROLE_LABEL[a.meta.role] ? t(ROLE_LABEL[a.meta.role]) : ""}`}
           </figcaption>
         )}
         {busy && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-[12px] text-white">
-            <Spinner className="mr-1.5 size-4" /> 만드는 중…
+            <Spinner className="mr-1.5 size-4" /> {t("studio.generating")}
           </div>
         )}
       </div>
@@ -568,7 +579,7 @@ function MediaItem({
           disabled={!a.url || downloading}
           className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-fg-2 hover:bg-surface-2 disabled:opacity-50"
         >
-          {downloading ? <Spinner className="size-3" /> : "↓"} 다운로드
+          {downloading ? <Spinner className="size-3" /> : "↓"} {t("studio.download")}
         </button>
         {onRedo && (
           <button
@@ -581,17 +592,17 @@ function MediaItem({
               open ? "text-accent" : "text-fg-2",
             )}
           >
-            ✎ 이 이미지 수정
+            ✎ {t("studio.editImage")}
           </button>
         )}
       </div>
       {failed && !busy && (
-        <p className="border-t border-line bg-surface-1 px-2 py-1 text-[11px] text-warn">이미지 연출 실패 — 기본 편집본이에요</p>
+        <p className="border-t border-line bg-surface-1 px-2 py-1 text-[11px] text-warn">{t("studio.fallbackImage")}</p>
       )}
 
       {onRedo && open && (
         <div className="space-y-2 border-t border-line bg-surface-1 p-2">
-          {lastPrompt && <p className="line-clamp-2 text-[11px] text-fg-3">지난 요청: {lastPrompt}</p>}
+          {lastPrompt && <p className="line-clamp-2 text-[11px] text-fg-3">{t("studio.lastRequest", { prompt: lastPrompt })}</p>}
           <textarea
             rows={3}
             value={text}
@@ -599,16 +610,16 @@ function MediaItem({
             maxLength={1000}
             placeholder={
               fromCurrent && canEditCurrent
-                ? "예) 하늘을 더 노을빛으로, 오른쪽 사람 지우기, 필름 테두리 추가"
-                : "예) 두 사진을 필름 스트립처럼 세로로 이어 붙여줘 (비우면 처음 연출대로 다시)"
+                ? t("studio.editPlaceholderCurrent")
+                : t("studio.editPlaceholderRedo")
             }
             className={cx(inputClass, "resize-y text-[12px]")}
             disabled={busy}
           />
-          <div className="flex rounded-md border border-line p-0.5 text-[11px]" role="radiogroup" aria-label="수정 방식">
+          <div className="flex rounded-md border border-line p-0.5 text-[11px]" role="radiogroup" aria-label={t("studio.editMode")}>
             {[
-              { v: true, label: "지금 이미지에서 고치기", disabled: !canEditCurrent },
-              { v: false, label: "처음부터 다시", disabled: false },
+              { v: true, label: t("studio.modeCurrent"), disabled: !canEditCurrent },
+              { v: false, label: t("studio.modeRedo"), disabled: false },
             ].map((o) => (
               <button
                 key={o.label}
@@ -632,7 +643,7 @@ function MediaItem({
             </p>
           )}
           <Button size="sm" className="w-full" onClick={apply} disabled={busy || (fromCurrent && canEditCurrent && !text.trim())}>
-            {busy ? <Spinner className="size-3" /> : "↻"} {fromCurrent && canEditCurrent ? "수정 적용" : "다시 만들기"}
+            {busy ? <Spinner className="size-3" /> : "↻"} {fromCurrent && canEditCurrent ? t("studio.applyEdit") : t("studio.redo")}
           </Button>
         </div>
       )}
@@ -640,13 +651,20 @@ function MediaItem({
   );
 }
 
-const ROLE_LABEL: Record<string, string> = { designed: "디자인", photo: "사진", overlay: "사진+글", panel: "정보", center: "강조" };
+const ROLE_LABEL: Record<string, MessageKey> = {
+  designed: "studio.roleDesigned",
+  photo: "studio.rolePhoto",
+  overlay: "studio.roleOverlay",
+  panel: "studio.rolePanel",
+  center: "studio.roleCenter",
+};
 
 function AudioTrack({ asset }: { asset: Asset }) {
+  const t = useT();
   return (
     <div className="mt-4 rounded-lg border border-line bg-surface-2 p-3">
       <p className="flex items-center gap-1.5 text-[13px] font-medium">
-        <IconMusic /> 배경음악
+        <IconMusic /> {t("studio.bgm")}
       </p>
       {asset.meta?.prompt && <p className="mt-0.5 text-[12px] text-fg-3">{asset.meta.prompt}</p>}
       <audio src={asset.url} controls className="mt-2 w-full" preload="none" />

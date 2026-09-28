@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.requests import Request
 
 from .config import settings
 from .db import init_db
+from .i18n import lang_of, translate_payload
 from .routers import auth, autoreply, cardnews, insights, sentiment, webhooks, workflow
 from .services.meta_graph import GraphError
 
@@ -26,6 +28,22 @@ app = FastAPI(
     docs_url="/docs",
     openapi_url="/openapi.json",
 )
+
+
+@app.middleware("http")
+async def localize_json(request: Request, call_next):
+    """오류·안내 문구(detail, note, warning, error …)를 요청 언어(lang 쿠키 → Accept-Language)로 바꿉니다."""
+    response = await call_next(request)
+    lang = lang_of(request)
+    if lang == "ko" or not response.headers.get("content-type", "").startswith("application/json"):
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return Response(body, status_code=response.status_code, headers=dict(response.headers))
+    headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+    return JSONResponse(translate_payload(data, lang), status_code=response.status_code, headers=headers)
 
 
 @app.exception_handler(GraphError)

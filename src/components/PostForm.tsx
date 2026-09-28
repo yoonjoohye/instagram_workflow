@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/i18n/client";
+import type { T } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
 import type { Job } from "@/lib/types";
 import { IconSpark } from "./icons";
@@ -8,18 +10,6 @@ import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
 
 const MAX_PHOTOS = 8; // 올릴 수 있는 사진 수 (게시물은 최대 10장까지 Gemini가 구성)
 const MAX_REFS = 3;
-const FORMAT_PLACEHOLDER = `비워 두면 주제·연출에 맞게 알아서 써요.
-예) 짧고 감성적으로, 장소 이름 넣어서
-예) [후킹 2줄]
-[핵심 정보 3~5줄, 줄마다 이모지로 시작]`;
-const FORMAT_EXAMPLE = `[후킹 3줄]
-
-[스탈링 뱅크 설명]
-[스탈링 뱅크 개설하는 법]
-[추천인 정보: 코드 ABC123, 가입하고 카드 결제하면 £5 지급]
-👉 가입 링크는 프로필에 있어요
-
-[댓글 유도 글 작성]`;
 
 type Research = { notes: string; sources: { title: string; uri: string }[]; warning: string };
 
@@ -27,7 +17,7 @@ type Photo = { key: string; file: File; preview: string };
 type Step = { label: string; done: number; total: number };
 
 /** 브라우저에서 긴 변 1600px JPEG 로 줄여 올립니다 (Vercel 요청 크기 제한 대비, 업로드도 빨라짐). */
-async function shrink(file: File, maxSide = 1600): Promise<Blob> {
+async function shrink(file: File, t: T, maxSide = 1600): Promise<Blob> {
   const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" } as ImageBitmapOptions);
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
@@ -35,20 +25,21 @@ async function shrink(file: File, maxSide = 1600): Promise<Blob> {
   canvas.height = Math.round(bitmap.height * scale);
   canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   return new Promise((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("이미지를 변환하지 못했습니다."))), "image/jpeg", 0.88),
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(t("studio.convertFailed")))), "image/jpeg", 0.88),
   );
 }
 
-async function uploadPhoto(file: File): Promise<string> {
+async function uploadPhoto(file: File, t: T): Promise<string> {
   const body = new FormData();
-  body.append("file", await shrink(file), file.name.replace(/\.\w+$/, "") + ".jpg");
+  body.append("file", await shrink(file, t), file.name.replace(/\.\w+$/, "") + ".jpg");
   const res = await fetch("/api/py/media/uploads", { method: "POST", body, credentials: "include" });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.detail || `업로드 실패 (${res.status})`);
+  if (!res.ok) throw new Error(data?.detail || t("studio.uploadFailed", { status: res.status }));
   return data.id as string;
 }
 
 export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
+  const { t, locale } = useI18n();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState("");
@@ -70,7 +61,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
     const images = Array.from(list).filter((f) => f.type.startsWith("image/"));
     setPhotos((prev) => {
       const room = MAX_PHOTOS - prev.length;
-      if (images.length > room) setError(`사진은 최대 ${MAX_PHOTOS}장까지 올릴 수 있어요.`);
+      if (images.length > room) setError(t("studio.maxPhotos", { max: MAX_PHOTOS }));
       return [
         ...prev,
         ...images.slice(0, Math.max(0, room)).map((file) => ({
@@ -111,25 +102,25 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (prompt.trim().length < 2) return setError("주제를 입력해 주세요.");
+    if (prompt.trim().length < 2) return setError(t("studio.topicRequired"));
     setError(undefined);
     try {
       const ids: string[] = [];
       for (let i = 0; i < photos.length; i++) {
-        setStep({ label: "사진 올리는 중", done: i, total: photos.length });
-        ids.push(await uploadPhoto(photos[i].file));
+        setStep({ label: t("studio.stepUploadPhotos"), done: i, total: photos.length });
+        ids.push(await uploadPhoto(photos[i].file, t));
       }
       const refIds: string[] = [];
       for (let i = 0; i < refs.length; i++) {
-        setStep({ label: "참고 이미지 올리는 중", done: i, total: refs.length });
-        refIds.push(await uploadPhoto(refs[i].file));
+        setStep({ label: t("studio.stepUploadRefs"), done: i, total: refs.length });
+        refIds.push(await uploadPhoto(refs[i].file, t));
       }
-      setStep({ label: "Gemini가 주제·연출 방향에 맞는 자료를 검색하는 중", done: 0, total: 1 });
+      setStep({ label: t("studio.stepResearch"), done: 0, total: 1 });
       const research = await api<Research>("/cardnews/research", {
         method: "POST",
-        json: { prompt: prompt.trim(), caption_format: format, style },
+        json: { prompt: prompt.trim(), caption_format: format, style, language: locale },
       });
-      setStep({ label: "Gemini가 연출 방향대로 구성·이미지·글을 설계하는 중", done: 0, total: 1 });
+      setStep({ label: t("studio.stepPlan"), done: 0, total: 1 });
       const plan = await api<{ job: Job; slides: { role: string }[]; warning: string }>("/cardnews/plan", {
         method: "POST",
         json: {
@@ -142,19 +133,20 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           sources: research.sources,
           accent,
           font,
+          language: locale,
         },
       });
       const total = plan.slides.length;
       for (let i = 0; i < total; i++) {
         const role = plan.slides[i].role;
-        setStep({ label: role === "photo" ? `이미지 ${i + 1}장째 만드는 중` : `이미지 ${i + 1}장째 만들고 글 얹는 중`, done: i, total });
+        setStep({ label: t(role === "photo" ? "studio.stepPhoto" : "studio.stepDesigned", { n: i + 1 }), done: i, total });
         try {
           await api(`/cardnews/${plan.job.id}/slides/${i}`, { method: "POST", json: {} });
         } catch {
           await api(`/cardnews/${plan.job.id}/slides/${i}`, { method: "POST", json: {} }); // 한 번 재시도
         }
       }
-      setStep({ label: "마무리하는 중", done: total, total });
+      setStep({ label: t("studio.stepFinalize"), done: total, total });
       onCreated(await api<Job>(`/cardnews/${plan.job.id}/finalize`, { method: "POST" }));
     } catch (err) {
       setError(toApiError(err).message);
@@ -165,23 +157,23 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
 
   return (
     <Card
-      title="사진과 주제로 게시물 만들기"
+      title={t("studio.formTitle")}
       subtitle={
         <span className="inline-flex flex-wrap items-center gap-1.5">
-          주제·컨셉에 맞춰 Gemini가 장수·구성·이미지·캡션을 정해요. 맞는 사진이 없으면 새로 만들어요
+          {t("studio.formSubtitle")}
           <Badge tone="accent">Gemini</Badge>
         </span>
       }
       className="h-fit"
     >
       <form onSubmit={submit} className="space-y-5">
-        <Field label="주제 · 컨셉" htmlFor="cn-prompt" hint="무엇을, 어떤 느낌으로 올릴지 자유롭게 적어 주세요. 이 컨셉을 끝까지 유지해요.">
+        <Field label={t("studio.topicLabel")} htmlFor="cn-prompt" hint={t("studio.topicHint")}>
           <textarea
             id="cn-prompt"
             rows={3}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={"예) 스탈링 뱅크 개설 방법을 영국 유학생 눈높이로 쉽게 정리\n예) 런던 브런치 카페 감성 기록 — 필름 사진 느낌, 글은 짧게"}
+            placeholder={t("studio.topicPlaceholder")}
             className={cx(inputClass, "resize-y")}
             disabled={busy}
           />
@@ -189,16 +181,16 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
 
         <div className="space-y-2">
           <Field
-            label="연출 방향"
+            label={t("studio.styleLabel")}
             htmlFor="cn-style"
-            hint="주제와 함께 가장 우선하는 기준이에요 — 이미지와 글 모두 이대로 만들어요. 형식(인스타툰·손글씨 메모·인터뷰·이벤트 포스터 등), 장별 지시, 그림체, 글자 표현, 말투를 자세히 적을수록 정확해져요. 조사 자료는 이 내용을 뒷받침하는 데만 써요."
+            hint={t("studio.styleHint")}
           >
             <textarea
               id="cn-style"
               rows={6}
               value={style}
               onChange={(e) => setStyle(e.target.value)}
-              placeholder={"예) 인스타툰 웹툰 형식. 귀여운 캐릭터가 말풍선으로 설명하고 파스텔 톤으로.\n첫 장은 배경을 어둡게 하고 후킹 제목 크게.\n두 번째 장부터는 사진 위에 아이패드 손글씨로 동그라미·화살표를 그려 설명.\n말투는 친구한테 알려주듯 반말로."}
+              placeholder={t("studio.stylePlaceholder")}
               className={cx(inputClass, "resize-y leading-relaxed")}
               disabled={busy}
             />
@@ -217,7 +209,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
                       // 마우스가 있으면 올렸을 때만, 터치 화면에서는 항상 보이게
                       "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
                     )}
-                    aria-label="참고 이미지 삭제"
+                    aria-label={t("studio.removeRef")}
                   >
                     ✕
                   </button>
@@ -231,7 +223,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
                 onClick={() => refInput.current?.click()}
                 className="inline-flex h-14 items-center rounded-md border border-dashed border-line-strong px-3 text-[12px] text-fg-2 hover:bg-surface-2"
               >
-                + 참고 이미지 · 양식 ({refs.length}/{MAX_REFS})
+                {t("studio.addRef", { n: refs.length, max: MAX_REFS })}
               </button>
             )}
             <input
@@ -247,12 +239,12 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             />
           </div>
           <p className="text-[12px] text-fg-3">
-            참고 이미지는 이미지를 만들 때 가장 우선하는 양식이에요 — 레이아웃·글자 배치·그림체·색을 똑같이 따라 내용만 바꿔 만들어요. (게시물 이미지로 그대로 들어가지는 않아요)
+            {t("studio.refNote")}
           </p>
         </div>
 
 
-        <Field label="글씨체" hint="자동이면 Gemini가 형식에 맞게 골라요 (손글씨 메모 → 손글씨체, 날림 요청 → 날림체 등). 연출 방향에 글씨체를 적어도 돼요.">
+        <Field label={t("studio.fontLabel")} hint={t("studio.fontHint")}>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -264,7 +256,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
                 font === "auto" ? "border-accent bg-accent/8 text-fg" : "border-line-strong text-fg-2 hover:bg-surface-2",
               )}
             >
-              ✨ 자동 (Gemini가 선택)
+              {t("studio.fontAuto")}
             </button>
             {(fonts.data?.data ?? []).map((f) => (
               <button
@@ -312,13 +304,13 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
                   <span className="tnum absolute top-1 left-1 rounded bg-black/60 px-1 text-[11px] text-white">{i + 1}</span>
                   {!busy && (
                     <span className="absolute inset-x-0 bottom-0 flex justify-between bg-black/55 px-0.5 py-0.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
-                      <button type="button" onClick={() => move(i, -1)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label="앞으로">
+                      <button type="button" onClick={() => move(i, -1)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label={t("studio.moveEarlier")}>
                         ←
                       </button>
-                      <button type="button" onClick={() => remove(i)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label="삭제">
+                      <button type="button" onClick={() => remove(i)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label={t("common.delete")}>
                         ✕
                       </button>
-                      <button type="button" onClick={() => move(i, 1)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label="뒤로">
+                      <button type="button" onClick={() => move(i, 1)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label={t("studio.moveLater")}>
                         →
                       </button>
                     </span>
@@ -333,7 +325,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             onClick={() => inputRef.current?.click()}
             className="w-full rounded-md py-3 text-[13px] text-fg-2 hover:bg-surface-2 disabled:opacity-50"
           >
-            {photos.length ? `+ 사진 추가 (${photos.length}/${MAX_PHOTOS})` : "사진을 끌어다 놓거나 눌러서 선택 (선택 · 최대 8장)"}
+            {photos.length ? t("studio.addPhotos", { n: photos.length, max: MAX_PHOTOS }) : t("studio.dropPhotos", { max: MAX_PHOTOS })}
           </button>
           <input
             ref={inputRef}
@@ -347,19 +339,17 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             }}
           />
         </div>
-        <p className="-mt-3 text-[12px] text-fg-3">사진은 선택이에요. Gemini가 컨셉에 맞는 사진만 골라 쓰고, 필요한 장면은 글 내용대로 새로 만들어요. &lsquo;두 사진을 합쳐 한 장 짜리로&rsquo;처럼 쓰면 여러 사진을 한 이미지로 합쳐요.</p>
+        <p className="-mt-3 text-[12px] text-fg-3">{t("studio.photosNote")}</p>
 
 
         <Field
-          label="캡션 양식 · 꼭 넣을 정보 (선택)"
+          label={t("studio.formatLabel")}
           htmlFor="cn-format"
           hint={
             <>
-              [ ] 칸이 없으면 캡션 요청으로 읽고 Gemini가 새로 써요. [ ] 칸이 있으면 양식으로 보고 칸만 채우며, 칸 밖 글자·줄바꿈은 그대로 들어가요. &lsquo;[후킹 3줄]&rsquo;처럼 줄 수를 쓰면 딱 맞춰요.
-              추천인 코드·링크·가격처럼 Gemini가 모르는 정보는 칸 밖에 그대로 쓰거나 칸 안에 적어 주세요
-              (예: {"[추천인 정보: 코드 ABC123]"}) — 바꾸지 않고 그대로 써요. 해시태그는 맨 뒤에 자동으로 붙어요.{" "}
-              <button type="button" className="underline" onClick={() => setFormat(FORMAT_EXAMPLE)} disabled={busy}>
-                예시 넣기
+              {t("studio.formatHint")}{" "}
+              <button type="button" className="underline" onClick={() => setFormat(t("studio.formatExample"))} disabled={busy}>
+                {t("studio.formatInsertExample")}
               </button>
             </>
           }
@@ -369,17 +359,17 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             rows={7}
             value={format}
             onChange={(e) => setFormat(e.target.value)}
-            placeholder={FORMAT_PLACEHOLDER}
+            placeholder={t("studio.formatPlaceholder")}
             className={cx(inputClass, "resize-y font-mono text-[12px]")}
             disabled={busy}
           />
         </Field>
 
         <details className="rounded-lg border border-line px-3 py-2">
-          <summary className="cursor-pointer text-[13px] font-medium text-fg-2">포인트 색 (선택)</summary>
+          <summary className="cursor-pointer text-[13px] font-medium text-fg-2">{t("studio.accentSummary")}</summary>
           <div className="mt-3 space-y-3">
             <label className="flex items-center gap-3 text-[13px] text-fg-2">
-              포인트 색
+              {t("studio.accentLabel")}
               <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} className="h-8 w-12 cursor-pointer rounded border border-line" disabled={busy} />
               <span className="tnum text-fg-3">{accent}</span>
             </label>
@@ -399,11 +389,11 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             <div className="h-2 overflow-hidden rounded-full bg-surface-2">
               <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(step.done / Math.max(step.total, 1)) * 100}%` }} />
             </div>
-            <p className="text-[12px] text-fg-3">주제 조사와 이미지 연출에 몇 분 걸릴 수 있어요. 창을 닫지 마세요.</p>
+            <p className="text-[12px] text-fg-3">{t("studio.waitNote")}</p>
           </div>
         ) : (
           <Button type="submit" variant="primary" className="w-full" disabled={prompt.trim().length < 2}>
-            <IconSpark width={16} height={16} /> 게시물 만들기
+            <IconSpark width={16} height={16} /> {t("studio.submit")}
           </Button>
         )}
       </form>

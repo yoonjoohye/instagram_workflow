@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { translate } from "@/i18n/core";
+import { getFormatLocale } from "./format";
 
 // 로컬: next.config 의 rewrite 가 uvicorn(8000) 으로, Vercel: vercel.json 이 api/index.py 로 보냅니다.
 export const API_BASE = "/api/py";
@@ -22,7 +24,7 @@ function detailMessage(data: unknown, status: number): string {
   if (typeof detail === "string") return detail;
   // FastAPI 검증 오류: [{loc, msg, ...}]
   if (Array.isArray(detail)) return detail.map((d) => d?.msg ?? String(d)).join(", ");
-  return `요청에 실패했습니다 (${status})`;
+  return translate(getFormatLocale(), "common.requestFailed", { status });
 }
 
 export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
@@ -37,7 +39,7 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
       body: json !== undefined ? JSON.stringify(json) : undefined,
     });
   } catch {
-    throw new ApiError("서버에 연결할 수 없습니다. 백엔드(npm run dev:api)가 실행 중인지 확인하세요.", 0);
+    throw new ApiError(translate(getFormatLocale(), "common.serverUnreachable"), 0);
   }
   if (res.status === 204) return undefined as T;
 

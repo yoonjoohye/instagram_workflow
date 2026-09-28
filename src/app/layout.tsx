@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import { I18nProvider } from "@/i18n/client";
+import { getT } from "@/i18n/server";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "Instagram Auto Studio",
-  description: "프롬프트 한 줄로 사진·영상·음악·캡션을 만들어 Instagram 에 게시하고, 성과를 한눈에 봅니다.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getT();
+  return { title: t("common.metaTitle"), description: t("common.metaDescription") };
+}
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -17,10 +19,14 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // 쿠키(사용자가 고른 언어) → 브라우저 언어 → 영어
+  const { locale } = await getT();
   return (
-    <html lang="ko">
-      <body className="min-h-dvh">{children}</body>
+    <html lang={locale}>
+      <body className="min-h-dvh">
+        <I18nProvider locale={locale}>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

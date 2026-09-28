@@ -10,7 +10,9 @@ import { useApi } from "@/lib/api";
 import { fmtInt, fmtRelative, METRIC_HINT, METRIC_LABEL, postKind } from "@/lib/format";
 import type { AudienceDetail, Breakdowns, IgPost, ListOf, MetricKey, Overview, SentimentOverview } from "@/lib/types";
 import { AudienceDetailCard, ContentTypeCard, EngagementCard, FollowSplitCard, OnlineHoursCard } from "@/components/insightCards";
-import { SentimentBar } from "@/components/sentiment";
+import { MIN_COMMENTS, SentimentBar } from "@/components/sentiment";
+import { useT } from "@/i18n/client";
+import { rich } from "@/i18n/rich";
 
 const TILE_METRICS: MetricKey[] = ["reach", "profile_views", "accounts_engaged", "total_interactions", "website_clicks"];
 
@@ -24,6 +26,7 @@ const CHART_METRICS: { key: MetricKey; color: string }[] = [
 
 export default function DashboardPage() {
   const { me } = useMe();
+  const t = useT();
   const [days, setDays] = useState(30);
   const overview = useApi<Overview>(`/insights/overview?days=${days}`);
   const posts = useApi<ListOf<IgPost>>("/posts?limit=12");
@@ -40,22 +43,22 @@ export default function DashboardPage() {
   return (
     <>
       <PageHeader
-        title="대시보드"
-        description={`@${me.username} · 최근 ${days}일 동안 콘텐츠가 얼마나 보였는지`}
+        title={t("dashboard.title")}
+        description={t("dashboard.description", { username: me.username, days })}
         action={
           <>
             <Segmented
-              ariaLabel="기간"
+              ariaLabel={t("dashboard.period")}
               value={days}
               onChange={setDays}
               options={[
-                { value: 7, label: "7일" },
-                { value: 30, label: "30일" },
-                { value: 90, label: "90일" },
+                { value: 7, label: t("dashboard.days", { n: 7 }) },
+                { value: 30, label: t("dashboard.days", { n: 30 }) },
+                { value: 90, label: t("dashboard.days", { n: 90 }) },
               ]}
             />
-            <Button variant="ghost" size="sm" onClick={refreshAll} loading={overview.loading} aria-label="새로고침">
-              {!overview.loading && <IconRefresh />} 새로고침
+            <Button variant="ghost" size="sm" onClick={refreshAll} loading={overview.loading} aria-label={t("common.refresh")}>
+              {!overview.loading && <IconRefresh />} {t("common.refresh")}
             </Button>
           </>
         }
@@ -63,7 +66,7 @@ export default function DashboardPage() {
 
       {overview.error && (
         <div className="mb-6">
-          <Notice tone="bad" title="인사이트를 불러오지 못했습니다">
+          <Notice tone="bad" title={t("dashboard.loadFailed")}>
             {overview.error.message}
           </Notice>
         </div>
@@ -126,6 +129,7 @@ function Tiles({ overview, loading }: { overview?: Overview; loading: boolean })
 }
 
 function TrendCard({ overview, loading }: { overview?: Overview; loading: boolean }) {
+  const t = useT();
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [asTable, setAsTable] = useState(false);
 
@@ -153,21 +157,21 @@ function TrendCard({ overview, loading }: { overview?: Overview; loading: boolea
 
   return (
     <Card
-      title="일자별 노출 추이"
+      title={t("dashboard.trendTitle")}
       subtitle={
         available.length < all.length
-          ? "프로필 조회·참여 계정의 일자별 값은 매일 수집되며 쌓이는 대로 표시됩니다."
-          : "범례를 눌러 계열을 끄고 켤 수 있습니다."
+          ? t("dashboard.trendCollecting")
+          : t("dashboard.trendLegendHint")
       }
       action={
         <Segmented
           size="sm"
-          ariaLabel="보기 방식"
+          ariaLabel={t("dashboard.viewMode")}
           value={asTable ? "table" : "chart"}
           onChange={(v) => setAsTable(v === "table")}
           options={[
-            { value: "chart", label: "차트" },
-            { value: "table", label: "표" },
+            { value: "chart", label: t("dashboard.chart") },
+            { value: "table", label: t("dashboard.table") },
           ]}
         />
       }
@@ -187,6 +191,7 @@ function TrendCard({ overview, loading }: { overview?: Overview; loading: boolea
 }
 
 function SeriesTable({ series }: { series: LineSeries[] }) {
+  const t = useT();
   const dates = [...new Set(series.flatMap((s) => s.points.map((p) => p.date)))].sort().reverse();
   const maps = series.map((s) => new Map(s.points.map((p) => [p.date, p.value])));
   return (
@@ -194,7 +199,7 @@ function SeriesTable({ series }: { series: LineSeries[] }) {
       <table className="w-full text-[13px]">
         <thead className="sticky top-0 bg-surface-2 text-left text-fg-3">
           <tr>
-            <th className="px-3 py-2 font-medium">날짜</th>
+            <th className="px-3 py-2 font-medium">{t("dashboard.date")}</th>
             {series.map((s) => (
               <th key={s.key} className="px-3 py-2 text-right font-medium">
                 {s.label}
@@ -220,6 +225,7 @@ function SeriesTable({ series }: { series: LineSeries[] }) {
 }
 
 function TopPostsCard({ posts, loading, error }: { posts?: IgPost[]; loading: boolean; error?: string }) {
+  const t = useT();
   const rows = [...(posts ?? [])]
     .filter((p) => p.insights?.reach != null)
     .sort((a, b) => (b.insights.reach ?? 0) - (a.insights.reach ?? 0))
@@ -227,11 +233,11 @@ function TopPostsCard({ posts, loading, error }: { posts?: IgPost[]; loading: bo
 
   return (
     <Card
-      title="게시물별 도달"
-      subtitle="최근 게시물 12개 중 도달 상위 6개"
+      title={t("dashboard.topPostsTitle")}
+      subtitle={t("dashboard.topPostsSubtitle")}
       action={
         <Link href="/admin/posts" className="text-[13px] text-fg-3 hover:text-fg">
-          전체 보기 →
+          {t("common.viewAll")}
         </Link>
       }
     >
@@ -246,7 +252,7 @@ function TopPostsCard({ posts, loading, error }: { posts?: IgPost[]; loading: bo
       ) : (
         <BarList
           labelWidth={150}
-          emptyText="아직 성과 데이터가 있는 게시물이 없습니다."
+          emptyText={t("dashboard.topPostsEmpty")}
           rows={rows.map((p) => ({
             key: p.id,
             value: p.insights.reach ?? 0,
@@ -261,7 +267,7 @@ function TopPostsCard({ posts, loading, error }: { posts?: IgPost[]; loading: bo
                   loading="lazy"
                 />
                 <span className="min-w-0">
-                  <span className="block truncate">{p.caption?.split("\n")[0] || "(캡션 없음)"}</span>
+                  <span className="block truncate">{p.caption?.split("\n")[0] || t("dashboard.noCaption")}</span>
                   <span className="block text-[11px] text-fg-3">
                     {postKind(p)} · {fmtRelative(p.timestamp)}
                   </span>
@@ -277,20 +283,28 @@ function TopPostsCard({ posts, loading, error }: { posts?: IgPost[]; loading: bo
 
 
 function SentimentCard() {
+  const tr = useT();
   const overview = useApi<SentimentOverview>("/sentiment/overview");
   const t = overview.data?.totals;
   const n = t ? t.positive + t.neutral + t.negative : 0;
   return (
     <Card
-      title="댓글 반응"
+      title={tr("dashboard.sentimentTitle")}
       subtitle={
         overview.data
-          ? `댓글 ${overview.data.min_comments}개 이상인 게시물만 분석 · 분석된 댓글 ${fmtInt(n)}개 · ${overview.data.engine === "gemini" ? `Gemini(${overview.data.model})` : "키워드·이모지 규칙"}로 분류`
-          : "긍정 · 보통 · 부정"
+          ? tr("dashboard.sentimentSubtitle", {
+              min: overview.data.min_comments,
+              n: fmtInt(n),
+              engine:
+                overview.data.engine === "gemini"
+                  ? tr("dashboard.engineGemini", { model: overview.data.model })
+                  : tr("dashboard.engineRules"),
+            })
+          : tr("dashboard.sentimentPlaceholder")
       }
       action={
         <Link href="/admin/posts" className="text-[13px] text-fg-3 hover:text-fg">
-          게시물별 보기 →
+          {tr("dashboard.byPost")}
         </Link>
       }
     >
@@ -300,16 +314,18 @@ function SentimentCard() {
         <Notice tone="bad">{overview.error.message}</Notice>
       ) : !t || n === 0 ? (
         <p className="py-6 text-center text-sm text-fg-3">
-          댓글이 30개 이상인 게시물만 분석합니다. 아직 분석된 댓글이 없습니다.{" "}
-          <Link href="/admin/posts" className="underline">
-            게시물 성과
-          </Link>
-          에서 게시물을 펼쳐 &lsquo;댓글 분석&rsquo;을 눌러 주세요.
+          {rich(tr("dashboard.sentimentEmpty", { min: MIN_COMMENTS }), {
+            link: (chunk) => (
+              <Link href="/admin/posts" className="underline">
+                {chunk}
+              </Link>
+            ),
+          })}
         </p>
       ) : (
         <>
           <p className="pnum text-3xl font-semibold tracking-tight">
-            {Math.round((t.positive / n) * 100)}%<span className="ml-2 text-[13px] font-normal text-fg-3">긍정 비율</span>
+            {Math.round((t.positive / n) * 100)}%<span className="ml-2 text-[13px] font-normal text-fg-3">{tr("dashboard.positiveRate")}</span>
           </p>
           <div className="mt-4">
             <SentimentBar counts={t} height={14} showLabels />

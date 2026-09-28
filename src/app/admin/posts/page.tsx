@@ -7,20 +7,23 @@ import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplySummary, autoR
 import { IconExternal, IconRefresh, IconReply, IconSpark } from "@/components/icons";
 import { MIN_COMMENTS, SentimentBar, SentimentDialog } from "@/components/sentiment";
 import { Badge, Button, Card, cx, Dialog, Empty, Notice, PageHeader, Segmented, Skeleton, Spinner, Switch } from "@/components/ui";
+import { useT } from "@/i18n/client";
+import type { MessageKey } from "@/i18n/core";
+import { rich } from "@/i18n/rich";
 import { api, toApiError, useApi } from "@/lib/api";
 import { dimLabel, fmtCompact, fmtDuration, fmtInt, fmtPct, fmtRelative, postKind } from "@/lib/format";
 import type { AutoReplyInput, AutoReplyRule, IgPost, Job, ListOf, PostDetailData, SentimentMediaSync } from "@/lib/types";
 
 type SortKey = "timestamp" | "reach" | "views" | "likes" | "comments" | "saved" | "shares" | "rate";
 
-const COLUMNS: { key: Exclude<SortKey, "timestamp">; label: string; hint: string }[] = [
-  { key: "reach", label: "도달", hint: "게시물을 본 고유 계정 수" },
-  { key: "views", label: "조회", hint: "재생·노출 횟수 (같은 계정의 반복 포함)" },
-  { key: "likes", label: "좋아요", hint: "" },
-  { key: "comments", label: "댓글", hint: "" },
-  { key: "saved", label: "저장", hint: "" },
-  { key: "shares", label: "공유", hint: "" },
-  { key: "rate", label: "참여율", hint: "(좋아요+댓글+저장+공유) ÷ 도달" },
+const COLUMNS: { key: Exclude<SortKey, "timestamp">; label: MessageKey; hint?: MessageKey }[] = [
+  { key: "reach", label: "posts.reach", hint: "posts.reachHint" },
+  { key: "views", label: "posts.views", hint: "posts.viewsHint" },
+  { key: "likes", label: "posts.likes" },
+  { key: "comments", label: "posts.comments" },
+  { key: "saved", label: "posts.saved" },
+  { key: "shares", label: "posts.shares" },
+  { key: "rate", label: "posts.rate", hint: "posts.rateHint" },
 ];
 
 function metric(p: IgPost, key: SortKey): number | null {
@@ -51,6 +54,7 @@ export default function PostsPage() {
 }
 
 function Posts() {
+  const t = useT();
   const [limit, setLimit] = useState(24);
   const posts = useApi<ListOf<IgPost>>(`/posts?limit=${limit}`);
   const jobs = useApi<ListOf<Job>>("/workflow/jobs?limit=100");
@@ -81,7 +85,7 @@ function Posts() {
 
   async function toggleComments(p: IgPost) {
     const next = !(p.is_comment_enabled ?? true);
-    if (!next && !window.confirm("이 게시물의 댓글을 끌까요? 새 댓글을 달 수 없게 되고, 자동 응답도 동작하지 않습니다.")) return;
+    if (!next && !window.confirm(t("posts.confirmCommentsOff"))) return;
     setTogglingId(p.id);
     setActionError(undefined);
     try {
@@ -133,31 +137,30 @@ function Posts() {
   return (
     <>
       <PageHeader
-        title="게시물 성과"
-        description="게시물마다 몇 개의 계정에 보였고 얼마나 반응을 얻었는지"
+        title={t("posts.title")}
+        description={t("posts.description")}
         action={
           <>
             <Segmented
-              ariaLabel="게시물 수"
+              ariaLabel={t("posts.countAria")}
               value={limit}
               onChange={setLimit}
               options={[
-                { value: 12, label: "12개" },
-                { value: 24, label: "24개" },
-                { value: 50, label: "50개" },
+                { value: 12, label: t("posts.countOption", { n: 12 }) },
+                { value: 24, label: t("posts.countOption", { n: 24 }) },
+                { value: 50, label: t("posts.countOption", { n: 50 }) },
               ]}
             />
             <Button variant="ghost" size="sm" onClick={posts.reload} loading={posts.loading}>
-              {!posts.loading && <IconRefresh />} 새로고침
+              {!posts.loading && <IconRefresh />} {t("common.refresh")}
             </Button>
           </>
         }
       />
 
       <div className="mb-6">
-        <Notice tone="neutral" title="기존 게시물에서 할 수 있는 것">
-          여기서는 <b>댓글 켜기/끄기</b>와 <b>댓글 자동 응답</b>을 바꿀 수 있습니다. 캡션 수정과 삭제는 Instagram API 가 지원하지 않아
-          (삭제는 Facebook 페이지 연결 계정만 가능) 각 게시물의 ↗ 링크로 Instagram 에서 처리해 주세요.
+        <Notice tone="neutral" title={t("posts.noticeTitle")}>
+          {rich(t("posts.noticeBody"), { b: (chunk) => <b>{chunk}</b> })}
         </Notice>
       </div>
 
@@ -171,15 +174,15 @@ function Posts() {
 
       {posts.error && (
         <div className="mb-6">
-          <Notice tone="bad" title="게시물을 불러오지 못했습니다">
+          <Notice tone="bad" title={t("posts.loadFailed")}>
             {posts.error.message}
           </Notice>
         </div>
       )}
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2">
-        <SummaryTile title="전체 게시물" s={summary.all} loading={posts.loading && !posts.data} />
-        <SummaryTile title="스튜디오에서 만든 게시물" s={summary.studio} loading={posts.loading && !posts.data} accent />
+        <SummaryTile title={t("posts.summaryAll")} s={summary.all} loading={posts.loading && !posts.data} />
+        <SummaryTile title={t("posts.summaryStudio")} s={summary.studio} loading={posts.loading && !posts.data} accent />
       </div>
 
       <Card bodyClassName="px-0 pb-0 pt-0">
@@ -191,7 +194,7 @@ function Posts() {
           </div>
         ) : rows.length === 0 ? (
           <div className="p-5">
-            <Empty title="게시물이 없습니다" />
+            <Empty title={t("posts.empty")} />
           </div>
         ) : (
           <>
@@ -199,7 +202,7 @@ function Posts() {
           <div className="md:hidden">
             <div className="flex items-center gap-2 border-b border-line px-4 py-3">
               <label htmlFor="post-sort" className="text-[12px] text-fg-3">
-                정렬
+                {t("posts.sort")}
               </label>
               <select
                 id="post-sort"
@@ -207,10 +210,10 @@ function Posts() {
                 onChange={(e) => setSort({ key: e.target.value as SortKey, desc: true })}
                 className="h-9 min-w-0 flex-1 rounded-lg border border-line-strong bg-surface-1 px-2 text-sm"
               >
-                <option value="timestamp">최신순</option>
+                <option value="timestamp">{t("posts.sortNewest")}</option>
                 {COLUMNS.map((c) => (
                   <option key={c.key} value={c.key}>
-                    {c.label}
+                    {t(c.label)}
                   </option>
                 ))}
               </select>
@@ -218,9 +221,9 @@ function Posts() {
                 type="button"
                 onClick={() => setSort((s) => ({ ...s, desc: !s.desc }))}
                 className="h-9 shrink-0 rounded-lg border border-line-strong px-3 text-[13px] text-fg-2"
-                aria-label={sort.desc ? "내림차순" : "오름차순"}
+                aria-label={sort.desc ? t("posts.sortDescAria") : t("posts.sortAscAria")}
               >
-                {sort.desc ? "높은 순 ▼" : "낮은 순 ▲"}
+                {sort.desc ? t("posts.sortDesc") : t("posts.sortAsc")}
               </button>
             </div>
             <ul className="tnum divide-y divide-line">
@@ -232,37 +235,24 @@ function Posts() {
                       type="button"
                       onClick={() => toggleRow(p.id)}
                       aria-expanded={open}
-                      className="flex w-full items-start gap-3 px-4 py-3 text-left active:bg-surface-2"
+                      className="grid w-full grid-cols-[56px_minmax(0,1fr)_18px] items-start gap-x-3 px-4 py-3 text-left active:bg-surface-2"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={p.thumbnail_url || p.media_url} alt="" className="size-14 shrink-0 rounded-md object-cover" loading="lazy" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14px] font-medium">{p.caption?.split("\n")[0] || "(캡션 없음)"}</span>
+                        <span className="block truncate text-[14px] font-medium">{p.caption?.split("\n")[0] || t("posts.noCaption")}</span>
                         <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-fg-3">
                           {postKind(p)} · {fmtRelative(p.timestamp)}
                           {studioIds.has(p.id) && (
                             <Badge tone="accent" icon={<IconSpark width={11} height={11} />}>
-                              스튜디오
+                              {t("posts.badgeStudio")}
                             </Badge>
                           )}
                           {p.auto_reply?.enabled && (
                             <Badge tone="accent" icon={<IconReply width={11} height={11} />}>
-                              자동 응답
+                              {t("posts.badgeAutoReply")}
                             </Badge>
                           )}
-                        </span>
-                        <span className="mt-2 grid grid-cols-4 gap-1 text-[12px]">
-                          {([
-                            ["도달", fmtCompact(p.insights?.reach)],
-                            ["좋아요", fmtCompact(metric(p, "likes"))],
-                            ["댓글", fmtCompact(metric(p, "comments"))],
-                            ["참여율", fmtPct(metric(p, "rate"))],
-                          ] as const).map(([label, value]) => (
-                            <span key={label}>
-                              <span className="block text-[11px] text-fg-3">{label}</span>
-                              <span className="block font-semibold text-fg">{value}</span>
-                            </span>
-                          ))}
                         </span>
                       </span>
                       <svg
@@ -279,6 +269,19 @@ function Posts() {
                       >
                         <path d="M6 9l6 6 6-6" />
                       </svg>
+                      <span className="col-span-3 mt-2.5 grid grid-cols-4 gap-2 text-[12px]">
+                        {([
+                          ["posts.reach", fmtCompact(p.insights?.reach)],
+                          ["posts.likes", fmtCompact(metric(p, "likes"))],
+                          ["posts.comments", fmtCompact(metric(p, "comments"))],
+                          ["posts.rate", fmtPct(metric(p, "rate"))],
+                        ] as const).map(([label, value]) => (
+                          <span key={label} className="min-w-0">
+                            <span className="block truncate text-[11px] text-fg-3">{t(label)}</span>
+                            <span className="block font-semibold text-fg">{value}</span>
+                          </span>
+                        ))}
+                      </span>
                     </button>
                     {open && (
                       <div className="px-3 pb-4">
@@ -303,18 +306,18 @@ function Posts() {
             <table className="w-full min-w-[860px] text-[13px]">
               <thead className="border-b border-line text-left text-fg-3">
                 <tr>
-                  <SortTh label="게시물" active={sort.key === "timestamp"} desc={sort.desc} onClick={() => onSort("timestamp")} left />
+                  <SortTh label={t("posts.colPost")} active={sort.key === "timestamp"} desc={sort.desc} onClick={() => onSort("timestamp")} left />
                   {COLUMNS.map((c) => (
                     <SortTh
                       key={c.key}
-                      label={c.label}
-                      hint={c.hint}
+                      label={t(c.label)}
+                      hint={c.hint && t(c.hint)}
                       active={sort.key === c.key}
                       desc={sort.desc}
                       onClick={() => onSort(c.key)}
                     />
                   ))}
-                  <th className="w-12 pr-4" aria-label="상세" />
+                  <th className="w-12 pr-4" aria-label={t("posts.detailAria")} />
                 </tr>
               </thead>
               <tbody className="tnum">
@@ -331,17 +334,17 @@ function Posts() {
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={p.thumbnail_url || p.media_url} alt="" className="size-11 shrink-0 rounded-md object-cover" loading="lazy" />
                             <span className="min-w-0 max-w-[300px]">
-                              <span className="block truncate font-medium">{p.caption?.split("\n")[0] || "(캡션 없음)"}</span>
+                              <span className="block truncate font-medium">{p.caption?.split("\n")[0] || t("posts.noCaption")}</span>
                               <span className="mt-0.5 flex items-center gap-1.5 text-[12px] text-fg-3">
                                 {postKind(p)} · {fmtRelative(p.timestamp)}
                                 {studioIds.has(p.id) && (
                                   <Badge tone="accent" icon={<IconSpark width={11} height={11} />}>
-                                    스튜디오
+                                    {t("posts.badgeStudio")}
                                   </Badge>
                                 )}
                                 {p.auto_reply?.enabled && (
                                   <Badge tone="accent" icon={<IconReply width={11} height={11} />}>
-                                    자동 응답
+                                    {t("posts.badgeAutoReply")}
                                   </Badge>
                                 )}
                               </span>
@@ -372,7 +375,7 @@ function Posts() {
                               toggleRow(p.id);
                             }}
                             aria-expanded={open}
-                            aria-label={open ? "상세 닫기" : "상세 열기"}
+                            aria-label={open ? t("posts.detailClose") : t("posts.detailOpen")}
                             className="inline-flex size-7 items-center justify-center rounded-md text-fg-3 hover:bg-surface-1 hover:text-fg"
                           >
                             <svg
@@ -432,8 +435,7 @@ function Posts() {
       )}
 
       <p className="mt-4 text-[12px] leading-relaxed text-fg-3">
-        도달은 게시물을 본 고유 계정 수입니다. Instagram 은 게시물을 본 개별 계정 목록을 제공하지 않습니다. 스토리는 게시 후 24시간이
-        지나면 인사이트가 사라집니다.
+        {t("posts.footnote")}
       </p>
     </>
   );
@@ -478,20 +480,21 @@ function SummaryTile({
   loading: boolean;
   accent?: boolean;
 }) {
+  const t = useT();
   if (loading) return <Skeleton className="h-[92px] rounded-xl" />;
   return (
     <div className={cx("rounded-xl border bg-surface-1 p-4", accent ? "border-accent/40" : "border-line")}>
       <p className="text-[13px] text-fg-3">
-        {title} · <span className="tnum">{fmtInt(s.count)}</span>개
+        {rich(t("posts.summaryCount", { title, n: fmtInt(s.count) }), { n: (chunk) => <span className="tnum">{chunk}</span> })}
       </p>
       <div className="mt-1 flex gap-8">
         <div>
           <p className="pnum text-xl font-semibold">{s.avgReach == null ? "—" : fmtCompact(Math.round(s.avgReach))}</p>
-          <p className="text-[12px] text-fg-3">평균 도달</p>
+          <p className="text-[12px] text-fg-3">{t("posts.avgReach")}</p>
         </div>
         <div>
           <p className="pnum text-xl font-semibold">{fmtPct(s.avgRate)}</p>
-          <p className="text-[12px] text-fg-3">평균 참여율</p>
+          <p className="text-[12px] text-fg-3">{t("posts.avgRate")}</p>
         </div>
       </div>
     </div>
@@ -507,6 +510,7 @@ function PostAutoReplyDialog({
   onClose: () => void;
   onSaved: (rule: AutoReplyRule) => void;
 }) {
+  const t = useT();
   const rule = useApi<AutoReplyRule>(`/autoreply/media/${post.id}`);
   const [form, setForm] = useState<AutoReplyInput | null>(null);
   const [saving, setSaving] = useState(false);
@@ -548,23 +552,23 @@ function PostAutoReplyDialog({
     <Dialog
       open
       onClose={onClose}
-      title="댓글 자동 응답"
+      title={t("posts.autoReplyTitle")}
       subtitle={
         <span className="flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={post.thumbnail_url || post.media_url} alt="" className="size-6 rounded object-cover" />
-          <span className="truncate">{post.caption?.split("\n")[0] || "(캡션 없음)"}</span>
+          <span className="truncate">{post.caption?.split("\n")[0] || t("posts.noCaption")}</span>
         </span>
       }
       footer={
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[12px] text-fg-3">저장하면 새 댓글부터 적용됩니다.</p>
+          <p className="text-[12px] text-fg-3">{t("posts.autoReplyFootnote")}</p>
           <div className="flex gap-2 max-sm:w-full max-sm:[&>button]:flex-1">
             <Button variant="ghost" onClick={onClose}>
-              취소
+              {t("common.cancel")}
             </Button>
             <Button variant="primary" onClick={save} loading={saving} disabled={!form || !dirty || !autoReplyValid(form)}>
-              저장
+              {t("common.save")}
             </Button>
           </div>
         </div>
@@ -572,7 +576,7 @@ function PostAutoReplyDialog({
     >
       {commentsOff && (
         <div className="mb-4">
-          <Notice tone="warn">이 게시물은 댓글이 꺼져 있어 자동 응답이 동작하지 않습니다.</Notice>
+          <Notice tone="warn">{t("posts.autoReplyCommentsOff")}</Notice>
         </div>
       )}
       {form ? (
@@ -607,6 +611,7 @@ function PostDetail({
   onOpenAutoReply: () => void;
   onAnalyzed: (counts: IgPost["sentiment"]) => void;
 }) {
+  const t = useT();
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<{ tone: "good" | "warn" | "bad"; text: string }>();
 
@@ -619,20 +624,20 @@ function PostDetail({
       const engine =
         r.engine === "gemini"
           ? r.last_error
-            ? `Gemini 호출 실패로 규칙 기반 분류 (${r.last_error})`
-            : `Gemini로 분류`
-          : "키워드·이모지 규칙으로 분류";
+            ? t("posts.engineGeminiFailed", { error: r.last_error })
+            : t("posts.engineGemini")
+          : t("posts.engineRules");
       if (r.skipped) {
-        setResult({ tone: "warn", text: `댓글이 ${MIN_COMMENTS}개 이상인 게시물만 분석합니다. (현재 ${r.comments_count}개)` });
+        setResult({ tone: "warn", text: t("posts.skipped", { min: MIN_COMMENTS, n: r.comments_count }) });
       } else if (r.comments_count > 0 && r.comments_seen === 0) {
         setResult({
           tone: "warn",
-          text: `댓글 ${r.comments_count}개가 있지만 조회되지 않았습니다. Meta 앱이 개발 모드라 다른 사용자의 댓글이 제공되지 않거나, 내 계정 댓글만 있는 경우입니다.`,
+          text: t("posts.notFetched", { n: r.comments_count }),
         });
       } else {
         setResult({
           tone: r.last_error ? "warn" : "good",
-          text: `댓글 ${r.comments_seen}개 확인 · 새로 ${r.classified}개 분류 · ${engine}`,
+          text: t("posts.analyzeResult", { seen: r.comments_seen, classified: r.classified, engine }),
         });
       }
     } catch (e) {
@@ -651,16 +656,16 @@ function PostDetail({
       <PostMetrics post={post} />
       <section className="rounded-lg border border-line bg-surface-1 p-4">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-[13px] font-semibold">댓글 반응</h3>
+          <h3 className="text-[13px] font-semibold">{t("posts.sentimentTitle")}</h3>
           <div className="flex items-center gap-1">
             {analyzed > 0 && (
               <button onClick={onOpenComments} className="h-7 rounded-md px-2 text-[12px] text-fg-3 hover:bg-surface-2 hover:text-fg">
-                댓글 {analyzed}개 보기 →
+                {t("posts.viewComments", { n: analyzed })}
               </button>
             )}
             {(post.comments_count ?? 0) >= MIN_COMMENTS && (
               <Button size="sm" onClick={analyze} loading={analyzing}>
-                {analyzed > 0 ? "새 댓글 분석" : "댓글 분석"}
+                {analyzed > 0 ? t("posts.analyzeNew") : t("posts.analyze")}
               </Button>
             )}
           </div>
@@ -671,8 +676,8 @@ function PostDetail({
           ) : (
             <p className="text-[12px] text-fg-3">
               {(post.comments_count ?? 0) >= MIN_COMMENTS
-                ? "아직 분석 전입니다. '댓글 분석'을 눌러 주세요."
-                : `댓글이 ${MIN_COMMENTS}개 이상인 게시물만 긍정·보통·부정을 분석합니다. (현재 ${post.comments_count ?? 0}개)`}
+                ? t("posts.notAnalyzed")
+                : t("posts.minComments", { min: MIN_COMMENTS, n: post.comments_count ?? 0 })}
             </p>
           )}
         </div>
@@ -685,25 +690,25 @@ function PostDetail({
       </section>
 
       <section className="rounded-lg border border-line bg-surface-1 p-4">
-        <h3 className="text-[13px] font-semibold">관리</h3>
+        <h3 className="text-[13px] font-semibold">{t("posts.manage")}</h3>
         <dl className="mt-3 space-y-2.5 text-[13px]">
           <div className="flex items-center justify-between gap-3">
             <dt className="text-fg-2">
-              댓글 허용
+              {t("posts.allowComments")}
               <span className={cx("ml-1.5 text-[12px] font-medium", commentsOn ? "text-fg" : "text-fg-3")}>
-                {commentsOn ? "켜짐" : "꺼짐 — 새 댓글을 달 수 없음"}
+                {commentsOn ? t("posts.commentsOn") : t("posts.commentsOff")}
               </span>
             </dt>
             <dd className="flex items-center gap-2">
               {toggling && <Spinner className="size-3 text-fg-3" />}
-              <Switch checked={commentsOn} onChange={onToggleComments} disabled={toggling} label="댓글 허용" />
+              <Switch checked={commentsOn} onChange={onToggleComments} disabled={toggling} label={t("posts.allowComments")} />
             </dd>
           </div>
           <div className="flex items-center justify-between gap-3">
             <dt className="text-fg-2">
-              자동 응답
+              {t("posts.autoReply")}
               <span className="ml-1.5 text-[12px] text-fg-3">
-                {ar && ar.enabled ? autoReplySummary(ar) : ar ? "일시정지" : "설정 안 됨"}
+                {ar && ar.enabled ? autoReplySummary(ar, t) : ar ? t("posts.autoReplyPaused") : t("posts.autoReplyNotSet")}
               </span>
             </dt>
             <dd>
@@ -711,14 +716,14 @@ function PostDetail({
                 onClick={onOpenAutoReply}
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-line-strong px-2.5 text-[12px] font-medium text-fg-2 hover:bg-surface-2"
               >
-                <IconReply width={13} height={13} /> 설정
+                <IconReply width={13} height={13} /> {t("posts.configure")}
               </button>
             </dd>
           </div>
           <div className="flex items-center justify-between gap-3">
             <dt className="text-fg-2">
-              캡션 수정 · 삭제
-              <span className="ml-1.5 text-[12px] text-fg-3">API 미지원</span>
+              {t("posts.editDelete")}
+              <span className="ml-1.5 text-[12px] text-fg-3">{t("posts.apiUnsupported")}</span>
             </dt>
             <dd>
               <a
@@ -727,7 +732,7 @@ function PostDetail({
                 rel="noreferrer"
                 className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-fg-2 hover:bg-surface-2 hover:text-fg"
               >
-                Instagram에서 <IconExternal width={12} height={12} />
+                {t("posts.openInInstagram")} <IconExternal width={12} height={12} />
               </a>
             </dd>
           </div>
@@ -738,35 +743,36 @@ function PostDetail({
 }
 
 // 게시물 유형별로 보여줄 상세 지표 (값이 없는 지표는 자동으로 숨깁니다)
-const DETAIL_TILES: Record<PostDetailData["kind"], { key: string; label: string; fmt?: (v: number) => string }[]> = {
+const DETAIL_TILES: Record<PostDetailData["kind"], { key: string; label: MessageKey; fmt?: (v: number) => string }[]> = {
   FEED: [
-    { key: "reach", label: "도달" },
-    { key: "views", label: "조회" },
-    { key: "profile_visits", label: "프로필 방문" },
-    { key: "follows", label: "팔로우" },
-    { key: "saved", label: "저장" },
-    { key: "shares", label: "공유" },
+    { key: "reach", label: "posts.reach" },
+    { key: "views", label: "posts.views" },
+    { key: "profile_visits", label: "posts.profileVisits" },
+    { key: "follows", label: "posts.follows" },
+    { key: "saved", label: "posts.saved" },
+    { key: "shares", label: "posts.shares" },
   ],
   REELS: [
-    { key: "views", label: "재생" },
-    { key: "reach", label: "도달" },
-    { key: "ig_reels_avg_watch_time", label: "평균 시청 시간", fmt: (v) => fmtDuration(v, "ms") },
-    { key: "ig_reels_video_view_total_time", label: "총 시청 시간", fmt: (v) => fmtDuration(v, "ms") },
-    { key: "reels_skip_rate", label: "3초 내 넘김", fmt: (v) => fmtPct(v) },
-    { key: "shares", label: "공유" },
+    { key: "views", label: "posts.plays" },
+    { key: "reach", label: "posts.reach" },
+    { key: "ig_reels_avg_watch_time", label: "posts.avgWatchTime", fmt: (v) => fmtDuration(v, "ms") },
+    { key: "ig_reels_video_view_total_time", label: "posts.totalWatchTime", fmt: (v) => fmtDuration(v, "ms") },
+    { key: "reels_skip_rate", label: "posts.skipRate", fmt: (v) => fmtPct(v) },
+    { key: "shares", label: "posts.shares" },
   ],
   STORY: [
-    { key: "reach", label: "도달" },
-    { key: "views", label: "조회" },
-    { key: "link_clicks", label: "링크 클릭" },
-    { key: "replies", label: "답장" },
-    { key: "profile_visits", label: "프로필 방문" },
-    { key: "follows", label: "팔로우" },
+    { key: "reach", label: "posts.reach" },
+    { key: "views", label: "posts.views" },
+    { key: "link_clicks", label: "posts.linkClicks" },
+    { key: "replies", label: "posts.replies" },
+    { key: "profile_visits", label: "posts.profileVisits" },
+    { key: "follows", label: "posts.follows" },
   ],
 };
 
 /** 펼쳤을 때 불러오는 게시물 상세 지표 */
 function PostMetrics({ post }: { post: IgPost }) {
+  const t = useT();
   const detail = useApi<PostDetailData>(`/posts/${post.id}/detail`);
   const d = detail.data;
   const reach = d?.metrics.reach ?? 0;
@@ -777,10 +783,10 @@ function PostMetrics({ post }: { post: IgPost }) {
   return (
     <section className="rounded-lg border border-line bg-surface-1 p-4 md:col-span-2">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-[13px] font-semibold">상세 지표</h3>
+        <h3 className="text-[13px] font-semibold">{t("posts.detailMetrics")}</h3>
         {d && d.kind !== "REELS" && reach > 0 && (
           <span className="tnum text-[12px] text-fg-3">
-            본 사람 중 프로필 방문 {fmtPct(visitRate)} · 팔로우 {fmtPct(followRate)}
+            {t("posts.visitFollowRate", { visit: fmtPct(visitRate), follow: fmtPct(followRate) })}
           </span>
         )}
       </div>
@@ -792,11 +798,11 @@ function PostMetrics({ post }: { post: IgPost }) {
         <div className="mt-3 space-y-4">
           <dl className="grid grid-cols-3 gap-2 sm:grid-cols-6">
             {DETAIL_TILES[d.kind]
-              .filter((t) => d.metrics[t.key] != null)
-              .map((t) => (
-                <div key={t.key} className="rounded-md bg-surface-2 px-3 py-2">
-                  <dt className="text-[11px] text-fg-3">{t.label}</dt>
-                  <dd className="pnum text-[15px] font-semibold">{t.fmt ? t.fmt(d.metrics[t.key]) : fmtCompact(d.metrics[t.key])}</dd>
+              .filter((tile) => d.metrics[tile.key] != null)
+              .map((tile) => (
+                <div key={tile.key} className="rounded-md bg-surface-2 px-3 py-2">
+                  <dt className="text-[11px] text-fg-3">{t(tile.label)}</dt>
+                  <dd className="pnum text-[15px] font-semibold">{tile.fmt ? tile.fmt(d.metrics[tile.key]) : fmtCompact(d.metrics[tile.key])}</dd>
                 </div>
               ))}
           </dl>
@@ -805,13 +811,13 @@ function PostMetrics({ post }: { post: IgPost }) {
             <div className="grid gap-4 sm:grid-cols-2">
               {d.profile_activity.length > 0 && (
                 <div>
-                  <p className="mb-2 text-[12px] font-medium text-fg-2">프로필에서 한 행동</p>
+                  <p className="mb-2 text-[12px] font-medium text-fg-2">{t("posts.profileActivity")}</p>
                   <BarList labelWidth={96} rows={d.profile_activity.map((r) => ({ key: r.key, label: dimLabel(r.key), value: r.value }))} />
                 </div>
               )}
               {d.navigation.length > 0 && (
                 <div>
-                  <p className="mb-2 text-[12px] font-medium text-fg-2">스토리 넘기기</p>
+                  <p className="mb-2 text-[12px] font-medium text-fg-2">{t("posts.storyNavigation")}</p>
                   <BarList labelWidth={120} rows={d.navigation.map((r) => ({ key: r.key, label: dimLabel(r.key), value: r.value }))} />
                 </div>
               )}
@@ -820,7 +826,7 @@ function PostMetrics({ post }: { post: IgPost }) {
 
           {topComments.length > 0 && (
             <div>
-              <p className="mb-1.5 text-[12px] font-medium text-fg-2">좋아요 많은 댓글</p>
+              <p className="mb-1.5 text-[12px] font-medium text-fg-2">{t("posts.topComments")}</p>
               <ul className="space-y-1.5">
                 {topComments.map((c) => (
                   <li key={c.id} className="flex items-baseline justify-between gap-3 text-[13px]">
@@ -828,7 +834,7 @@ function PostMetrics({ post }: { post: IgPost }) {
                       <span className="font-medium">@{c.username}</span> <span className="text-fg-2">{c.text}</span>
                     </span>
                     <span className="tnum shrink-0 text-[12px] text-fg-3">
-                      ♥ {c.like_count} · 답글 {c.reply_count}
+                      ♥ {c.like_count} · {t("posts.replyCount", { n: c.reply_count })}
                     </span>
                   </li>
                 ))}

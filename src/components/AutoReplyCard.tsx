@@ -1,6 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useT } from "@/i18n/client";
+import type { T } from "@/i18n/core";
 import type { AutoReplyInput, AutoReplyRule } from "@/lib/types";
 import { cx, inputClass } from "./ui";
 
@@ -14,7 +16,8 @@ const FIELDS: (keyof AutoReplyInput)[] = [
   "not_following_message",
 ];
 
-/** 서버 규칙 → 폼 값. 아직 규칙이 없으면 두 스위치 모두 꺼진 상태로 시작합니다. */
+/** 서버 규칙 → 폼 값. 아직 규칙이 없으면 두 스위치 모두 꺼진 상태로 시작합니다.
+ *  (새 규칙의 기본 문구는 서버가 화면 언어로 채워 줍니다) */
 export function autoReplyForm(rule: AutoReplyRule): AutoReplyInput {
   const form = Object.fromEntries(FIELDS.map((k) => [k, rule[k]])) as AutoReplyInput;
   return rule.exists ? form : { ...form, public_reply_enabled: false, dm_enabled: false };
@@ -40,9 +43,9 @@ export function autoReplyValid(form: AutoReplyInput) {
 }
 
 /** 확인 창·목록에 쓰는 한 줄 요약 */
-export function autoReplySummary(form: Pick<AutoReplyInput, "public_reply_enabled" | "dm_enabled">) {
-  const parts = [form.public_reply_enabled && "댓글 답글", form.dm_enabled && "팔로우별 DM"].filter(Boolean);
-  return parts.length ? parts.join(" + ") : "꺼짐";
+export function autoReplySummary(form: Pick<AutoReplyInput, "public_reply_enabled" | "dm_enabled">, t: T) {
+  const parts = [form.public_reply_enabled && t("autoreply.summaryReply"), form.dm_enabled && t("autoreply.summaryDm")].filter(Boolean);
+  return parts.length ? parts.join(" + ") : t("autoreply.summaryOff");
 }
 
 /** 댓글 자동 응답 설정: ① 모든 댓글에 같은 답글 ② 팔로우 여부에 따라 다른 DM. 상태는 부모가 들고 있습니다. */
@@ -53,6 +56,7 @@ export function AutoReplyFields({
   form: AutoReplyInput;
   onChange: (next: AutoReplyInput) => void;
 }) {
+  const t = useT();
   const set = <K extends keyof AutoReplyInput>(k: K, v: AutoReplyInput[K]) => onChange({ ...form, [k]: v });
   const badLink = form.link_url.trim() !== "" && !/^https?:\/\/\S+$/.test(form.link_url.trim());
 
@@ -61,14 +65,14 @@ export function AutoReplyFields({
       <Toggle
         checked={form.public_reply_enabled}
         onChange={(v) => set("public_reply_enabled", v)}
-        title="댓글에 자동 답글"
-        description="어떤 댓글이든 아래 문구로 똑같이 답글을 답니다."
+        title={t("autoreply.publicReplyTitle")}
+        description={t("autoreply.publicReplyDesc")}
       >
         <input
-          aria-label="답글 문구"
+          aria-label={t("autoreply.publicReplyLabel")}
           value={form.public_reply}
           onChange={(e) => set("public_reply", e.target.value)}
-          placeholder="댓글 감사합니다! 😊"
+          placeholder={t("autoreply.defaultPublicReply")}
           className={cx(inputClass, !form.public_reply.trim() && "border-bad")}
         />
       </Toggle>
@@ -76,34 +80,34 @@ export function AutoReplyFields({
       <Toggle
         checked={form.dm_enabled}
         onChange={(v) => set("dm_enabled", v)}
-        title="댓글 쓴 사람에게 DM 보내기"
-        description="팔로우 여부에 따라 다른 문구를 DM으로 보냅니다."
+        title={t("autoreply.dmTitle")}
+        description={t("autoreply.dmDesc")}
       >
         <div className="space-y-4">
-          <Section label="팔로워에게" hint="문구와 링크 중 하나 이상을 채워 주세요.">
+          <Section label={t("autoreply.followersLabel")} hint={t("autoreply.followersHint")}>
             <textarea
-              aria-label="팔로워에게 보낼 문구"
+              aria-label={t("autoreply.followerMessageLabel")}
               rows={3}
               value={form.link_message}
               onChange={(e) => set("link_message", e.target.value)}
-              placeholder={"팔로우해 주셔서 감사해요! 🎁\n요청하신 링크입니다 👇"}
+              placeholder={t("autoreply.defaultLinkMessage")}
               className={cx(inputClass, "resize-y leading-relaxed")}
             />
             <input
-              aria-label="팔로워에게 보낼 링크"
+              aria-label={t("autoreply.followerLinkLabel")}
               type="url"
               value={form.link_url}
               onChange={(e) => set("link_url", e.target.value)}
-              placeholder="https:// (선택)"
+              placeholder={t("autoreply.linkPlaceholder")}
               className={cx(inputClass, "mt-2", badLink && "border-bad")}
             />
-            {badLink && <p className="mt-1 text-[12px] text-bad">링크는 http:// 또는 https:// 로 시작해야 합니다.</p>}
+            {badLink && <p className="mt-1 text-[12px] text-bad">{t("autoreply.badLink")}</p>}
             <DmPreview text={form.link_message} link={form.link_url} />
           </Section>
 
-          <Section label="팔로워가 아니면">
+          <Section label={t("autoreply.nonFollowersLabel")}>
             <textarea
-              aria-label="팔로워가 아닌 사람에게 보낼 문구"
+              aria-label={t("autoreply.nonFollowerMessageLabel")}
               rows={2}
               value={form.not_following_message}
               onChange={(e) => set("not_following_message", e.target.value)}
@@ -112,13 +116,12 @@ export function AutoReplyFields({
           </Section>
 
           <details className="rounded-lg border border-line bg-surface-2 px-3 py-2">
-            <summary className="cursor-pointer text-[13px] font-medium text-fg-2">팔로우 여부를 아직 모를 때 보내는 안내 DM</summary>
+            <summary className="cursor-pointer text-[13px] font-medium text-fg-2">{t("autoreply.promptSummary")}</summary>
             <p className="mt-2 text-[12px] leading-relaxed text-fg-3">
-              Instagram 정책상 팔로우 여부는 상대가 우리 계정에 DM을 보낸 적이 있어야 확인할 수 있어요. 처음 보는 사람에게는 이 안내를
-              먼저 보내고, 답장이 오면 위의 팔로워/비팔로워 문구를 보냅니다.
+              {t("autoreply.promptHelp")}
             </p>
             <textarea
-              aria-label="안내 DM 문구"
+              aria-label={t("autoreply.promptLabel")}
               rows={2}
               value={form.dm_prompt}
               onChange={(e) => set("dm_prompt", e.target.value)}

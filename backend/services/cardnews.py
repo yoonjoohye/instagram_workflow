@@ -21,6 +21,7 @@ import httpx
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 from ..config import settings
+from ..i18n import LANG_NAME
 
 log = logging.getLogger(__name__)
 
@@ -150,12 +151,14 @@ _RESEARCH_PROMPT = """너는 인스타그램 게시물 리서처야. Google 검�
 주제가 정보·방법·제품·서비스처럼 사실이 중요한 내용이면:
 1) 한 줄 요약  2) 핵심 사실 6~10개 (정의, 특징, 절차·방법, 조건·비용·주의사항, 최신 변경)  3) 독자가 궁금해할 질문 3개
 주제가 감성·일상·여행 기록처럼 분위기가 중요한 내용이면: 관련 배경 지식과 표현에 쓸 만한 사실 몇 줄만.
-한국어로, 확인된 사실만 쓰고 추측하지 마. 날짜가 중요한 정보에는 기준 시점을 적어."""
+확인된 사실만 쓰고 추측하지 마. 날짜가 중요한 정보에는 기준 시점을 적어."""
 
 
-def research(prompt: str, notes: str, style: str = "") -> tuple[dict[str, Any], str]:
+def research(prompt: str, notes: str, style: str = "", *, language: str = "ko") -> tuple[dict[str, Any], str]:
     """(조사 결과 {notes, sources}, 경고). 검색이 안 되면 빈 결과로 계속 진행합니다."""
-    parts = [{"text": _RESEARCH_PROMPT.format(prompt=prompt, notes=notes.strip() or "없음", style=style.strip() or "없음")}]
+    text = _RESEARCH_PROMPT.format(prompt=prompt, notes=notes.strip() or "없음", style=style.strip() or "없음")
+    text += f"\n\n조사 결과는 {LANG_NAME.get(language, 'English')} 로 써. (게시물 글의 언어는 나중에 [주제]의 언어를 따라 정해.)"
+    parts = [{"text": text}]
     try:
         data = _text_call(parts, {"temperature": 0.2}, tools=[{"googleSearch": {}}])
         text = _text_of(data)
@@ -230,12 +233,13 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
 1) 형식(format) 정하기 — 주제·컨셉·연출 방향에 나온 형식을 그대로 따르고, 언급이 없으면 가장 잘 맞는 것을 골라:
   인스타툰/웹툰(캐릭터·말풍선 컷), 손글씨 메모(사진이나 종이 위 손글씨·동그라미·화살표 낙서), 인터뷰/Q&A, 이벤트·프로모션 포스터,
   정보 정리형(체크리스트·단계별 안내·비교), 감성 사진/무드보드, 비포·애프터, 인용 한 줄 등. 특정 형식을 기본값처럼 쓰지 마.
-2) art_style: 모든 이미지에 똑같이 적용할 그림체를 영어로 구체적으로 (예: 'Korean Instagram webtoon, clean black line art, flat pastel colors, rounded chibi character' /
-  'real photo with white hand-drawn iPad marker doodles and Korean handwriting' / 'natural film photography, warm grain').
+2) art_style: 모든 이미지에 똑같이 적용할 그림체를 영어로 구체적으로 (예: 'Instagram webtoon, clean black line art, flat pastel colors, rounded chibi character' /
+  'real photo with white hand-drawn iPad marker doodles and handwriting' / 'natural film photography, warm grain').
   참고 이미지가 있으면 그 양식의 그림체·색·레이아웃을 그대로 적고, 없으면 연출 방향을 가장 크게 반영해. 요청이 그림체면 실사로 바꾸지 마.
 
 3) font: 서버가 글자를 얹는 장(overlay/panel/center)에 쓸 글씨체를 골라. 연출 방향에 글씨체 언급이 있으면 그대로 따르고, 없으면 형식에 맞게:
   {fonts}
+  게시물 글이 일본어면 반드시 noto_sans_jp (다른 글씨체는 일본어 글자가 없음). 한국어·영어면:
   손글씨 메모면 nanum_pen/gaegu, 날림체면 east_sea_dokdo, 붓글씨·전통·궁서 느낌이면 nanum_brush/song_myung, 우아하면 nanum_myeongjo,
   강한 제목은 black_han_sans/do_hyeon, 귀여우면 jua, 깔끔한 정보형은 pretendard. designed 장의 글자 느낌도 이 글씨체와 맞춰 art_style 에 적어.
 
@@ -258,6 +262,13 @@ _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터�
 - visual: 이미지 AI 에게 줄 영어 지시 2~4문장. 이 장의 장면·등장인물·소품·구도·연출을 art_style 로 구체적으로.
   designed 면 글자가 어디에 어떤 모양으로 들어가는지(말풍선 위치, 손글씨 위치, 화살표가 가리키는 대상 등)도 적어.
   그 외 레이아웃이면 글자를 넣지 말라고 적고, overlay 는 아래쪽·center 는 가운데를 단순하게 비워 두라고 적어.
+
+언어 규칙 (매우 중요)
+- 게시물에 들어가는 모든 글(캡션, 해시태그, title/body/cta, image_text)은 사용자가 [주제]와 [연출 방향]을 쓴 언어로 써.
+  사용자가 언어를 따로 지정했으면(예: '영어로', 'in Japanese', '日本語で') 그 언어로. 두 언어가 섞여 애매하면 {ui_lang}.
+- requirements 의 requirement·how 와 concept 는 사용자가 검수 화면에서 읽는 설명이므로 {ui_lang} 로 써.
+- visual, art_style 은 이미지 AI 용이라 항상 영어로.
+- 해시태그도 게시물 언어로 쓰고, 필요하면 영어 해시태그를 몇 개 섞어도 돼.
 
 캡션 규칙 (매우 중요)
 - 캡션의 말투·표현·강조점도 [주제]와 [연출 방향]을 따라. 조사 자료는 사실을 뒷받침할 때만 써.
@@ -335,8 +346,10 @@ def plan_cardnews(
     notes: str = "",
     research_notes: str = "",
     references: list[bytes] | None = None,
+    language: str = "ko",
 ) -> tuple[dict[str, Any], str, str]:
-    """(설계안, 사용 엔진, 경고) — Gemini 실패 시 기본 설계안. references 는 연출 참고 이미지."""
+    """(설계안, 사용 엔진, 경고) — Gemini 실패 시 기본 설계안. references 는 연출 참고 이미지.
+    language 는 사용자 화면 언어: 검수용 설명(requirements·concept)을 이 언어로, 게시물 글은 [주제]의 언어로."""
     n = len(photos)
     references = references or []
     template = caption_format.strip()
@@ -355,6 +368,7 @@ def plan_cardnews(
         research=research_notes.strip() or "(조사 자료 없음)",
         max_slides=MAX_SLIDES,
         caption_rules=caption_rules,
+        ui_lang=LANG_NAME.get(language, "English"),
         fonts=" / ".join(f"{k}({v['label']})" for k, v in FONTS.items()),
         refs=(
             f"\n(사진 뒤에 첨부한 마지막 {len(references)}장은 사진이 아니라 1순위의 [참고 이미지] 양식 템플릿이야. 사진 번호로 쓰지 마.)"
@@ -525,7 +539,7 @@ def _visual_prompt(
         lines.append(f"This image: {slide['visual']}")
     message = " — ".join(p for p in (slide.get("title"), slide.get("body")) if p)
     if message and role != "designed":
-        lines.append(f"It illustrates this message (Korean): {message}")
+        lines.append(f"It illustrates this message: {message}")
     count = int(has_photo)
     if count > 1:
         lines.append(
@@ -545,11 +559,11 @@ def _visual_prompt(
         text = (slide.get("image_text") or "").strip()
         if text:
             lines.append(
-                "The image must include this Korean text as part of the design (speech bubbles, handwriting, doodle labels or "
+                "The image must include this text as part of the design (speech bubbles, handwriting, doodle labels or "
                 f"a headline, as fitting the style), written exactly as given, character by character: «{text}». "
-                + (f"Lettering style: {FONTS[font]['desc']}. " if font in FONTS else "")
+                + (f"Lettering style: {FONTS[font_for_text(font, text)]['desc']}. " if font in FONTS else "")
                 + ""
-                "Keep every Korean character correct and legible. Do not add any other text, watermark or logo."
+                "Keep every character (Korean/Japanese/Latin) correct and legible. Do not add any other text, watermark or logo."
             )
         else:
             lines.append("Do not add any text, watermark or logo.")
@@ -655,9 +669,9 @@ def render_visual(
 def edit_visual(image: bytes, instruction: str, *, aspect: str = "4:5") -> tuple[bytes, str]:
     """지금 이미지에서 요청한 부분만 고칩니다 (나머지는 그대로). 실패하면 원래 이미지를 그대로 돌려줍니다."""
     prompt = (
-        f"Edit the attached image. Apply ONLY this change (Korean request, highest priority): {instruction}\n"
+        f"Edit the attached image. Apply ONLY this change (user's request, may be in any language; highest priority): {instruction}\n"
         "Keep everything else exactly the same: composition, people and faces, landmarks, colors, art style, "
-        "and any existing text (keep its Korean characters identical). Do not add watermarks or logos. "
+        "and any existing text (keep its characters identical). Do not add watermarks or logos. "
         "Output one image in the same format."
     )
     parts = [{"text": prompt}, {"inlineData": {"mimeType": "image/jpeg", "data": _b64(_small(image, 1280))}}]
@@ -730,7 +744,42 @@ FONTS: dict[str, dict[str, Any]] = {
     "east_sea_dokdo": {"label": "동해독도 · 날림체", "title": "EastSeaDokdo-Regular.ttf", "body": "EastSeaDokdo-Regular.ttf", "scale": 1.45, "desc": "rough, quick scribbled Korean handwriting"},
     "song_myung": {"label": "송명 · 궁서 느낌 붓 명조", "title": "SongMyung-Regular.ttf", "body": "SongMyung-Regular.ttf", "scale": 1.05, "desc": "traditional Korean brush serif (Gungseo-like)"},
     "nanum_myeongjo": {"label": "나눔명조 · 명조", "title": "NanumMyeongjo-ExtraBold.ttf", "body": "NanumMyeongjo-Regular.ttf", "scale": 1.0, "desc": "elegant Korean serif (Myeongjo)"},
+    # 일본어(가나·한자)용. 가변 글꼴이라 굵기를 wght 로 고릅니다.
+    "noto_sans_jp": {"label": "Noto Sans JP · 日本語", "title": "NotoSansJP-VF.ttf", "body": "NotoSansJP-VF.ttf", "scale": 1.0, "desc": "clean Japanese sans-serif (Noto Sans JP)", "wght": {"title": 800, "body": 500}},
 }
+# 글씨체 이름 (화면 언어별). 없는 언어는 label 을 씁니다.
+FONT_LABELS: dict[str, dict[str, str]] = {
+    "en": {
+        "pretendard": "Pretendard · Clean sans", "black_han_sans": "Black Han Sans · Heavy title", "do_hyeon": "Do Hyeon · Blocky title",
+        "jua": "Jua · Round & cute", "nanum_pen": "Nanum Pen · Handwriting", "gaegu": "Gaegu · Cute handwriting",
+        "nanum_brush": "Nanum Brush · Brush pen", "east_sea_dokdo": "East Sea Dokdo · Scribble", "song_myung": "Song Myung · Brush serif",
+        "nanum_myeongjo": "Nanum Myeongjo · Serif", "noto_sans_jp": "Noto Sans JP · Japanese",
+    },
+    "ja": {
+        "pretendard": "Pretendard · ゴシック", "black_han_sans": "Black Han Sans · 極太見出し", "do_hyeon": "Do Hyeon · 角ばった見出し",
+        "jua": "Jua · 丸くてかわいい", "nanum_pen": "Nanum Pen · 手書き", "gaegu": "Gaegu · かわいい手書き",
+        "nanum_brush": "Nanum Brush · 筆ペン", "east_sea_dokdo": "East Sea Dokdo · 殴り書き", "song_myung": "Song Myung · 筆の明朝",
+        "nanum_myeongjo": "Nanum Myeongjo · 明朝", "noto_sans_jp": "Noto Sans JP · 日本語",
+    },
+}
+JP_FONT = "noto_sans_jp"
+# 한글 글씨체에 없는 일본어 가나·한자 (한글이 섞여 있으면 한글 글씨체를 유지)
+_JAPANESE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\uff66-\uff9f]")
+_CJK = re.compile(r"[\u4e00-\u9fff]")
+_HANGUL = re.compile(r"[\uac00-\ud7a3]")
+
+
+def font_for_text(key: str, text: str) -> str:
+    """글에 일본어가 있으면 일본어 글씨체로 (한글 글씨체로는 네모로 보임)."""
+    if key == JP_FONT:
+        return key
+    if _JAPANESE.search(text) or (_CJK.search(text) and not _HANGUL.search(text)):
+        return JP_FONT
+    return key
+
+
+def font_label(key: str, lang: str = "ko") -> str:
+    return FONT_LABELS.get(lang, {}).get(key) or FONTS[key]["label"]
 DEFAULT_FONT = "pretendard"
 
 
@@ -742,10 +791,18 @@ def _font(kind: str, size: int, key: str = DEFAULT_FONT) -> ImageFont.FreeTypeFo
     """kind: 'title' | 'body' (예전 호출의 'ExtraBold'/'Medium' 도 받음)."""
     spec = FONTS[font_key(key)]
     kind = "title" if kind in ("title", "ExtraBold") else "body"
-    return ImageFont.truetype(str(FONT_DIR / spec[kind]), int(size * spec["scale"]))
+    font = ImageFont.truetype(str(FONT_DIR / spec[kind]), int(size * spec["scale"]))
+    if "wght" in spec:  # 가변 글꼴
+        font.set_variation_by_axes([spec["wght"][kind]])
+    return font
 
 
-def font_preview(key: str, text: str = "가나다 손글씨 Aa 123") -> bytes:
+# 글씨체 미리보기 문구 (한글 글씨체는 일본어 글자가 없어 ja 에서도 로마자로 보여 줍니다)
+_PREVIEW_TEXT = {"ko": "가나다 손글씨 Aa 123", "en": "Hello Aa Bb 123", "ja": "Hello Aa 123"}
+
+
+def font_preview(key: str, text: str = "", *, lang: str = "ko") -> bytes:
+    text = text or ("あいう 日本語 Aa 123" if key == JP_FONT else _PREVIEW_TEXT.get(lang, _PREVIEW_TEXT["en"]))
     """폼에서 고를 때 보여줄 미리보기 (실제 합성과 같은 렌더링)."""
     img = Image.new("RGB", (560, 96), (252, 252, 251))
     draw = ImageDraw.Draw(img)
@@ -830,6 +887,7 @@ def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", fon
     pad = 84
     role = slide["role"]
     title, body, cta = (_no_emoji(slide.get(k, "")) for k in ("title", "body", "cta"))
+    font = font_for_text(font, f"{title}{body}{cta}")
 
     if role in ("designed", "photo") or not (title or body):
         return to_jpeg(_cover_fit(photo, SIZE), 92)  # designed 는 글자까지 이미지 모델이 그림

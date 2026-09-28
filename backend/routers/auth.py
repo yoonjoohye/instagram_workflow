@@ -21,6 +21,7 @@ from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, DataDeletionRequest
 from ..services import account_data
+from ..i18n import lang_of, tr
 from ..security import SESSION_COOKIE, SESSION_MAX_AGE, encrypt, sign_session
 from ..services.meta_graph import IG_AUTHORIZE_URL, IG_SCOPES, SCOPES, GraphClient, GraphError
 
@@ -164,20 +165,23 @@ def callback(
 ) -> RedirectResponse:
     if error:
         if error_reason == "user_denied":
-            return RedirectResponse(_admin_url(error="권한 허용을 취소했습니다. 다시 연결해 주세요."))
+            return RedirectResponse(_admin_url(error=tr("권한 허용을 취소했습니다. 다시 연결해 주세요.", lang_of(request))))
         return RedirectResponse(_admin_url(error=error_description or error))
 
     expected = request.cookies.get(OAUTH_STATE_COOKIE)
     if not code or not state or state != expected:
-        return RedirectResponse(_admin_url(error="OAuth state 검증에 실패했습니다. 다시 시도해 주세요."))
+        return RedirectResponse(_admin_url(error=tr("OAuth state 검증에 실패했습니다. 다시 시도해 주세요.", lang_of(request))))
 
     try:
         linked = _link_instagram(code) if settings.auth_mode == "instagram" else _link_facebook(code)
     except _NoPages:
         return RedirectResponse(
             _admin_url(
-                error="Instagram 프로페셔널 계정이 연결된 Facebook 페이지를 찾지 못했습니다. "
-                "Instagram 앱에서 비즈니스/크리에이터 계정으로 전환하고 페이지에 연결해 주세요."
+                error=tr(
+                    "Instagram 프로페셔널 계정이 연결된 Facebook 페이지를 찾지 못했습니다. "
+                    "Instagram 앱에서 비즈니스/크리에이터 계정으로 전환하고 페이지에 연결해 주세요.",
+                    lang_of(request),
+                )
             )
         )
     except GraphError as exc:
