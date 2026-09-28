@@ -157,7 +157,9 @@ export function LineChart({ series, height = 260 }: { series: LineSeries[]; heig
             fill="transparent"
             onPointerMove={onMove}
             onPointerDown={onMove}
-            onPointerLeave={() => setHover(null)}
+            // 터치는 손을 떼면 바로 leave 가 와서 툴팁이 사라지므로, 마우스일 때만 닫습니다 (터치는 다른 곳을 누르면 바뀜).
+            onPointerLeave={(e) => e.pointerType === "mouse" && setHover(null)}
+            style={{ touchAction: "pan-y" }}
           />
         </svg>
       )}
@@ -295,7 +297,8 @@ export function BarList({
         <li
           key={r.key}
           className="grid items-center gap-3 rounded-md px-1 py-0.5 hover:bg-surface-2"
-          style={{ gridTemplateColumns: `${labelWidth}px 1fr` }}
+          // 좁은 화면에서는 라벨이 너비의 45% 를 넘지 않게 (막대 자리를 남김)
+          style={{ gridTemplateColumns: `min(${labelWidth}px, 45%) minmax(0, 1fr)` }}
           title={r.title ?? `${typeof r.label === "string" ? r.label : ""} ${fmtInt(r.value)}`}
         >
           <div className="min-w-0 truncate text-[13px] text-fg-2">{r.label}</div>

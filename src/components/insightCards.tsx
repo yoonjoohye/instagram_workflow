@@ -218,6 +218,8 @@ export function OnlineHoursCard({ data, loading }: { data?: AudienceDetail; load
   const hours = data?.online_followers ?? [];
   const max = Math.max(1, ...hours);
   const peak = hours.length ? hours.indexOf(Math.max(...hours)) : -1;
+  // 터치 화면에는 hover 가 없으므로 막대를 누르면 그 시간대 값을 보여줍니다.
+  const [picked, setPicked] = useState<number | null>(null);
   return (
     <Card title="팔로워 접속 시간대" subtitle="최근 7일, 시간대별 평균 접속 팔로워 수 (게시 시간 정할 때 참고)">
       {loading ? (
@@ -226,14 +228,30 @@ export function OnlineHoursCard({ data, loading }: { data?: AudienceDetail; load
         <p className="py-6 text-center text-sm text-fg-3">팔로워 100명 미만이면 Meta 가 접속 시간대를 제공하지 않습니다.</p>
       ) : (
         <>
-          <p className="text-[13px] text-fg-2">
-            가장 많이 접속하는 시간 <span className="pnum text-lg font-semibold text-fg">{peak}시</span>
+          <p className="flex flex-wrap items-baseline justify-between gap-2 text-[13px] text-fg-2">
+            <span>
+              가장 많이 접속하는 시간 <span className="pnum text-lg font-semibold text-fg">{peak}시</span>
+            </span>
+            {picked != null && (
+              <span className="tnum text-[12px] text-fg-2">
+                {picked}시 · <span className="font-medium text-fg">{fmtInt(hours[picked])}명</span>
+              </span>
+            )}
           </p>
           <div className="mt-3 flex h-32 items-end gap-[2px]" role="img" aria-label={`시간대별 접속, 최대 ${peak}시`}>
             {hours.map((v, h) => (
-              <div key={h} className="group relative flex h-full flex-1 items-end" title={`${h}시 · ${fmtInt(v)}명`}>
+              <div
+                key={h}
+                className="group relative flex h-full flex-1 cursor-pointer items-end"
+                title={`${h}시 · ${fmtInt(v)}명`}
+                onClick={() => setPicked((p) => (p === h ? null : h))}
+                onPointerEnter={(e) => e.pointerType === "mouse" && setPicked(h)}
+              >
                 <span
-                  className={cx("w-full rounded-t-[3px]", h === peak ? "opacity-100" : "opacity-70 group-hover:opacity-100")}
+                  className={cx(
+                    "w-full rounded-t-[3px]",
+                    h === picked || (picked == null && h === peak) ? "opacity-100" : "opacity-60 group-hover:opacity-100",
+                  )}
                   style={{ height: `${Math.max(2, (v / max) * 100)}%`, background: "var(--seq-bar)" }}
                 />
               </div>

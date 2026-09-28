@@ -8,7 +8,7 @@ import { fmtCompact } from "@/lib/format";
 import type { Me } from "@/lib/types";
 import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark } from "./icons";
 import { Logo } from "@/components/Logo";
-import { Avatar, cx, Notice, Spinner } from "./ui";
+import { Avatar, cx, Dialog, Notice, Spinner } from "./ui";
 
 const MeContext = createContext<{ me: Me; refreshMe: () => void } | null>(null);
 
@@ -19,11 +19,11 @@ export function useMe() {
 }
 
 const NAV = [
-  { href: "/admin", label: "대시보드", icon: IconChart },
-  { href: "/admin/studio", label: "만들기", icon: IconSpark },
-  { href: "/admin/jobs", label: "작업함", icon: IconInbox },
-  { href: "/admin/posts", label: "게시물 성과", icon: IconGrid },
-  { href: "/admin/autoreply", label: "자동 응답", icon: IconReply },
+  { href: "/admin", label: "대시보드", short: "홈", icon: IconChart },
+  { href: "/admin/studio", label: "만들기", short: "만들기", icon: IconSpark },
+  { href: "/admin/jobs", label: "작업함", short: "작업함", icon: IconInbox },
+  { href: "/admin/posts", label: "게시물 성과", short: "성과", icon: IconGrid },
+  { href: "/admin/autoreply", label: "자동 응답", short: "자동응답", icon: IconReply },
 ];
 
 export function AdminShell({ children }: { children: ReactNode }) {
@@ -47,7 +47,8 @@ export function AdminShell({ children }: { children: ReactNode }) {
     <MeContext.Provider value={{ me: me.data, refreshMe: me.reload }}>
       <div className="min-h-dvh md:grid md:grid-cols-[232px_1fr]">
         <Sidebar me={me.data} />
-        <main className="min-w-0 px-4 py-6 sm:px-8 sm:py-8">
+        {/* 휴대폰: 하단 탭바(약 64px + safe-area)에 가리지 않게 아래 여백 */}
+        <main className="min-w-0 px-4 pt-5 pb-[calc(88px+env(safe-area-inset-bottom))] sm:px-8 sm:py-8 md:pb-8">
           <div className="mx-auto max-w-6xl">
             <Suspense fallback={null}>
               <OAuthResultBanner />
@@ -91,20 +92,85 @@ function Sidebar({ me }: { me: Me }) {
   }
 
   const isActive = (href: string) => (href === "/admin" ? pathname === href : pathname.startsWith(href));
+  const [accountOpen, setAccountOpen] = useState(false);
 
   return (
-    <aside className="sticky top-0 z-20 border-b border-line bg-surface-1 md:flex md:h-dvh md:flex-col md:border-r md:border-b-0">
-      <div className="flex items-center justify-between gap-3 px-4 py-3 md:px-5 md:py-5">
+    <>
+    {/* 휴대폰: 상단 바 (로고 + 계정 메뉴) */}
+    <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-line bg-surface-1/95 px-4 pt-[env(safe-area-inset-top)] backdrop-blur md:hidden">
+      <Link href="/admin" className="flex h-14 items-center gap-2 text-sm font-semibold">
+        <Logo size={26} />
+        Auto Studio
+      </Link>
+      <button
+        type="button"
+        onClick={() => setAccountOpen(true)}
+        className="-mr-1 flex items-center gap-2 rounded-full p-1 hover:bg-surface-2"
+        aria-label="계정 메뉴"
+      >
+        <Avatar src={me.profile_picture_url} name={me.username} size={32} />
+      </button>
+    </header>
+
+    {/* 휴대폰: 하단 탭바 */}
+    <nav
+      aria-label="주 메뉴"
+      className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+    >
+      {NAV.map(({ href, short, icon: Icon }) => (
+        <Link
+          key={href}
+          href={href}
+          aria-current={isActive(href) ? "page" : undefined}
+          className={cx(
+            "flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium",
+            isActive(href) ? "text-accent" : "text-fg-3 active:text-fg",
+          )}
+        >
+          <Icon width={22} height={22} />
+          {short}
+        </Link>
+      ))}
+    </nav>
+
+    <Dialog
+      open={accountOpen}
+      onClose={() => setAccountOpen(false)}
+      title={`@${me.username}`}
+      subtitle={`팔로워 ${fmtCompact(me.followers_count)}${me.fb_page_name ? ` · 페이지 ${me.fb_page_name}` : ""}`}
+    >
+      <div className="-mx-2 space-y-1">
+        <button
+          onClick={logout}
+          disabled={loggingOut}
+          className="flex h-12 w-full items-center gap-3 rounded-lg px-3 text-[15px] hover:bg-surface-2"
+        >
+          <IconLogout width={18} height={18} /> 로그아웃
+        </button>
+        <button
+          onClick={deleteAccount}
+          disabled={loggingOut}
+          className="flex h-12 w-full items-center rounded-lg px-3 text-left text-[14px] text-bad hover:bg-bad/10"
+        >
+          연결 해제 및 데이터 삭제
+        </button>
+        <div className="flex gap-4 px-3 pt-2 pb-1 text-[13px] text-fg-3">
+          <Link href="/privacy">개인정보처리방침</Link>
+          <Link href="/data-deletion">데이터 삭제 안내</Link>
+        </div>
+      </div>
+    </Dialog>
+
+    {/* 태블릿·데스크톱: 왼쪽 사이드바 */}
+    <aside className="sticky top-0 z-20 hidden h-dvh flex-col border-r border-line bg-surface-1 md:flex">
+      <div className="flex items-center justify-between gap-3 px-5 py-5">
         <Link href="/admin" className="flex items-center gap-2 text-sm font-semibold">
           <Logo size={24} />
           Auto Studio
         </Link>
-        <button onClick={logout} className="text-fg-3 hover:text-fg md:hidden" aria-label="로그아웃">
-          <IconLogout />
-        </button>
       </div>
 
-      <nav className="flex gap-1 overflow-x-auto px-3 pb-2 md:flex-col md:px-3 md:pb-0">
+      <nav className="flex flex-col gap-1 px-3">
         {NAV.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
@@ -121,7 +187,7 @@ function Sidebar({ me }: { me: Me }) {
         ))}
       </nav>
 
-      <div className="mt-auto hidden border-t border-line p-4 md:block">
+      <div className="mt-auto border-t border-line p-4">
         <div className="flex items-center gap-3">
           <Avatar src={me.profile_picture_url} name={me.username} size={36} />
           <div className="min-w-0 flex-1">
@@ -154,6 +220,7 @@ function Sidebar({ me }: { me: Me }) {
         </div>
       </div>
     </aside>
+    </>
   );
 }
 

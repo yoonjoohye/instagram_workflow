@@ -51,6 +51,10 @@ function Studio() {
   const onCreated = (j: Job) => {
     setJob(j);
     router.replace(`/admin/studio?job=${j.id}`, { scroll: false });
+    // 휴대폰·태블릿에서는 검수 화면이 입력 폼 아래에 있으므로 그쪽으로 내려 줍니다.
+    if (!window.matchMedia("(min-width: 1024px)").matches) {
+      setTimeout(() => document.getElementById("review")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+    }
   };
 
   return (
@@ -75,7 +79,9 @@ function Studio() {
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <PostForm onCreated={onCreated} />
-        {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}
+        <div id="review" className="min-w-0 scroll-mt-20">
+          {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}
+        </div>
       </div>
     </>
   );
@@ -351,7 +357,7 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
                   <Spinner />
                 ) : null}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto [&>button]:flex-1 sm:[&>button]:flex-none">
                 {job.media_kind === "REELS" && (
                   <label className="mr-2 flex items-center gap-2 text-[13px] text-fg-2">
                     <input type="checkbox" checked={shareToFeed} onChange={(e) => setShareToFeed(e.target.checked)} className="accent-[var(--accent)]" />
@@ -387,18 +393,40 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
 
 type RedoFn = (index: number, instruction: string, fromCurrent: boolean) => Promise<void>;
 
-/** 이미지 한 장을 파일로 저장합니다 (같은 출처 이미지를 blob 으로 받아 저장 — 새 탭으로 열리지 않게). */
-async function downloadImage(url: string, name: string) {
+async function fetchFile(url: string, name: string): Promise<File> {
   const res = await fetch(mediaSrc(url));
   if (!res.ok) throw new Error(`이미지를 받지 못했습니다 (${res.status})`);
-  const href = URL.createObjectURL(await res.blob());
-  const a = document.createElement("a");
-  a.href = href;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(href), 1000);
+  const blob = await res.blob();
+  return new File([blob], name, { type: blob.type || "image/jpeg" });
+}
+
+/** 휴대폰에서는 공유 시트(‘이미지 저장’ → 사진 앱)로, 컴퓨터에서는 파일로 저장합니다. */
+async function saveFiles(files: File[]) {
+  const touch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  if (touch && navigator.canShare?.({ files })) {
+    try {
+      await navigator.share({ files });
+      return;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return; // 사용자가 닫음
+      // 공유가 막히면 아래 파일 저장으로
+    }
+  }
+  for (const file of files) {
+    const href = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+    if (files.length > 1) await new Promise((r) => setTimeout(r, 300)); // 브라우저가 연속 다운로드를 막지 않게
+  }
+}
+
+async function downloadImage(url: string, name: string) {
+  await saveFiles([await fetchFile(url, name)]);
 }
 
 function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; onRedo?: RedoFn; filePrefix?: string }) {
@@ -413,11 +441,10 @@ function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; 
     setDownloadingAll(true);
     setError(undefined);
     try {
-      for (const [i, a] of assets.entries()) {
-        if (!a.url) continue;
-        await downloadImage(a.url, fileName(a, i));
-        await new Promise((r) => setTimeout(r, 300)); // 브라우저가 연속 다운로드를 막지 않게
-      }
+      const files = await Promise.all(
+        assets.map((a, i) => (a.url ? fetchFile(a.url, fileName(a, i)) : null)),
+      );
+      await saveFiles(files.filter((f): f is File => f !== null));
     } catch (e) {
       setError(toApiError(e).message);
     } finally {

@@ -194,7 +194,112 @@ function Posts() {
             <Empty title="게시물이 없습니다" />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* 휴대폰: 카드 목록 */}
+          <div className="md:hidden">
+            <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+              <label htmlFor="post-sort" className="text-[12px] text-fg-3">
+                정렬
+              </label>
+              <select
+                id="post-sort"
+                value={sort.key}
+                onChange={(e) => setSort({ key: e.target.value as SortKey, desc: true })}
+                className="h-9 min-w-0 flex-1 rounded-lg border border-line-strong bg-surface-1 px-2 text-sm"
+              >
+                <option value="timestamp">최신순</option>
+                {COLUMNS.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setSort((s) => ({ ...s, desc: !s.desc }))}
+                className="h-9 shrink-0 rounded-lg border border-line-strong px-3 text-[13px] text-fg-2"
+                aria-label={sort.desc ? "내림차순" : "오름차순"}
+              >
+                {sort.desc ? "높은 순 ▼" : "낮은 순 ▲"}
+              </button>
+            </div>
+            <ul className="tnum divide-y divide-line">
+              {rows.map((p) => {
+                const open = expanded.has(p.id);
+                return (
+                  <li key={p.id} className={cx(open && "bg-surface-2")}>
+                    <button
+                      type="button"
+                      onClick={() => toggleRow(p.id)}
+                      aria-expanded={open}
+                      className="flex w-full items-start gap-3 px-4 py-3 text-left active:bg-surface-2"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.thumbnail_url || p.media_url} alt="" className="size-14 shrink-0 rounded-md object-cover" loading="lazy" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-medium">{p.caption?.split("\n")[0] || "(캡션 없음)"}</span>
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-fg-3">
+                          {postKind(p)} · {fmtRelative(p.timestamp)}
+                          {studioIds.has(p.id) && (
+                            <Badge tone="accent" icon={<IconSpark width={11} height={11} />}>
+                              스튜디오
+                            </Badge>
+                          )}
+                          {p.auto_reply?.enabled && (
+                            <Badge tone="accent" icon={<IconReply width={11} height={11} />}>
+                              자동 응답
+                            </Badge>
+                          )}
+                        </span>
+                        <span className="mt-2 grid grid-cols-4 gap-1 text-[12px]">
+                          {([
+                            ["도달", fmtCompact(p.insights?.reach)],
+                            ["좋아요", fmtCompact(metric(p, "likes"))],
+                            ["댓글", fmtCompact(metric(p, "comments"))],
+                            ["참여율", fmtPct(metric(p, "rate"))],
+                          ] as const).map(([label, value]) => (
+                            <span key={label}>
+                              <span className="block text-[11px] text-fg-3">{label}</span>
+                              <span className="block font-semibold text-fg">{value}</span>
+                            </span>
+                          ))}
+                        </span>
+                      </span>
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className={cx("mt-1 shrink-0 text-fg-3 transition-transform", open && "rotate-180")}
+                        aria-hidden
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                    {open && (
+                      <div className="px-3 pb-4">
+                        <PostDetail
+                          post={p}
+                          toggling={togglingId === p.id}
+                          onToggleComments={() => toggleComments(p)}
+                          onOpenComments={() => setSentimentPost(p)}
+                          onAnalyzed={(counts) => patchPost(p.id, { sentiment: counts })}
+                          onOpenAutoReply={() => openAutoReply(p.id)}
+                        />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {/* 태블릿·데스크톱: 표 */}
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[860px] text-[13px]">
               <thead className="border-b border-line text-left text-fg-3">
                 <tr>
@@ -307,6 +412,7 @@ function Posts() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </Card>
       {sentimentPost && <SentimentDialog post={sentimentPost} onClose={() => setSentimentPost(null)} />}
@@ -451,9 +557,9 @@ function PostAutoReplyDialog({
         </span>
       }
       footer={
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[12px] text-fg-3">저장하면 새 댓글부터 적용됩니다.</p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 max-sm:w-full max-sm:[&>button]:flex-1">
             <Button variant="ghost" onClick={onClose}>
               취소
             </Button>

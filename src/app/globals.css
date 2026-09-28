@@ -132,6 +132,25 @@ body {
   font-feature-settings: "tnum" 1;
 }
 
+/* 휴대폰 ─────────────────────────────────────────────── */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  -webkit-tap-highlight-color: transparent;
+  /* 가로로 삐져나온 요소 때문에 화면 전체가 좌우로 밀리지 않게 (clip 은 sticky 헤더를 깨지 않음) */
+  overflow-x: clip;
+}
+@media (max-width: 639px) {
+  /* iOS Safari 는 16px 보다 작은 입력칸에 초점이 가면 화면을 확대하므로 휴대폰에서는 16px 로 */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 /* 숫자는 표에서 자리가 흔들리지 않도록 등폭으로 */
 .tnum {
   font-variant-numeric: tabular-nums;

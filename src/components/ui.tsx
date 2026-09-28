@@ -130,7 +130,11 @@ export function Segmented<T extends string | number>({
   ariaLabel?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className="inline-flex rounded-lg border border-line bg-surface-2 p-0.5">
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className="inline-flex max-w-full overflow-x-auto rounded-lg border border-line bg-surface-2 p-0.5 [scrollbar-width:none]"
+    >
       {options.map((o) => (
         <button
           key={String(o.value)}
@@ -281,7 +285,7 @@ export function Dialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="flex max-h-[92dvh] w-full max-w-xl flex-col rounded-t-2xl border border-line bg-surface-1 shadow-2xl sm:rounded-2xl"
+        className="flex max-h-[92dvh] w-full max-w-xl flex-col rounded-t-2xl border border-line bg-surface-1 pb-[env(safe-area-inset-bottom)] shadow-2xl sm:rounded-2xl sm:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">

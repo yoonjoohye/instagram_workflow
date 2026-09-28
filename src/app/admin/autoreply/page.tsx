@@ -105,7 +105,7 @@ export default function AutoReplyPage() {
           ) : (
             <ul className="divide-y divide-line">
               {rules.data.data.map((r) => (
-                <li key={r.id} className="flex items-center gap-3 py-3">
+                <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
                   {r.post?.thumbnail_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={mediaSrc(r.post.thumbnail_url)} alt="" className="size-11 shrink-0 rounded-md object-cover" />
@@ -119,7 +119,8 @@ export default function AutoReplyPage() {
                       {!r.ig_media_id && " · 게시 전"}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                  {/* 휴대폰에서는 버튼을 한 줄 아래로 (제목이 잘리지 않게) */}
+                  <div className="flex shrink-0 items-center gap-1 max-sm:w-full max-sm:justify-end">
                     <Button size="sm" variant={r.enabled ? "secondary" : "ghost"} onClick={() => toggle(r)}>
                       {r.enabled ? "켜짐" : "꺼짐"}
                     </Button>

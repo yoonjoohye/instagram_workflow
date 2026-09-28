@@ -7,6 +7,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // 아이폰 홈 인디케이터·노치 영역까지 쓰고, 하단 탭바는 safe-area 만큼 띄웁니다.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f7f7f5" },
     { media: "(prefers-color-scheme: dark)", color: "#121211" },

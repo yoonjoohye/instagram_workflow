@@ -212,7 +212,11 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
                   <button
                     type="button"
                     onClick={() => setRefs((prev) => prev.filter((_, k) => k !== i))}
-                    className="absolute inset-0 hidden items-center justify-center bg-black/55 text-[12px] text-white group-hover:flex"
+                    className={cx(
+                      "absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded-full bg-black/65 text-[11px] text-white",
+                      // 마우스가 있으면 올렸을 때만, 터치 화면에서는 항상 보이게
+                      "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
+                    )}
                     aria-label="참고 이미지 삭제"
                   >
                     ✕
@@ -300,21 +304,21 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           )}
         >
           {photos.length > 0 && (
-            <ol className="mb-3 grid grid-cols-4 gap-2">
+            <ol className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
               {photos.map((p, i) => (
                 <li key={p.key} className="group relative aspect-square overflow-hidden rounded-md bg-surface-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={p.preview} alt="" className="size-full object-cover" />
                   <span className="tnum absolute top-1 left-1 rounded bg-black/60 px-1 text-[11px] text-white">{i + 1}</span>
                   {!busy && (
-                    <span className="absolute inset-x-0 bottom-0 flex justify-between bg-black/55 px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                      <button type="button" onClick={() => move(i, -1)} className="px-1 text-[12px] text-white" aria-label="앞으로">
+                    <span className="absolute inset-x-0 bottom-0 flex justify-between bg-black/55 px-0.5 py-0.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
+                      <button type="button" onClick={() => move(i, -1)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label="앞으로">
                         ←
                       </button>
-                      <button type="button" onClick={() => remove(i)} className="px-1 text-[12px] text-white" aria-label="삭제">
+                      <button type="button" onClick={() => remove(i)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label="삭제">
                         ✕
                       </button>
-                      <button type="button" onClick={() => move(i, 1)} className="px-1 text-[12px] text-white" aria-label="뒤로">
+                      <button type="button" onClick={() => move(i, 1)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label="뒤로">
                         →
                       </button>
                     </span>
