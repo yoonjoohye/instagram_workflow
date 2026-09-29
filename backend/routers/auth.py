@@ -11,7 +11,8 @@ import secrets
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from urllib.parse import urlencode
@@ -22,7 +23,7 @@ from ..deps import current_account, graph_for
 from ..models import Account, DataDeletionRequest
 from ..services import account_data
 from ..i18n import lang_of, tr
-from ..security import SESSION_COOKIE, SESSION_MAX_AGE, encrypt, sign_session
+from ..security import SESSION_COOKIE, SESSION_MAX_AGE, encrypt, load_session, sign_session
 from ..services.meta_graph import IG_AUTHORIZE_URL, IG_SCOPES, SCOPES, GraphClient, GraphError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -45,9 +46,36 @@ def _expires_at(expires_in: object) -> dt.datetime | None:
     return dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(expires_in))
 
 
+MAX_LINKED = 10  # 한 브라우저에서 바꿔 가며 쓸 수 있는 연결 계정 수
+
+
+def _session(request: Request) -> tuple[int | None, list[int]]:
+    """(현재 계정, 이 브라우저에서 연결한 계정들). 세션 쿠키는 서명돼 있어 목록을 위조할 수 없습니다."""
+    payload = load_session(request.cookies.get(SESSION_COOKIE) or "") or {}
+    current = payload.get("account_id")
+    linked = [i for i in payload.get("linked", []) if isinstance(i, int)]
+    if isinstance(current, int) and current not in linked:
+        linked.insert(0, current)
+    return (current if isinstance(current, int) else None), linked[:MAX_LINKED]
+
+
+def _set_session(resp: Response, current: int, linked: list[int]) -> None:
+    linked = list(dict.fromkeys([current, *linked]))[:MAX_LINKED]
+    resp.set_cookie(
+        SESSION_COOKIE,
+        sign_session({"account_id": current, "linked": linked}),
+        max_age=SESSION_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=_secure(),
+        path="/",
+    )
+
+
 @router.get("/login")
-def login() -> RedirectResponse:
-    """선택된 로그인 방식의 OAuth 다이얼로그로 보냅니다."""
+def login(switch: bool = Query(default=False)) -> RedirectResponse:
+    """선택된 로그인 방식의 OAuth 다이얼로그로 보냅니다.
+    switch=1 이면 브라우저에 로그인된 계정으로 바로 넘어가지 않고 로그인 화면을 띄워 다른 계정을 고르게 합니다."""
     if not settings.meta_configured:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -63,6 +91,7 @@ def login() -> RedirectResponse:
                 "response_type": "code",
                 "scope": ",".join(IG_SCOPES),
                 "state": state,
+                **({"force_authentication": "1"} if switch else {}),
             }
         )
     else:
@@ -73,6 +102,7 @@ def login() -> RedirectResponse:
                 "state": state,
                 "scope": ",".join(SCOPES),
                 "response_type": "code",
+                **({"auth_type": "reauthenticate"} if switch else {}),
             }
         )
     resp = RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
@@ -199,15 +229,8 @@ def callback(
 
     resp = RedirectResponse(_admin_url(connected="1"))
     resp.delete_cookie(OAUTH_STATE_COOKIE)
-    resp.set_cookie(
-        SESSION_COOKIE,
-        sign_session({"account_id": account.id}),
-        max_age=SESSION_MAX_AGE,
-        httponly=True,
-        samesite="lax",
-        secure=_secure(),
-        path="/",
-    )
+    # 이미 연결해 둔 다른 계정은 목록에 남겨 두고, 방금 연결한 계정으로 전환합니다.
+    _set_session(resp, account.id, _session(request)[1])
     return resp
 
 
@@ -256,49 +279,57 @@ def me(account: Account = Depends(current_account)) -> dict:
 
 
 @router.get("/accounts")
-def list_accounts(account: Account = Depends(current_account)) -> dict:
-    """같은 Facebook 사용자에 연결된 다른 IG 계정 목록 (Instagram 로그인은 본인 계정 하나)."""
-    if settings.auth_mode == "instagram":
-        return {
-            "data": [
-                {
-                    "page_id": "",
-                    "page_name": "",
-                    "ig_user_id": account.ig_user_id,
-                    "username": account.username,
-                    "current": True,
-                }
-            ]
-        }
-    with graph_for(account) as client:
-        try:
-            pages = client.my_pages()
-        except GraphError as exc:
-            raise HTTPException(exc.status, str(exc)) from exc
+def list_accounts(request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """이 브라우저에서 연결한 계정들 (다시 로그인하지 않고 전환할 수 있음)."""
+    _, linked = _session(request)
+    rows = [db.get(Account, i) for i in linked]
     return {
         "data": [
             {
-                "page_id": p["id"],
-                "page_name": p.get("name", ""),
-                "ig_user_id": p["instagram_business_account"]["id"],
-                "username": p["instagram_business_account"].get("username", ""),
-                "current": p["instagram_business_account"]["id"] == account.ig_user_id,
+                "id": a.id,
+                "username": a.username,
+                "name": a.name,
+                "profile_picture_url": a.profile_picture_url,
+                "current": a.id == account.id,
             }
-            for p in pages
+            for a in rows
+            if a is not None
         ]
     }
 
 
+class SwitchIn(BaseModel):
+    account_id: int
+
+
+@router.post("/switch")
+def switch_account(body: SwitchIn, request: Request, db: Session = Depends(get_db)) -> JSONResponse:
+    """이 브라우저에서 이미 연결한 계정으로 바꿉니다 (연결한 적 없는 계정은 거부)."""
+    _, linked = _session(request)
+    if body.account_id not in linked or db.get(Account, body.account_id) is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "이 브라우저에서 연결한 계정만 전환할 수 있습니다.")
+    resp = JSONResponse({"ok": True})
+    _set_session(resp, body.account_id, linked)
+    return resp
+
+
 @router.delete("/account")
 def delete_my_account(
-    account: Account = Depends(current_account), db: Session = Depends(get_db)
+    request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
 ) -> JSONResponse:
     """연결 해제 및 데이터 삭제 — 토큰, 생성물, 인사이트 기록, 댓글·자동 응답 기록을 모두 지웁니다."""
+    _, linked = _session(request)
+    deleted_id = account.id
     account_data.delete_account(db, account)
     record = account_data.record_in_app(db)
     db.commit()
     resp = JSONResponse({"ok": True, "confirmation_code": record.code})
-    resp.delete_cookie(SESSION_COOKIE, path="/")
+    # 이 계정만 목록에서 빼고, 연결해 둔 다른 계정이 있으면 그 계정으로 전환합니다.
+    remaining = [i for i in linked if i != deleted_id and db.get(Account, i) is not None]
+    if remaining:
+        _set_session(resp, remaining[0], remaining)
+    else:
+        resp.delete_cookie(SESSION_COOKIE, path="/")
     return resp
 
 

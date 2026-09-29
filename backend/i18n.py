@@ -53,6 +53,7 @@ CATALOG: dict[str, tuple[str, str]] = {
         "No Facebook Page linked to an Instagram professional account was found. Switch to a Business/Creator account in the Instagram app and link it to a Page.",
         "Instagramプロアカウントに連携されたFacebookページが見つかりません。Instagramアプリでビジネス/クリエイターアカウントに切り替え、ページと連携してください。",
     ),
+    "이 브라우저에서 연결한 계정만 전환할 수 있습니다.": ("You can only switch to accounts connected in this browser.", "このブラウザで連携したアカウントにのみ切り替えられます。"),
     "signed_request 검증 실패": ("signed_request verification failed", "signed_request の検証に失敗しました"),
     "해당 확인 코드를 찾을 수 없습니다.": ("That confirmation code wasn't found.", "該当する確認コードが見つかりません。"),
     "인증 실패": ("Authentication failed", "認証に失敗しました"),

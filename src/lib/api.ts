@@ -7,6 +7,8 @@ import { getFormatLocale } from "./format";
 // 로컬: next.config 의 rewrite 가 uvicorn(8000) 으로, Vercel: vercel.json 이 api/index.py 로 보냅니다.
 export const API_BASE = "/api/py";
 export const LOGIN_URL = `${API_BASE}/auth/login`;
+/** 브라우저에 로그인된 인스타 계정으로 바로 넘어가지 않고 로그인 화면을 띄워 다른 계정을 연결 */
+export const SWITCH_LOGIN_URL = `${LOGIN_URL}?switch=1`;
 
 export class ApiError extends Error {
   constructor(

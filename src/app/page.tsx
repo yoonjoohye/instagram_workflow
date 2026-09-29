@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useT } from "@/i18n/client";
 import { rich } from "@/i18n/rich";
-import { LOGIN_URL, useApi } from "@/lib/api";
+import { LOGIN_URL, SWITCH_LOGIN_URL, useApi } from "@/lib/api";
 import type { Health, Me } from "@/lib/types";
 import { IconChart, IconInstagram, IconReply, IconSpark } from "@/components/icons";
 import { Logo } from "@/components/Logo";
@@ -58,7 +58,13 @@ export default function Home() {
             >
               {t("landing.goDashboard", { username: me.data!.username })}
             </Link>
-          ) : loginBlocked ? (
+          ) : null}
+          {loggedIn && !me.loading ? (
+            <a href={SWITCH_LOGIN_URL} className="text-[13px] text-fg-3 underline-offset-2 hover:text-fg hover:underline">
+              {t("shell.addAccount")}
+            </a>
+          ) : null}
+          {me.loading || loggedIn ? null : loginBlocked ? (
             <span className="inline-flex h-11 cursor-not-allowed items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-on-accent opacity-50">
               <IconInstagram /> {t("common.connectInstagram")}
             </span>

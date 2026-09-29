@@ -2,6 +2,8 @@ import { defineMessages } from "../define";
 
 export default defineMessages({
   ko: {
+    accounts: "연결한 계정", addAccount: "다른 계정 연결", switchFailed: "계정을 바꾸지 못했습니다.",
+    addAccountHint: "인스타그램 로그인 화면에서 연결할 계정으로 로그인하세요.",
     dashboard: "대시보드", studio: "만들기", jobs: "작업함", posts: "게시물 성과", autoreply: "자동 응답",
     dashboardShort: "홈", studioShort: "만들기", jobsShort: "작업함", postsShort: "성과", autoreplyShort: "자동응답",
     mainMenu: "주 메뉴", accountMenu: "계정 메뉴", loadingAccount: "계정 정보를 불러오는 중…",
@@ -13,6 +15,8 @@ export default defineMessages({
     loginRequired: "로그인이 필요합니다", loginRequiredBody: "Instagram 비즈니스·크리에이터 계정을 연결하세요.", backHome: "처음 화면으로",
   },
   en: {
+    accounts: "Connected accounts", addAccount: "Connect another account", switchFailed: "Couldn't switch accounts.",
+    addAccountHint: "Log in with the account you want to connect on the Instagram login screen.",
     dashboard: "Dashboard", studio: "Create", jobs: "Drafts", posts: "Post performance", autoreply: "Auto-reply",
     dashboardShort: "Home", studioShort: "Create", jobsShort: "Drafts", postsShort: "Posts", autoreplyShort: "Replies",
     mainMenu: "Main menu", accountMenu: "Account menu", loadingAccount: "Loading your account…",
@@ -24,6 +28,8 @@ export default defineMessages({
     loginRequired: "Please log in", loginRequiredBody: "Connect an Instagram Business or Creator account.", backHome: "Back to home",
   },
   ja: {
+    accounts: "連携したアカウント", addAccount: "別のアカウントを連携", switchFailed: "アカウントを切り替えられませんでした。",
+    addAccountHint: "Instagramのログイン画面で、連携したいアカウントでログインしてください。",
     dashboard: "ダッシュボード", studio: "作成", jobs: "作業一覧", posts: "投稿の成果", autoreply: "自動返信",
     dashboardShort: "ホーム", studioShort: "作成", jobsShort: "作業", postsShort: "成果", autoreplyShort: "自動返信",
     mainMenu: "メインメニュー", accountMenu: "アカウントメニュー", loadingAccount: "アカウント情報を読み込み中…",

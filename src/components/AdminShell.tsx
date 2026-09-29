@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useState, type ReactNode } from "react";
-import { api, LOGIN_URL, useApi } from "@/lib/api";
+import { api, LOGIN_URL, SWITCH_LOGIN_URL, useApi } from "@/lib/api";
 import { fmtCompact } from "@/lib/format";
-import type { Me } from "@/lib/types";
+import type { LinkedAccount, ListOf, Me } from "@/lib/types";
 import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark } from "./icons";
 import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -142,6 +142,7 @@ function Sidebar({ me }: { me: Me }) {
       subtitle={`${t("shell.followers", { n: fmtCompact(me.followers_count) })}${me.fb_page_name ? ` · ${t("shell.page", { name: me.fb_page_name })}` : ""}`}
     >
       <div className="-mx-2 space-y-1">
+        <AccountSwitcher onSwitched={() => setAccountOpen(false)} />
         <button
           onClick={logout}
           disabled={loggingOut}
@@ -199,6 +200,9 @@ function Sidebar({ me }: { me: Me }) {
           </div>
         </div>
         {me.fb_page_name && <p className="mt-2 truncate text-[12px] text-fg-3">{t("shell.page", { name: me.fb_page_name })}</p>}
+        <div className="-mx-2 mt-2">
+          <AccountSwitcher compact />
+        </div>
         <button
           onClick={logout}
           disabled={loggingOut}
@@ -225,6 +229,60 @@ function Sidebar({ me }: { me: Me }) {
       </div>
     </aside>
     </>
+  );
+}
+
+/** 이 브라우저에서 연결한 다른 계정으로 전환 + 새 계정 연결 (인스타 계정이 여러 개일 때) */
+function AccountSwitcher({ compact, onSwitched }: { compact?: boolean; onSwitched?: () => void }) {
+  const t = useT();
+  const accounts = useApi<ListOf<LinkedAccount>>("/auth/accounts");
+  const [switching, setSwitching] = useState<number>();
+  const others = (accounts.data?.data ?? []).filter((a) => !a.current);
+
+  async function switchTo(id: number) {
+    setSwitching(id);
+    try {
+      await api("/auth/switch", { method: "POST", json: { account_id: id } });
+      onSwitched?.();
+      window.location.reload(); // 모든 화면을 새 계정 데이터로
+    } catch (e) {
+      setSwitching(undefined);
+      window.alert(e instanceof Error ? e.message : t("shell.switchFailed"));
+    }
+  }
+
+  const row = compact ? "h-9 px-2 text-[13px]" : "h-12 px-3 text-[15px]";
+  return (
+    <div className="space-y-0.5">
+      {others.length > 0 && (
+        <p className={cx("pt-1 pb-0.5 text-fg-3", compact ? "px-2 text-[11px]" : "px-3 text-[12px]")}>{t("shell.accounts")}</p>
+      )}
+      {others.map((a) => (
+        <button
+          key={a.id}
+          onClick={() => switchTo(a.id)}
+          disabled={switching !== undefined}
+          className={cx("flex w-full items-center gap-2.5 rounded-lg text-left hover:bg-surface-2 disabled:opacity-60", row)}
+        >
+          <Avatar src={a.profile_picture_url} name={a.username} size={compact ? 22 : 28} />
+          <span className="min-w-0 flex-1 truncate">@{a.username}</span>
+          {switching === a.id && <Spinner className="size-3" />}
+        </button>
+      ))}
+      <a
+        href={SWITCH_LOGIN_URL}
+        title={t("shell.addAccountHint")}
+        className={cx("flex w-full items-center gap-2.5 rounded-lg text-fg-2 hover:bg-surface-2 hover:text-fg", row)}
+      >
+        <span
+          aria-hidden
+          className={cx("inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong", compact ? "size-[22px] text-[13px]" : "size-7")}
+        >
+          +
+        </span>
+        {t("shell.addAccount")}
+      </a>
+    </div>
   );
 }
 

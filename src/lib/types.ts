@@ -227,3 +227,12 @@ export type PostDetailData = {
   comments: { id: string; username: string; text: string; timestamp: string; like_count: number; reply_count: number }[];
 };
 
+
+/** 이 브라우저에서 연결한 계정 (다시 로그인하지 않고 전환) */
+export type LinkedAccount = {
+  id: number;
+  username: string;
+  name: string;
+  profile_picture_url: string;
+  current: boolean;
+};
