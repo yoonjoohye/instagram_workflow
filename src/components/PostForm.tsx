@@ -1,5 +1,6 @@
 "use client";
 
+import { upload as blobUpload } from "@vercel/blob/client";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n/client";
 import type { T } from "@/i18n/core";
@@ -8,12 +9,13 @@ import type { Job } from "@/lib/types";
 import { IconSpark } from "./icons";
 import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
 
-const MAX_PHOTOS = 8; // 올릴 수 있는 사진 수 (게시물은 최대 10장까지 Gemini가 구성)
+const MAX_PHOTOS = 8; // 올릴 수 있는 사진·동영상 수 (게시물은 최대 10장까지 Gemini가 구성)
+const MAX_VIDEO_MB = 300; // src/app/api/blob/upload/route.ts 와 같게
 const MAX_REFS = 3;
 
 type Research = { notes: string; sources: { title: string; uri: string }[]; warning: string };
 
-type Photo = { key: string; file: File; preview: string };
+type Photo = { key: string; file: File; preview: string; kind: "image" | "video" };
 type Step = { label: string; done: number; total: number };
 
 /** 브라우저에서 긴 변 1600px JPEG 로 줄여 올립니다 (Vercel 요청 크기 제한 대비, 업로드도 빨라짐). */
@@ -29,13 +31,54 @@ async function shrink(file: File, t: T, maxSide = 1600): Promise<Blob> {
   );
 }
 
-async function uploadPhoto(file: File, t: T): Promise<string> {
+async function uploadImageBlob(image: Blob, name: string, t: T): Promise<string> {
   const body = new FormData();
-  body.append("file", await shrink(file, t), file.name.replace(/\.\w+$/, "") + ".jpg");
+  body.append("file", image, name.replace(/\.\w+$/, "") + ".jpg");
   const res = await fetch("/api/py/media/uploads", { method: "POST", body, credentials: "include" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.detail || t("studio.uploadFailed", { status: res.status }));
   return data.id as string;
+}
+
+async function uploadPhoto(file: File, t: T): Promise<string> {
+  return uploadImageBlob(await shrink(file, t), file.name, t);
+}
+
+/** 동영상에서 대표 화면 한 장을 JPEG 로 뽑습니다 (Gemini 가 장면을 보고 캡션을 쓰고, 릴스 커버로도 씀). */
+function captureCover(file: File, t: T): Promise<{ image: Blob; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const src = URL.createObjectURL(file);
+    const fail = () => {
+      URL.revokeObjectURL(src);
+      reject(new Error(t("studio.videoCoverFailed")));
+    };
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.onerror = fail;
+    video.onloadedmetadata = () => {
+      video.currentTime = Math.min(1, (video.duration || 0) / 3); // 첫 프레임이 검은 화면인 경우가 많아 조금 뒤로
+    };
+    video.onseeked = () => {
+      const scale = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      canvas.getContext("2d")!.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (b) => {
+          URL.revokeObjectURL(src);
+          if (b) resolve({ image: b, width: video.videoWidth, height: video.videoHeight });
+          else fail();
+        },
+        "image/jpeg",
+        0.88,
+      );
+    };
+    video.src = src;
+    video.load();
+  });
 }
 
 export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
@@ -58,16 +101,20 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   useEffect(() => () => photos.forEach((p) => URL.revokeObjectURL(p.preview)), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function addFiles(list: FileList | File[]) {
-    const images = Array.from(list).filter((f) => f.type.startsWith("image/"));
+    const all = Array.from(list).filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    const tooBig = all.filter((f) => f.type.startsWith("video/") && f.size > MAX_VIDEO_MB * 1024 * 1024);
+    if (tooBig.length) setError(t("studio.videoTooBig", { mb: MAX_VIDEO_MB }));
+    const files = all.filter((f) => !tooBig.includes(f));
     setPhotos((prev) => {
       const room = MAX_PHOTOS - prev.length;
-      if (images.length > room) setError(t("studio.maxPhotos", { max: MAX_PHOTOS }));
+      if (files.length > room) setError(t("studio.maxPhotos", { max: MAX_PHOTOS }));
       return [
         ...prev,
-        ...images.slice(0, Math.max(0, room)).map((file) => ({
+        ...files.slice(0, Math.max(0, room)).map((file) => ({
           key: `${file.name}-${file.size}-${Math.random()}`,
           file,
           preview: URL.createObjectURL(file),
+          kind: file.type.startsWith("video/") ? ("video" as const) : ("image" as const),
         })),
       ];
     });
@@ -96,8 +143,35 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         key: `${file.name}-${Math.random()}`,
         file,
         preview: URL.createObjectURL(file),
+        kind: "image" as const,
       })),
     ]);
+  }
+
+  /** 동영상: 대표 화면 → 사진처럼 업로드, 원본은 Blob 저장소에 직접 업로드 → 서버에 등록 */
+  async function uploadVideo(file: File, index: number): Promise<string> {
+    setStep({ label: t("studio.stepCover"), done: index, total: photos.length });
+    const cover = await captureCover(file, t);
+    const coverId = await uploadImageBlob(cover.image, file.name, t);
+    let url: string;
+    try {
+      const ext = file.name.split(".").pop()?.toLowerCase() || "mp4";
+      const blob = await blobUpload(`videos/${Date.now()}.${ext}`, file, {
+        access: "public",
+        handleUploadUrl: "/api/blob/upload",
+        multipart: file.size > 20 * 1024 * 1024,
+        onUploadProgress: ({ percentage }) =>
+          setStep({ label: t("studio.stepUploadVideo", { pct: Math.round(percentage) }), done: index, total: photos.length }),
+      });
+      url = blob.url;
+    } catch (err) {
+      throw new Error(t("studio.videoUploadFailed", { e: err instanceof Error ? err.message : String(err) }));
+    }
+    const video = await api<{ id: string }>("/media/videos", {
+      method: "POST",
+      json: { url, cover_id: coverId, width: cover.width, height: cover.height, content_type: file.type || "video/mp4" },
+    });
+    return video.id;
   }
 
   async function submit(e: React.FormEvent) {
@@ -107,8 +181,13 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
     try {
       const ids: string[] = [];
       for (let i = 0; i < photos.length; i++) {
+        const item = photos[i];
+        if (item.kind === "video") {
+          ids.push(await uploadVideo(item.file, i));
+          continue;
+        }
         setStep({ label: t("studio.stepUploadPhotos"), done: i, total: photos.length });
-        ids.push(await uploadPhoto(photos[i].file, t));
+        ids.push(await uploadPhoto(item.file, t));
       }
       const refIds: string[] = [];
       for (let i = 0; i < refs.length; i++) {
@@ -299,9 +378,16 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             <ol className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
               {photos.map((p, i) => (
                 <li key={p.key} className="group relative aspect-square overflow-hidden rounded-md bg-surface-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.preview} alt="" className="size-full object-cover" />
-                  <span className="tnum absolute top-1 left-1 rounded bg-black/60 px-1 text-[11px] text-white">{i + 1}</span>
+                  {p.kind === "video" ? (
+                    <video src={p.preview} muted playsInline preload="metadata" className="size-full object-cover" />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.preview} alt="" className="size-full object-cover" />
+                  )}
+                  <span className="tnum absolute top-1 left-1 rounded bg-black/60 px-1 text-[11px] text-white">
+                    {i + 1}
+                    {p.kind === "video" && ` · ▶ ${t("studio.videoBadge")}`}
+                  </span>
                   {!busy && (
                     <span className="absolute inset-x-0 bottom-0 flex justify-between bg-black/55 px-0.5 py-0.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
                       <button type="button" onClick={() => move(i, -1)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label={t("studio.moveEarlier")}>
@@ -330,7 +416,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/mp4,video/quicktime"
             multiple
             hidden
             onChange={(e) => {
@@ -339,7 +425,9 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             }}
           />
         </div>
-        <p className="-mt-3 text-[12px] text-fg-3">{t("studio.photosNote")}</p>
+        <p className="-mt-3 text-[12px] text-fg-3">
+          {photos.some((p) => p.kind === "video") ? t("studio.videoNote") : t("studio.photosNote")}
+        </p>
 
 
         <Field

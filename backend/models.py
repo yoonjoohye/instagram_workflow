@@ -231,7 +231,10 @@ class MediaBlob(Base):
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
-    kind: Mapped[str] = mapped_column(String(16), default="upload")  # upload | slide | visual (글 얹기 전 이미지)
+    kind: Mapped[str] = mapped_column(String(16), default="upload")  # upload | slide | visual (글 얹기 전 이미지) | video
+    # 동영상은 크기 때문에 DB 가 아니라 Vercel Blob 에 두고 공개 주소만 기록합니다 (data 는 비어 있음).
+    url: Mapped[str] = mapped_column(Text, default="")
+    cover_id: Mapped[str] = mapped_column(String(40), default="")  # 동영상 대표 화면(사진 MediaBlob)
     content_type: Mapped[str] = mapped_column(String(32), default="image/jpeg")
     width: Mapped[int] = mapped_column(Integer, default=0)
     height: Mapped[int] = mapped_column(Integer, default=0)

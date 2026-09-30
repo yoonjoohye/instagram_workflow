@@ -53,7 +53,11 @@ export type Job = {
   created_at: string;
   sources?: { title: string; uri: string }[];
   requirements?: { requirement: string; how: string }[];
+  /** 인스타 음악 추천·선택 (사진 게시물은 게시 후 인스타 앱에서 추가) */
+  music?: { suggestions: MusicPick[]; selected: MusicPick | null } | null;
 };
+
+export type MusicPick = { title: string; artist: string; reason?: string; section?: string };
 
 export type Quota = { used: number; total: number; remaining: number };
 

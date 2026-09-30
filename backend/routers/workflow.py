@@ -12,7 +12,7 @@ from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, AutoReplyRule, GenerationJob, MediaBlob
 from ..schemas import JobPatch, PublishIn
-from ..services import publishing
+from ..services import blobstore, publishing
 from ..services.meta_graph import GraphError
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
@@ -49,6 +49,8 @@ def _job_dict(job: GenerationJob) -> dict:
         "sources": (job.plan or {}).get("sources", []) if isinstance(job.plan, dict) else [],
         # 게시물 만들기: 주제·연출 방향에서 뽑은 요구사항과 반영 위치 (검수용)
         "requirements": (job.plan or {}).get("requirements", []) if isinstance(job.plan, dict) else [],
+        # 인스타 음악 추천·선택 (사진 게시물은 게시 후 인스타 앱에서 추가)
+        "music": (job.plan or {}).get("music") if isinstance(job.plan, dict) else None,
     }
 
 
@@ -112,6 +114,18 @@ def delete_job(
     db: Session = Depends(get_db),
 ) -> Response:
     job = _get_job(db, account, job_id)
+    # 올린 동영상은 Blob 에 있어 따로 지웁니다 (다른 작업이 같은 영상을 쓰지 않을 때만).
+    video_urls = [a.get("url", "") for a in (job.assets or []) if a.get("type") == "video"]
+    in_use = {
+        a.get("url")
+        for other in db.scalars(select(GenerationJob).where(GenerationJob.account_id == account.id, GenerationJob.id != job.id))
+        for a in (other.assets or [])
+        if a.get("type") == "video"
+    }
+    blobstore.delete([u for u in video_urls if u not in in_use])
+    for blob in db.scalars(select(MediaBlob).where(MediaBlob.account_id == account.id, MediaBlob.kind == "video")):
+        if blob.url in video_urls and blob.url not in in_use:
+            db.delete(blob)
     # 이 작업이 만든 이미지(완성본·글 얹기 전 이미지)도 함께 지웁니다. 사용자가 올린 원본 사진은 남깁니다.
     for asset in job.assets or []:
         ids = [(asset.get("url") or "").rsplit("/media/", 1)[-1].removesuffix(".jpg"), (asset.get("meta") or {}).get("visual_id")]
@@ -165,8 +179,23 @@ def publish_job(
                     f"24시간 발행 한도를 모두 썼습니다 ({limit['used']}/{limit['total']}).",
                 )
 
-            if job.media_kind == "CAROUSEL":
+            # 이전 시도에서 만든 컨테이너가 아직 처리 중이거나 끝났다면(큰 동영상) 새로 만들지 않고 이어서 발행합니다.
+            # 캡션·미디어가 그때와 같을 때만.
+            fingerprint = f"{caption}|{'|'.join(a['url'] for a in visual)}"
+            container_id = None
+            if job.ig_container_id and (job.plan or {}).get("container_fingerprint") == fingerprint:
+                try:
+                    code = publishing.container_status(client, job.ig_container_id).get("status_code")
+                except GraphError:
+                    code = None
+                if code in {"FINISHED", "IN_PROGRESS"}:
+                    container_id = job.ig_container_id
+
+            if container_id:
+                pass
+            elif job.media_kind == "CAROUSEL":
                 children = []
+                video_children = []
                 for asset in visual[:10]:
                     child = publishing.create_container(
                         client,
@@ -176,8 +205,11 @@ def publish_job(
                         is_carousel_item=True,
                     )
                     if asset["type"] == "video":
-                        publishing.wait_until_finished(client, child)
+                        video_children.append(child)
                     children.append(child)
+                # 동영상은 인스타그램에서 동시에 처리되므로 모두 만든 뒤 한꺼번에 기다립니다.
+                for child in video_children:
+                    publishing.wait_until_finished(client, child)
                 container_id = publishing.create_container(
                     client,
                     account.ig_user_id,
@@ -198,6 +230,7 @@ def publish_job(
                 )
 
             job.ig_container_id = container_id
+            job.plan = {**(job.plan or {}), "container_fingerprint": fingerprint}
             db.commit()
 
             if job.media_kind in {"REELS", "CAROUSEL"} or visual[0]["type"] == "video":

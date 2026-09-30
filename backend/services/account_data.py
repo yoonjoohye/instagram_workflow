@@ -17,6 +17,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from . import blobstore
 from ..models import (
     Account,
     AutoReplyRule,
@@ -53,6 +54,10 @@ def parse_signed_request(signed_request: str) -> dict[str, Any] | None:
 
 def delete_account(db: Session, account: Account) -> None:
     """이 계정과 연결된 모든 데이터(토큰·생성물·인사이트·댓글 기록·자동 응답)를 삭제합니다."""
+    # 동영상 파일은 DB 가 아니라 Blob 저장소에 있으므로 먼저 지웁니다.
+    blobstore.delete(
+        list(db.scalars(select(MediaBlob.url).where(MediaBlob.account_id == account.id, MediaBlob.kind == "video")))
+    )
     for table in _CHILD_TABLES:
         db.execute(delete(table).where(table.account_id == account.id))
     db.delete(account)

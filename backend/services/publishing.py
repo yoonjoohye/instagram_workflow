@@ -37,6 +37,11 @@ def create_container(
             raise ValueError("캐러셀은 자식 컨테이너가 최소 2개 필요합니다.")
         payload["media_type"] = "CAROUSEL"
         payload["children"] = ",".join(children)
+    elif kind == "REELS" and is_carousel_item:
+        # 캐러셀 안의 동영상은 REELS 가 아니라 VIDEO + is_carousel_item 입니다.
+        payload["media_type"] = "VIDEO"
+        payload["video_url"] = media_url
+        payload["is_carousel_item"] = "true"
     elif kind == "REELS":
         payload["media_type"] = "REELS"
         payload["video_url"] = media_url

@@ -19,6 +19,7 @@ from ..db import get_db
 from ..deps import current_account
 from ..i18n import lang_of, norm_lang
 from ..models import Account, GenerationJob, MediaBlob
+from ..services import blobstore
 from ..services import cardnews as svc
 from .workflow import _job_dict
 
@@ -56,6 +57,36 @@ async def upload(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "이미지 파일을 읽을 수 없습니다.") from exc
     blob = _save_blob(db, account, data, w, h, "upload")
     return {"id": blob.id, "url": _media_url(blob.id), "width": w, "height": h}
+
+
+class VideoIn(BaseModel):
+    url: str = Field(max_length=1000)  # 브라우저가 Vercel Blob 에 올린 공개 주소
+    cover_id: str = Field(max_length=40)  # 브라우저가 뽑은 대표 화면(사진 업로드 id)
+    width: int = Field(default=0, ge=0, le=10000)
+    height: int = Field(default=0, ge=0, le=10000)
+    content_type: str = Field(default="video/mp4", max_length=32)
+
+
+@router.post("/media/videos", status_code=status.HTTP_201_CREATED)
+def register_video(body: VideoIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """Blob 에 올린 동영상을 게시물 재료로 등록합니다."""
+    if not blobstore.is_our_blob(body.url):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "동영상 주소가 올바르지 않습니다.")
+    _blobs(db, account, [body.cover_id])  # 대표 화면이 내 사진인지 확인
+    blob = MediaBlob(
+        id=secrets.token_urlsafe(18),
+        account_id=account.id,
+        kind="video",
+        data=b"",
+        url=body.url,
+        cover_id=body.cover_id,
+        content_type=body.content_type if body.content_type.startswith("video/") else "video/mp4",
+        width=body.width,
+        height=body.height,
+    )
+    db.add(blob)
+    db.commit()
+    return {"id": blob.id, "url": body.url, "thumbnail_url": _media_url(body.cover_id)}
 
 
 @router.get("/media/{blob_id}.jpg")
@@ -161,9 +192,13 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
     """사진과 주제로 게시물 구성(장 수·장별 사진·레이아웃)과 캡션·해시태그를 설계합니다."""
     blobs = _blobs(db, account, body.upload_ids)
     refs = _blobs(db, account, body.reference_ids)
+    # 동영상이 있으면 이미지 편집 없이 올린 원본 그대로 게시하고, Gemini 는 캡션·해시태그·음악만 만듭니다.
+    original = any(b.kind == "video" for b in blobs)
+    kinds = ["video" if b.kind == "video" else "photo" for b in blobs]
+    ai_images = [(db.get(MediaBlob, b.cover_id).data if b.kind == "video" else b.data) for b in blobs]  # type: ignore[union-attr]
     try:
         design, engine, warning = svc.plan_cardnews(
-            [b.data for b in blobs],
+            ai_images,
             references=[r.data for r in refs],
             prompt=body.prompt,
             style=body.style,
@@ -171,6 +206,8 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             notes=body.notes,
             research_notes=body.research_notes,
             language=norm_lang(body.language or lang_of(request)),
+            original=original,
+            kinds=kinds,
         )
     except svc.GeminiError as exc:
         # 엉뚱한 기본 구성으로 만들지 않고 멈춥니다.
@@ -181,13 +218,40 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             ) from exc
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Gemini 로 게시물을 구성하지 못했습니다: {exc}") from exc
     slides = svc.slide_list(design)
+    music = design.get("music") or []
+    if original:
+        items = blobs[:10]  # 캐러셀은 최대 10장
+        media_kind = "CAROUSEL" if len(items) > 1 else ("REELS" if items[0].kind == "video" else "IMAGE")
+        assets = [
+            {
+                "type": "video",
+                "url": b.url,
+                "thumbnail_url": _media_url(b.cover_id),
+                "meta": {"role": "video", "status": "done", "engine": "original"},
+            }
+            if b.kind == "video"
+            else {
+                "type": "image",
+                "url": _media_url(b.id),
+                "thumbnail_url": _media_url(b.id),
+                "meta": {"role": "photo", "status": "done", "engine": "original"},
+            }
+            for b in items
+        ]
+    else:
+        media_kind = "CAROUSEL" if len(slides) > 1 else "IMAGE"
+        assets = [
+            {"type": "image", "url": "", "thumbnail_url": "", "meta": {"role": s["role"], "status": "pending"}}
+            for s in slides
+        ]
     job = GenerationJob(
         account_id=account.id,
         prompt=body.prompt,
-        media_kind="CAROUSEL" if len(slides) > 1 else "IMAGE",
+        media_kind=media_kind,
         tone="",
         status="generating",
-        provider=f"studio/{engine}",
+        # original/* 은 원본 게시 — 이미지별 다시 만들기를 쓰지 않습니다.
+        provider=f"{'original' if original else 'studio'}/{engine}",
         error=warning,
         caption=design["caption"],
         # 양식 안에 해시태그 칸이 있으면 이미 캡션에 들어갔으므로 따로 붙이지 않습니다.
@@ -202,16 +266,74 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             "font": svc.font_key(body.font) if body.font in svc.FONTS else design.get("font", svc.DEFAULT_FONT),
             "topic": body.prompt,
             "sources": [s.model_dump() for s in body.sources],
+            "original": original,
+            # 인스타 음악 추천 — 첫 곡을 기본 선택 (사진 게시물에는 API 로 음악을 붙일 수 없어 앱에서 추가하도록 안내)
+            "music": {"suggestions": music, "selected": music[0] if music else None},
         },
-        assets=[
-            {"type": "image", "url": "", "thumbnail_url": "", "meta": {"role": s["role"], "status": "pending"}}
-            for s in slides
-        ],
+        assets=assets,
     )
     db.add(job)
     db.commit()
     db.refresh(job)
-    return {"job": _job_dict(job), "slides": slides, "engine": engine, "warning": warning}
+    # 원본 게시는 만들 이미지가 없으므로 slides 를 비워 보냅니다 (바로 finalize).
+    return {"job": _job_dict(job), "slides": [] if original else slides, "engine": engine, "warning": warning}
+
+
+class MusicPick(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    artist: str = Field(default="", max_length=120)
+    section: str = Field(default="", max_length=120)
+    reason: str = Field(default="", max_length=200)
+
+
+class MusicIn(BaseModel):
+    selected: MusicPick | None = None  # None = 음악 없이
+
+
+@router.put("/cardnews/{job_id}/music")
+def set_music(job_id: int, body: MusicIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """추천 곡 중 고르거나 직접 입력한 곡으로 바꿉니다."""
+    job = _own_job(db, account, job_id)
+    music = dict(job.plan.get("music") or {"suggestions": []})
+    music["selected"] = body.selected.model_dump() if body.selected else None
+    job.plan = {**job.plan, "music": music}
+    flag_modified(job, "plan")
+    db.commit()
+    return _job_dict(job)
+
+
+class MusicSuggestIn(BaseModel):
+    hint: str = Field(default="", max_length=300)  # 원하는 분위기·장르·언어
+    language: str | None = Field(default=None, max_length=8)
+
+
+@router.post("/cardnews/{job_id}/music/suggest")
+def resuggest_music(
+    job_id: int, body: MusicSuggestIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> dict:
+    """요청한 분위기로 음악을 다시 추천합니다 (Google 검색으로 실제 곡인지 확인)."""
+    job = _own_job(db, account, job_id)
+    music = dict(job.plan.get("music") or {"suggestions": [], "selected": None})
+    shown = [f"{m['title']} - {m['artist']}" for m in music.get("suggestions") or []]
+    try:
+        fresh = svc.suggest_music(
+            job.plan.get("topic") or job.prompt, job.caption, body.hint, shown,
+            language=norm_lang(body.language or lang_of(request)),
+        )
+    except svc.GeminiError as exc:
+        if svc.is_busy(exc):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})",
+            ) from exc
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"음악을 추천하지 못했습니다: {exc}") from exc
+    if not fresh:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "음악을 추천하지 못했습니다: 결과 없음")
+    music["suggestions"] = fresh
+    job.plan = {**job.plan, "music": music}
+    flag_modified(job, "plan")
+    db.commit()
+    return _job_dict(job)
 
 
 @router.post("/cardnews/{job_id}/slides/{index}")
@@ -226,6 +348,8 @@ def render_slide(
     job = _own_job(db, account, job_id)
     if job.status == "published":
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 게시된 작업입니다.")
+    if job.plan.get("original"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "원본 그대로 게시하는 작업은 이미지를 다시 만들 수 없습니다.")
     slides = svc.slide_list(job.plan)
     if not 0 <= index < len(slides):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "이미지 번호가 올바르지 않습니다.")

@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", ".env.local"), extra="ignore")
 
     app_secret: str = "dev-only-insecure-secret-change-me"
     public_base_url: str = "http://localhost:3000"
@@ -31,6 +31,8 @@ class Settings(BaseSettings):
 
     # 댓글 감정 분석(긍정/보통/부정). 비워두면 한국어 키워드·이모지 규칙으로 분류합니다.
     gemini_api_key: str = ""
+    # 동영상 저장소 (Vercel Blob). Vercel 에 Blob 스토어를 연결하면 자동으로 들어옵니다.
+    blob_read_write_token: str = ""
     gemini_model: str = "gemini-flash-lite-latest"
     # 게시물 만들기: 조사·구성은 gemini_text_model, 이미지 연출(편집·생성)은 gemini_image_model
     gemini_text_model: str = "gemini-flash-latest"

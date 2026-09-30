@@ -42,6 +42,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 _ADDED_COLUMNS = {
     "insight_snapshots": {"totals_synced": "INTEGER DEFAULT 0"},
     "generation_jobs": {"plan": "JSON"},
+    "media_blobs": {"url": "TEXT DEFAULT ''", "cover_id": "VARCHAR(40) DEFAULT ''"},
     "auto_reply_rules": {
         "public_reply_enabled": "INTEGER DEFAULT 1",
         "dm_enabled": "INTEGER DEFAULT 0",
