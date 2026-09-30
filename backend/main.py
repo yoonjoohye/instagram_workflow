@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,6 +13,12 @@ from .db import init_db
 from .i18n import lang_of, translate_payload
 from .routers import auth, autoreply, cardnews, insights, sentiment, webhooks, workflow
 from .services.meta_graph import GraphError
+
+
+# httpx 는 요청 주소 전체(쿼리의 access_token 포함)를 INFO 로그로 남깁니다. 토큰이 Vercel 로그에
+# 찍히지 않도록 경고 이상만 남깁니다.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
