@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useMe } from "@/components/AdminShell";
+import { InstagramPreview } from "@/components/InstagramPreview";
 import { PostForm } from "@/components/PostForm";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconMusic, IconSpark } from "@/components/icons";
@@ -320,13 +321,16 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
             <input id="tags" value={tagsText} onChange={(e) => setTagsText(e.target.value)} className={inputClass} disabled={locked} />
           </Field>
 
-          <details className="rounded-lg border border-line bg-surface-2 px-3 py-2">
+          <details open className="rounded-lg border border-line bg-surface-2 px-3 py-2">
             <summary className="cursor-pointer text-[13px] font-medium text-fg-2">{t("studio.postPreview")}</summary>
-            <div className="mt-3 flex gap-3">
-              <Avatar src={me.profile_picture_url} name={me.username} size={28} />
-              <p className="text-[13px] leading-relaxed whitespace-pre-wrap">
-                <span className="font-semibold">{me.username}</span> {finalCaption}
-              </p>
+            <div className="mt-3 pb-1">
+              <InstagramPreview
+                username={me.username}
+                avatar={me.profile_picture_url}
+                assets={visual}
+                caption={finalCaption}
+                music={job.music?.selected}
+              />
             </div>
           </details>
 

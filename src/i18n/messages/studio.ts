@@ -3,6 +3,7 @@ import { defineMessages } from "../define";
 /** 만들기(검수·게시) 화면과 게시물 생성 폼 */
 export default defineMessages({
   ko: {
+    igMore: "더 보기",
     videoNote: "동영상을 넣으면 사진·동영상을 편집 없이 올린 순서대로 게시해요 (동영상 하나면 릴스). Gemini는 캡션·해시태그·음악만 만들어요.",
     videoBadge: "동영상", videoTooBig: "동영상은 {mb}MB 이하만 올릴 수 있어요.",
     stepCover: "동영상 대표 화면 만드는 중", stepUploadVideo: "동영상 올리는 중 {pct}%",
@@ -115,6 +116,7 @@ export default defineMessages({
     submit: "게시물 만들기",
   },
   en: {
+    igMore: "more",
     videoNote: "With a video, your photos and videos are posted as-is in upload order (a single video becomes a Reel). Gemini writes only the caption, hashtags and music picks.",
     videoBadge: "Video", videoTooBig: "Videos must be {mb}MB or smaller.",
     stepCover: "Creating the video cover", stepUploadVideo: "Uploading video {pct}%",
@@ -223,6 +225,7 @@ export default defineMessages({
     submit: "Create post",
   },
   ja: {
+    igMore: "続きを読む",
     videoNote: "動画を入れると、写真・動画を編集せずアップロード順にそのまま投稿します(動画1本ならリール)。Geminiはキャプション・ハッシュタグ・音楽だけを作ります。",
     videoBadge: "動画", videoTooBig: "動画は{mb}MB以下のみアップロードできます。",
     stepCover: "動画のカバー画像を作成中", stepUploadVideo: "動画をアップロード中 {pct}%",
