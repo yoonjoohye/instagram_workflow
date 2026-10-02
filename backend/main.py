@@ -59,7 +59,7 @@ async def graph_error_handler(request: Request, exc: GraphError) -> JSONResponse
 
 
 @app.get("/health")
-def health() -> dict:
+def health(request: Request) -> dict:
     return {
         "ok": True,
         "meta_configured": settings.meta_configured,
@@ -68,6 +68,7 @@ def health() -> dict:
         "ai_engine": "gemini" if settings.gemini_api_key else "basic",
         "public_base_url": settings.public_base_url,
         "redirect_uri": settings.redirect_uri,
+        "dev_login": auth.dev_login_enabled(request),
     }
 
 

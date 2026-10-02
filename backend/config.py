@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     # 동영상 저장소 (Vercel Blob). Vercel 에 Blob 스토어를 연결하면 자동으로 들어옵니다.
     blob_read_write_token: str = ""
+    # 로컬 개발 전용: 인스타 로그인 없이 DB 에 있는 계정으로 들어가기 (.env 에 DEV_LOGIN=1). Vercel 에서는 항상 꺼짐.
+    dev_login: bool = False
     gemini_model: str = "gemini-flash-lite-latest"
     # 게시물 만들기: 조사·구성은 gemini_text_model, 이미지 연출(편집·생성)은 gemini_image_model
     gemini_text_model: str = "gemini-flash-latest"

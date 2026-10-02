@@ -7,6 +7,7 @@ settings.auth_mode 에 따라 두 가지 흐름을 지원합니다.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import secrets
 from dataclasses import dataclass
 
@@ -257,6 +258,35 @@ def _upsert_account(db: Session, linked: _Linked) -> Account:
     db.commit()
     db.refresh(account)
     return account
+
+
+def dev_login_enabled(request: Request) -> bool:
+    """로컬 개발 전용 로그인 허용 조건: DEV_LOGIN=1, Vercel 아님, 이 컴퓨터에서 온 localhost 요청."""
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(":")[0]
+    client = request.client.host if request.client else ""
+    return (
+        settings.dev_login
+        and not os.environ.get("VERCEL")
+        and host in {"localhost", "127.0.0.1"}
+        and client in {"127.0.0.1", "::1"}
+    )
+
+
+@router.get("/dev-login")
+def dev_login(request: Request, account_id: int | None = None, db: Session = Depends(get_db)) -> Response:
+    """로컬에서 인스타 로그인 없이 화면을 확인하기 위한 로그인 (DB 에 이미 연결된 계정만)."""
+    if not dev_login_enabled(request):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    accounts = db.scalars(select(Account).order_by(Account.id)).all()
+    if account_id is None:
+        if not accounts:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "계정을 찾을 수 없습니다.")
+        account_id = accounts[0].id
+    if db.get(Account, account_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "계정을 찾을 수 없습니다.")
+    resp = RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
+    _set_session(resp, account_id, [a.id for a in accounts])
+    return resp
 
 
 @router.get("/me")

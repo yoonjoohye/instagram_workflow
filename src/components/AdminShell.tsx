@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useState, type ReactNode } from "react";
 import { api, LOGIN_URL, SWITCH_LOGIN_URL, useApi } from "@/lib/api";
 import { fmtCompact } from "@/lib/format";
-import type { LinkedAccount, ListOf, Me } from "@/lib/types";
+import type { Health, LinkedAccount, ListOf, Me } from "@/lib/types";
 import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark } from "./icons";
 import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -329,11 +329,26 @@ function LoginGate({ message }: { message?: string }) {
         >
           <IconInstagram /> {t("common.connectInstagram")}
         </a>
+        <DevLoginLink />
         <Link href="/" className="mt-3 inline-block text-[13px] text-fg-3 hover:text-fg">
           {t("shell.backHome")}
         </Link>
       </div>
     </div>
+  );
+}
+
+/** 로컬 개발 전용: 인스타 로그인 없이 저장된 계정으로 들어가기 (서버가 허용할 때만 보임) */
+function DevLoginLink() {
+  const health = useApi<Health>("/health");
+  if (!health.data?.dev_login) return null;
+  return (
+    <a
+      href="/api/py/auth/dev-login"
+      className="mt-3 flex h-10 w-full items-center justify-center rounded-lg border border-dashed border-warn/60 text-[13px] font-medium text-fg-2 hover:bg-warn/10"
+    >
+      🛠 로컬 테스트 로그인 (개발용)
+    </a>
   );
 }
 

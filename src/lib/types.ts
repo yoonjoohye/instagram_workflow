@@ -24,6 +24,8 @@ export type Health = {
   ai_engine: "gemini" | "basic";
   public_base_url: string;
   redirect_uri: string;
+  /** 로컬 개발 전용 로그인 사용 가능 (DEV_LOGIN=1 + localhost) */
+  dev_login?: boolean;
 };
 
 export type Asset = {
