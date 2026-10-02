@@ -12,7 +12,7 @@ from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, AutoReplyRule, GenerationJob, MediaBlob
 from ..schemas import JobPatch, PublishIn
-from ..services import blobstore, publishing
+from ..services import blobstore, media_sync, publishing
 from ..services.meta_graph import GraphError
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
@@ -60,6 +60,7 @@ def list_jobs(
     db: Session = Depends(get_db),
     limit: int = 30,
 ) -> dict:
+    media_sync.try_sync(db, account)  # Instagram 에서 지운 게시물 반영
     rows = db.scalars(
         select(GenerationJob)
         .where(GenerationJob.account_id == account.id)

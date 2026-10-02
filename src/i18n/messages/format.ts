@@ -2,6 +2,7 @@ import { defineMessages } from "../define";
 
 export default defineMessages({
   ko: {
+    "status.deleted": "인스타에서 삭제됨", 
     justNow: "방금 전", minutesAgo: "{n}분 전", hoursAgo: "{n}시간 전", daysAgo: "{n}일 전",
     sec: "{s}초", min: "{m}분", minSec: "{m}분 {s}초", hourMin: "{h}시간 {m}분",
     "metric.reach": "도달 계정", "metric.profile_views": "프로필 조회", "metric.accounts_engaged": "참여 계정",
@@ -19,6 +20,7 @@ export default defineMessages({
     "dim.TAP_BACK": "뒤로", "dim.TAP_EXIT": "나가기", "dim.TAP_FORWARD": "다음으로", "dim.F": "여성", "dim.M": "남성", "dim.U": "미상",
   },
   en: {
+    "status.deleted": "Deleted on Instagram", 
     justNow: "just now", minutesAgo: "{n}m ago", hoursAgo: "{n}h ago", daysAgo: "{n}d ago",
     sec: "{s}s", min: "{m}m", minSec: "{m}m {s}s", hourMin: "{h}h {m}m",
     "metric.reach": "Accounts reached", "metric.profile_views": "Profile views", "metric.accounts_engaged": "Accounts engaged",
@@ -36,6 +38,7 @@ export default defineMessages({
     "dim.TAP_BACK": "Tap back", "dim.TAP_EXIT": "Exit", "dim.TAP_FORWARD": "Tap forward", "dim.F": "Female", "dim.M": "Male", "dim.U": "Unknown",
   },
   ja: {
+    "status.deleted": "Instagramで削除済み", 
     justNow: "たった今", minutesAgo: "{n}分前", hoursAgo: "{n}時間前", daysAgo: "{n}日前",
     sec: "{s}秒", min: "{m}分", minSec: "{m}分{s}秒", hourMin: "{h}時間{m}分",
     "metric.reach": "リーチしたアカウント", "metric.profile_views": "プロフィール表示", "metric.accounts_engaged": "反応したアカウント",

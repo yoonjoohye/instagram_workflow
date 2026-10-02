@@ -11,13 +11,14 @@ import { fmtRelative, KIND_LABEL, mediaSrc, STATUS_LABEL } from "@/lib/format";
 import { statusTone } from "@/lib/status";
 import type { Job, JobStatus, ListOf } from "@/lib/types";
 
-type Filter = "all" | "ready" | "published" | "failed";
+type Filter = "all" | "ready" | "published" | "failed" | "deleted";
 
 const FILTERS: { value: Filter; label: MessageKey }[] = [
   { value: "all", label: "jobs.filterAll" },
   { value: "ready", label: "jobs.filterReady" },
   { value: "published", label: "jobs.filterPublished" },
   { value: "failed", label: "jobs.filterFailed" },
+  { value: "deleted", label: "format.status.deleted" },
 ];
 
 export default function JobsPage() {
@@ -135,7 +136,7 @@ function JobCard({ job, onDelete }: { job: Job; onDelete: () => void }) {
             href={`/admin/studio?job=${job.id}`}
             className="inline-flex h-8 items-center rounded-lg border border-line-strong px-3 text-[13px] font-medium hover:bg-surface-2"
           >
-            {job.status === "published" ? t("jobs.open") : job.status === "failed" ? t("jobs.retry") : t("jobs.review")}
+            {job.status === "published" ? t("jobs.open") : job.status === "failed" || job.status === "deleted" ? t("jobs.retry") : t("jobs.review")}
           </Link>
           {job.permalink && (
             <a

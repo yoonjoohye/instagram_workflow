@@ -388,7 +388,7 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
                   loading={publishing}
                   disabled={overCaption || overTags || !arValid || visual.length === 0 || quota.data?.remaining === 0}
                 >
-                  {publishing ? t("studio.publishing") : job.status === "failed" ? t("studio.republish") : t("studio.publish")}
+                  {publishing ? t("studio.publishing") : job.status === "failed" || job.status === "deleted" ? t("studio.republish") : t("studio.publish")}
                 </Button>
               </div>
             </div>

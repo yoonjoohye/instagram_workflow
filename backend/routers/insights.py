@@ -15,6 +15,7 @@ from ..models import Account, AutoReplyRule, InsightSnapshot
 from ..schemas import CommentsToggle
 from ..security import encrypt
 from ..services import insights as svc
+from ..services import media_sync
 from ..services import sentiment as sentiment_svc
 from ..services.meta_graph import GraphError
 
@@ -237,6 +238,7 @@ def posts(
         # 게시물별 인사이트 호출을 동시에 보냅니다 (순차로는 12개에 ~9초).
         with ThreadPoolExecutor(max_workers=6) as pool:
             insights = list(pool.map(lambda m: svc.media_insights(client, m), media))
+        media_sync.sync_deleted(db, account, client)  # 지운 게시물의 자동 응답·댓글 분석 정리
     rules = {
         r.ig_media_id: r
         for r in db.scalars(

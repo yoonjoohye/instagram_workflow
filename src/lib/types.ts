@@ -1,7 +1,7 @@
 // 백엔드(FastAPI) 응답 형태. backend/routers/* 와 1:1 로 맞춥니다.
 
 export type MediaKind = "IMAGE" | "CAROUSEL" | "REELS" | "STORIES";
-export type JobStatus = "draft" | "generating" | "ready" | "publishing" | "published" | "failed";
+export type JobStatus = "draft" | "generating" | "ready" | "publishing" | "published" | "failed" | "deleted"; // deleted = Instagram 에서 지움
 
 export type Me = {
   id: number;

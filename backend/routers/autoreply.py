@@ -13,6 +13,7 @@ from ..deps import current_account, graph_for
 from ..models import Account, AutoReplyRule, CommentReply, GenerationJob
 from ..schemas import AutoReplyIn, AutoReplyMediaIn, AutoReplyToggle
 from ..i18n import lang_of
+from ..services import media_sync
 from ..services.autoreply import DEFAULTS_BY_LANG
 from ..services.meta_graph import GraphError
 
@@ -117,6 +118,7 @@ def subscribe(account: Account = Depends(current_account)) -> dict:
 
 @router.get("/rules")
 def list_rules(account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    media_sync.try_sync(db, account)  # Instagram 에서 지운 게시물의 규칙 정리
     rules = db.scalars(
         select(AutoReplyRule)
         .where(AutoReplyRule.account_id == account.id)

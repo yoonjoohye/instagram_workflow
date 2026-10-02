@@ -10,6 +10,7 @@ from ..db import get_db
 from ..deps import current_account, graph_for
 from ..models import Account, CommentSentiment
 from ..services import sentiment as svc
+from ..services import media_sync
 from ..services.meta_graph import GraphError
 
 router = APIRouter(prefix="/sentiment", tags=["sentiment"])
@@ -54,6 +55,7 @@ def sync_one(
 
 @router.get("/overview")
 def overview(account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    media_sync.try_sync(db, account)  # Instagram 에서 지운 게시물의 댓글 분석은 집계에서 뺌
     rows = db.execute(
         select(CommentSentiment.sentiment, func.count())
         .where(CommentSentiment.account_id == account.id)

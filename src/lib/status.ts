@@ -7,6 +7,8 @@ export function statusTone(status: JobStatus): Tone {
       return "good";
     case "failed":
       return "bad";
+    case "deleted":
+      return "neutral";
     case "ready":
       return "accent";
     case "generating":
