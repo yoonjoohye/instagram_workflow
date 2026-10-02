@@ -7,6 +7,8 @@ import type { T } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
 import type { Job } from "@/lib/types";
 import { IconSpark } from "./icons";
+import * as photoLib from "@/lib/photoLibrary";
+import { PhotoLibraryPanel } from "./PhotoLibraryPanel";
 import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
 
 const MAX_PHOTOS = 8; // 올릴 수 있는 사진·동영상 수 (게시물은 최대 10장까지 Gemini가 구성)
@@ -15,7 +17,7 @@ const MAX_REFS = 3;
 
 type Research = { notes: string; sources: { title: string; uri: string }[]; warning: string };
 
-type Photo = { key: string; file: File; preview: string; kind: "image" | "video" };
+type Photo = { key: string; file: File; preview: string; kind: "image" | "video"; auto?: boolean }; // auto = 폴더에서 자동으로 고름
 type Step = { label: string; done: number; total: number };
 
 /** 브라우저에서 긴 변 1600px JPEG 로 줄여 올립니다 (Vercel 요청 크기 제한 대비, 업로드도 빨라짐). */
@@ -95,6 +97,8 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [step, setStep] = useState<Step | null>(null);
   const [error, setError] = useState<string>();
   const [dragging, setDragging] = useState(false);
+  const [libReady, setLibReady] = useState(false);
+  const [libNotice, setLibNotice] = useState<{ tone: "good" | "warn"; text: string }>();
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = step !== null;
 
@@ -148,9 +152,35 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
     ]);
   }
 
+  /** 연결한 사진 폴더에서 주제에 맞는 사진을 찾아 목록에 넣습니다 (직접 고른 사진은 그대로 두고 자동 선택만 교체). */
+  async function findFromLibrary(): Promise<Photo[]> {
+    if (prompt.trim().length < 2) {
+      setError(t("studio.libNeedTopic"));
+      return photos;
+    }
+    setLibNotice(undefined);
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const query = await api<photoLib.PhotoQuery>("/cardnews/photo-query", { method: "POST", json: { prompt: prompt.trim(), today } });
+    const matches = await photoLib.search(query);
+    const files = await Promise.all(matches.map((m) => photoLib.fileFor(m.path)));
+    const found: Photo[] = files.map((file) => ({
+      key: `auto-${file.name}-${file.size}-${Math.random()}`,
+      file,
+      preview: URL.createObjectURL(file),
+      kind: "image",
+      auto: true,
+    }));
+    const next = [...photos.filter((p) => !p.auto), ...found].slice(0, MAX_PHOTOS);
+    photos.filter((p) => p.auto).forEach((p) => URL.revokeObjectURL(p.preview));
+    setPhotos(next);
+    setLibNotice(found.length ? { tone: "good", text: t("studio.libFound", { n: found.length }) } : { tone: "warn", text: t("studio.libNoneFound") });
+    return next;
+  }
+
   /** 동영상: 대표 화면 → 사진처럼 업로드, 원본은 Blob 저장소에 직접 업로드 → 서버에 등록 */
-  async function uploadVideo(file: File, index: number): Promise<string> {
-    setStep({ label: t("studio.stepCover"), done: index, total: photos.length });
+  async function uploadVideo(file: File, index: number, total: number): Promise<string> {
+    setStep({ label: t("studio.stepCover"), done: index, total });
     const cover = await captureCover(file, t);
     const coverId = await uploadImageBlob(cover.image, file.name, t);
     let url: string;
@@ -161,7 +191,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         handleUploadUrl: "/api/blob/upload",
         multipart: file.size > 20 * 1024 * 1024,
         onUploadProgress: ({ percentage }) =>
-          setStep({ label: t("studio.stepUploadVideo", { pct: Math.round(percentage) }), done: index, total: photos.length }),
+          setStep({ label: t("studio.stepUploadVideo", { pct: Math.round(percentage) }), done: index, total }),
       });
       url = blob.url;
     } catch (err) {
@@ -179,14 +209,20 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
     if (prompt.trim().length < 2) return setError(t("studio.topicRequired"));
     setError(undefined);
     try {
+      // 사진을 고르지 않았고 사진 폴더가 연결돼 있으면, 주제에 맞는 사진을 먼저 자동으로 찾습니다.
+      let items = photos;
+      if (!items.length && libReady) {
+        setStep({ label: t("studio.stepFindPhotos"), done: 0, total: 1 });
+        items = await findFromLibrary();
+      }
       const ids: string[] = [];
-      for (let i = 0; i < photos.length; i++) {
-        const item = photos[i];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
         if (item.kind === "video") {
-          ids.push(await uploadVideo(item.file, i));
+          ids.push(await uploadVideo(item.file, i, items.length));
           continue;
         }
-        setStep({ label: t("studio.stepUploadPhotos"), done: i, total: photos.length });
+        setStep({ label: t("studio.stepUploadPhotos"), done: i, total: items.length });
         ids.push(await uploadPhoto(item.file, t));
       }
       const refIds: string[] = [];
@@ -358,6 +394,21 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           </div>
         </Field>
 
+        <PhotoLibraryPanel
+          busy={busy}
+          canFind={prompt.trim().length >= 2}
+          onReadyChange={setLibReady}
+          onFind={async () => {
+            setError(undefined);
+            try {
+              await findFromLibrary();
+            } catch (e) {
+              setError(toApiError(e).message);
+            }
+          }}
+        />
+        {libNotice && <Notice tone={libNotice.tone}>{libNotice.text}</Notice>}
+
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -377,7 +428,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           {photos.length > 0 && (
             <ol className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
               {photos.map((p, i) => (
-                <li key={p.key} className="group relative aspect-square overflow-hidden rounded-md bg-surface-2">
+                <li key={p.key} title={p.file.name} className="group relative aspect-square overflow-hidden rounded-md bg-surface-2">
                   {p.kind === "video" ? (
                     <video src={p.preview} muted playsInline preload="metadata" className="size-full object-cover" />
                   ) : (
@@ -387,6 +438,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
                   <span className="tnum absolute top-1 left-1 rounded bg-black/60 px-1 text-[11px] text-white">
                     {i + 1}
                     {p.kind === "video" && ` · ▶ ${t("studio.videoBadge")}`}
+                    {p.auto && ` · ${t("studio.libAutoBadge")}`}
                   </span>
                   {!busy && (
                     <span className="absolute inset-x-0 bottom-0 flex justify-between bg-black/55 px-0.5 py-0.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">

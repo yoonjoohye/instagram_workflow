@@ -338,6 +338,72 @@ def suggest_music(topic: str, caption: str, hint: str = "", exclude: list[str] |
     return clean_music(items)[:5]
 
 
+_PHOTO_QUERY_PROMPT = """사용자가 인스타그램 게시물 주제를 적었어. 사용자 기기의 사진 중에서 이 주제에 맞는 사진을 찾으려고 해.
+사진 검색은 이미지 인식 모델(CLIP, 영어 문장만 이해)과 사진의 촬영 위치(GPS)·날짜로 해.
+
+주제: {prompt}
+오늘 날짜: {today}
+
+JSON 으로만 답해:
+- queries: 이 주제의 사진에 실제로 찍혀 있을 장면을 영어로 짧게 묘사한 문장 3~6개
+  (예: 'the Eiffel Tower at sunset', 'a woman posing by the Seine at night', 'a plate of churros with chocolate').
+  사람이 찍은 일상 사진처럼 구체적인 피사체·장소·음식·풍경으로. 추상적인 단어(memories, trip, vibe)는 쓰지 마.
+- place: 주제에 특정 장소(도시·지역·관광지)가 있으면 {{"name": 장소명, "lat": 위도, "lng": 경도, "radius_km": 반경}}, 없으면 null.
+  도시면 반경 25~40, 나라면 300~800, 특정 건물·식당이면 1~3.
+- date_from, date_to: 주제에 시기('지난 여름', '2024년 크리스마스', '어제')가 있으면 YYYY-MM-DD, 없으면 null.
+- count: 이 게시물에 쓸 사진 수 (주제에 장 수가 있으면 그 수, 없으면 4, 1~8)."""
+
+
+def photo_query(prompt: str, today: str) -> dict[str, Any]:
+    """주제 → 기기 사진 검색 조건 (영어 장면 묘사·장소·날짜·장 수). 실패하면 GeminiError."""
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "queries": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "place": {
+                "type": "OBJECT",
+                "nullable": True,
+                "properties": {
+                    "name": {"type": "STRING"},
+                    "lat": {"type": "NUMBER"},
+                    "lng": {"type": "NUMBER"},
+                    "radius_km": {"type": "NUMBER"},
+                },
+                "required": ["name", "lat", "lng", "radius_km"],
+            },
+            "date_from": {"type": "STRING", "nullable": True},
+            "date_to": {"type": "STRING", "nullable": True},
+            "count": {"type": "INTEGER"},
+        },
+        "required": ["queries", "count"],
+    }
+    cfg = {"temperature": 0.0, "responseMimeType": "application/json", "responseSchema": schema}  # 같은 주제엔 같은 검색어
+    data = _text_call([{"text": _PHOTO_QUERY_PROMPT.format(prompt=prompt[:1000], today=today)}], cfg, budget=40.0)
+    try:
+        raw = json.loads(_text_of(data))
+    except ValueError as exc:
+        raise GeminiError(f"Gemini 응답을 읽지 못했습니다: {exc}") from exc
+    place = raw.get("place") if isinstance(raw.get("place"), dict) else None
+    if place:
+        try:
+            place = {
+                "name": _clip(place.get("name"), 80),
+                "lat": float(place["lat"]),
+                "lng": float(place["lng"]),
+                "radius_km": max(0.5, min(1000.0, float(place.get("radius_km") or 30))),
+            }
+        except (KeyError, TypeError, ValueError):
+            place = None
+    date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    return {
+        "queries": [_clip(q, 120) for q in (raw.get("queries") or []) if str(q).strip()][:6],
+        "place": place,
+        "date_from": raw.get("date_from") if date_re.match(str(raw.get("date_from") or "")) else None,
+        "date_to": raw.get("date_to") if date_re.match(str(raw.get("date_to") or "")) else None,
+        "count": max(1, min(MAX_PHOTOS, int(raw.get("count") or 4))),
+    }
+
+
 def clean_music(raw: Any) -> list[dict[str, str]]:
     out = []
     for m in raw or []:

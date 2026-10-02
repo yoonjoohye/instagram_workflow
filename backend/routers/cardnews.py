@@ -174,6 +174,28 @@ def font_preview(key: str, lang: str = "ko") -> Response:
     )
 
 
+class PhotoQueryIn(BaseModel):
+    prompt: str = Field(min_length=2, max_length=1000)
+    today: str = Field(default="", max_length=10)  # 사용자 기기 날짜 (YYYY-MM-DD) — '어제' 같은 표현용
+
+
+@router.post("/cardnews/photo-query")
+def photo_query(body: PhotoQueryIn, account: Account = Depends(current_account)) -> dict:
+    """기기 사진 자동 선택용: 주제를 영어 장면 묘사·장소·날짜로 바꿉니다 (사진 자체는 서버로 오지 않음)."""
+    import datetime as _dt
+
+    today = body.today if len(body.today) == 10 else _dt.date.today().isoformat()
+    try:
+        return svc.photo_query(body.prompt, today)
+    except svc.GeminiError as exc:
+        if svc.is_busy(exc):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})",
+            ) from exc
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"사진 검색 조건을 만들지 못했습니다: {exc}") from exc
+
+
 @router.post("/cardnews/research")
 def research(body: ResearchIn, request: Request, account: Account = Depends(current_account)) -> dict:
     """Gemini + Google 검색으로 주제를 조사합니다 (Vercel 시간 제한 때문에 설계와 나눠 호출)."""
