@@ -20,6 +20,13 @@ export function I18nProvider({ locale: initial, children }: { locale: Locale; ch
       document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
       document.documentElement.lang = next;
       setState(next);
+      // 주소에 언어가 들어 있으면(/ko/…, ?lang=) 고른 언어로 맞춥니다 (남아 있으면 새로고침 때 이전 언어로 돌아감).
+      const url = new URL(window.location.href);
+      const parts = url.pathname.split("/");
+      const inPath = ["ko", "en", "ja"].includes(parts[1]);
+      if (inPath) parts[1] = next;
+      if (url.searchParams.has("lang")) url.searchParams.set("lang", next);
+      if (inPath || url.searchParams.has("lang")) router.replace(parts.join("/") + url.search, { scroll: false });
       router.refresh(); // 서버 컴포넌트(개인정보처리방침 등)도 새 언어로
     },
     [router],

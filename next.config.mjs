@@ -7,6 +7,11 @@ const nextConfig = {
   allowedDevOrigins: ["*.trycloudflare.com"],
   // 개발 모드 표시(N 버튼)가 휴대폰 하단 탭바를 가리지 않게
   devIndicators: false,
+  // 공유 미리보기 이미지가 읽는 파일을 배포에 포함
+  outputFileTracingIncludes: {
+    "/opengraph-image": ["./src/app/_og/**", "./public/logo.png"],
+    "/twitter-image": ["./src/app/_og/**", "./public/logo.png"],
+  },
   async rewrites() {
     // 프로덕션(Vercel)에서는 vercel.json 의 rewrite 가 처리합니다.
     // 로컬에서는 별도로 띄운 uvicorn(8000) 으로 넘깁니다.

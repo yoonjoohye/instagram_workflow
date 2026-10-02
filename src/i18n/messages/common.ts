@@ -3,6 +3,9 @@ import { defineMessages } from "../define";
 /** 여러 화면에서 함께 쓰는 문구 */
 export default defineMessages({
   ko: {
+    seoTitle: "Instagram Auto Studio — AI 인스타그램 게시물 만들기·댓글 자동 응답·인사이트",
+    seoKeywords: "인스타그램 자동화, 인스타 게시물 만들기, AI 카드뉴스, 인스타 댓글 자동 응답, 인스타 DM 자동화, 인스타그램 인사이트, 인스타 예약 게시, 해시태그 추천",
+    ogAlt: "Instagram Auto Studio — 사진과 주제로 인스타그램 게시물을 만들어 게시",
     close: "닫기", cancel: "취소", save: "저장", saved: "저장됨 ✓", delete: "삭제", edit: "수정", refresh: "새로고침",
     loading: "불러오는 중…", checking: "확인 중…", retry: "다시 시도", on: "켜짐", off: "꺼짐", viewAll: "전체 보기 →",
     noData: "데이터가 없습니다.", noChartData: "표시할 데이터가 없습니다.", noCompare: "비교 데이터 없음", vsPrev: "직전 기간 대비",
@@ -15,6 +18,9 @@ export default defineMessages({
     metaDescription: "사진과 주제로 Instagram 게시물을 만들어 게시하고, 댓글에 자동으로 답하고, 성과를 한눈에 봅니다.",
   },
   en: {
+    seoTitle: "Instagram Auto Studio — AI Instagram post maker, comment auto-reply & insights",
+    seoKeywords: "Instagram automation, Instagram post maker, AI carousel generator, Instagram comment auto reply, Instagram DM automation, Instagram insights, hashtag generator",
+    ogAlt: "Instagram Auto Studio — create and publish Instagram posts from your photos and topic",
     close: "Close", cancel: "Cancel", save: "Save", saved: "Saved ✓", delete: "Delete", edit: "Edit", refresh: "Refresh",
     loading: "Loading…", checking: "Checking…", retry: "Try again", on: "On", off: "Off", viewAll: "View all →",
     noData: "No data.", noChartData: "Nothing to show yet.", noCompare: "No comparison data", vsPrev: "vs. previous period",
@@ -27,6 +33,9 @@ export default defineMessages({
     metaDescription: "Create Instagram posts from your photos and topic, publish them, auto-reply to comments and see performance at a glance.",
   },
   ja: {
+    seoTitle: "Instagram Auto Studio — AIでInstagram投稿作成・コメント自動返信・インサイト分析",
+    seoKeywords: "Instagram 自動化, インスタ 投稿 作成, AI カルーセル, インスタ コメント 自動返信, インスタ DM 自動化, Instagram インサイト, ハッシュタグ 提案",
+    ogAlt: "Instagram Auto Studio — 写真とテーマからInstagram投稿を作成・投稿",
     close: "閉じる", cancel: "キャンセル", save: "保存", saved: "保存しました ✓", delete: "削除", edit: "編集", refresh: "更新",
     loading: "読み込み中…", checking: "確認中…", retry: "再試行", on: "オン", off: "オフ", viewAll: "すべて見る →",
     noData: "データがありません。", noChartData: "表示できるデータがありません。", noCompare: "比較データなし", vsPrev: "前の期間比",

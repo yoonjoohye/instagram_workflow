@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { alternates } from "@/lib/seo";
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import { Contact, LegalPage, Section, SERVICE_NAME } from "@/components/LegalPage";
@@ -7,9 +8,10 @@ import { getT } from "@/i18n/server";
 import { DeletionStatus } from "./DeletionStatus";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { t } = await getT();
+  const { t, locale } = await getT();
   return {
-    title: `${t("common.dataDeletion")} · ${SERVICE_NAME}`,
+    title: t("common.dataDeletion"), // 레이아웃의 제목 틀이 ' · 서비스명' 을 붙임
+    alternates: alternates("/data-deletion", locale),
     description: t("legal.dMetaDescription", { service: SERVICE_NAME }),
   };
 }
