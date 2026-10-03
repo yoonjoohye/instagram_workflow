@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Auto Studio",
+    "slug": "instagram-auto-studio",
+    "scheme": "instaautostudio",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#121211",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.instaautostudio",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "app.instaautostudio",
+      "adaptiveIcon": {
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-web-browser",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "주제에 맞는 사진을 사진첩에서 찾아 게시물에 쓰기 위해 사진에 접근합니다. 사진은 기기 안에서만 분석됩니다.",
+          "savePhotosPermission": "만든 게시물 이미지를 사진첩에 저장합니다.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "webUrl": "https://instagram-workflow-nine.vercel.app"
+    }
+  }
+}

@@ -3,6 +3,10 @@ import { defineMessages } from "../define";
 /** 만들기(검수·게시) 화면과 게시물 생성 폼 */
 export default defineMessages({
   ko: {
+    libTitleApp: "내 사진첩에서 자동으로 찾기", libConnectApp: "사진첩 연결",
+    libConnectHintApp: "사진첩 접근을 허용하면, 주제만 적고 만들기를 누를 때 어울리는 사진을 자동으로 골라요. 사진은 휴대폰 안에서만 분석하고, 고른 사진만 올라가요. (처음 한 번 인식 모델을 받으니 Wi-Fi 에서 해 주세요)",
+    libRegrantApp: "사진첩 접근 허용", libRegrantHintApp: "설정에서 사진 접근이 꺼져 있어요. 허용하면 다시 찾을 수 있어요.",
+    libAppName: "사진첩", savedToPhotos: "사진첩에 저장했어요",
     libTitle: "내 사진 폴더에서 자동으로 찾기",
     libUnsupported: "사진 폴더 연결은 컴퓨터의 크롬·엣지에서만 쓸 수 있어요. 지금은 아래에서 사진을 직접 골라 주세요.",
     libConnectHint: "사진 폴더를 한 번 연결하면, 주제만 적고 만들기를 누를 때 어울리는 사진을 자동으로 골라요. 사진은 이 브라우저 안에서만 분석하고, 고른 사진만 올라가요.",
@@ -130,6 +134,10 @@ export default defineMessages({
     submit: "게시물 만들기",
   },
   en: {
+    libTitleApp: "Find photos automatically in my photo library", libConnectApp: "Connect photo library",
+    libConnectHintApp: "Allow photo access — then just write a topic and hit Create, and matching photos are picked for you. Photos are analyzed only on this phone; only the chosen ones are uploaded. (The recognition model downloads once — use Wi-Fi.)",
+    libRegrantApp: "Allow photo access", libRegrantHintApp: "Photo access is turned off in Settings. Allow it to search again.",
+    libAppName: "Photos", savedToPhotos: "Saved to Photos",
     libTitle: "Find photos automatically in my photo folder",
     libUnsupported: "Connecting a photo folder works in Chrome or Edge on a computer. For now, pick photos below.",
     libConnectHint: "Connect your photo folder once — then just write a topic and hit Create, and matching photos are picked for you. Photos are analyzed only inside this browser; only the chosen ones are uploaded.",
@@ -253,6 +261,10 @@ export default defineMessages({
     submit: "Create post",
   },
   ja: {
+    libTitleApp: "写真ライブラリから自動で探す", libConnectApp: "写真ライブラリを連携",
+    libConnectHintApp: "写真へのアクセスを許可すれば、テーマを書いて作成を押すだけで合う写真を自動で選びます。写真はこのスマホ内でだけ分析し、選んだ写真だけがアップロードされます。(初回だけ認識モデルをダウンロードするのでWi-Fiで)",
+    libRegrantApp: "写真へのアクセスを許可", libRegrantHintApp: "設定で写真へのアクセスがオフになっています。許可すると再び探せます。",
+    libAppName: "写真", savedToPhotos: "写真に保存しました",
     libTitle: "写真フォルダから自動で探す",
     libUnsupported: "写真フォルダの連携はパソコンのChrome・Edgeでのみ使えます。今は下から写真を選んでください。",
     libConnectHint: "写真フォルダを一度連携すれば、テーマを書いて作成を押すだけで合う写真を自動で選びます。写真はこのブラウザ内でだけ分析し、選んだ写真だけがアップロードされます。",

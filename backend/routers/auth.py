@@ -73,8 +73,34 @@ def _set_session(resp: Response, current: int, linked: list[int]) -> None:
     )
 
 
+APP_REDIRECT_COOKIE = "iaw_app_redirect"
+APP_SCHEME = "instaautostudio"
+
+
+def _allowed_app_redirect(url: str) -> bool:
+    """로그인 후 코드를 돌려줄 앱 주소. 우리 앱 스킴, 또는 개발용 Expo Go(같은 와이파이의 사설 IP)만."""
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme == APP_SCHEME:
+        return True
+    if parts.scheme == "exp" and parts.hostname:
+        try:
+            return ipaddress.ip_address(parts.hostname).is_private
+        except ValueError:
+            return False
+    return False
+
+
+def _app_signer():
+    from itsdangerous import URLSafeTimedSerializer
+
+    return URLSafeTimedSerializer(settings.app_secret, salt="iaw-app-code")
+
+
 @router.get("/login")
-def login(switch: bool = Query(default=False)) -> RedirectResponse:
+def login(switch: bool = Query(default=False), app: str | None = Query(default=None, max_length=300)) -> RedirectResponse:
     """선택된 로그인 방식의 OAuth 다이얼로그로 보냅니다.
     switch=1 이면 브라우저에 로그인된 계정으로 바로 넘어가지 않고 로그인 화면을 띄워 다른 계정을 고르게 합니다."""
     if not settings.meta_configured:
@@ -110,6 +136,11 @@ def login(switch: bool = Query(default=False)) -> RedirectResponse:
     resp.set_cookie(
         OAUTH_STATE_COOKIE, state, max_age=600, httponly=True, samesite="lax", secure=_secure()
     )
+    # 휴대폰 앱: 로그인은 시스템 브라우저에서 하고, 끝나면 일회용 코드로 앱에 돌려줍니다.
+    if app and _allowed_app_redirect(app):
+        resp.set_cookie(APP_REDIRECT_COOKIE, app, max_age=600, httponly=True, samesite="lax", secure=_secure())
+    else:
+        resp.delete_cookie(APP_REDIRECT_COOKIE)
     return resp
 
 
@@ -228,11 +259,42 @@ def callback(
         except GraphError:
             pass
 
+    app_redirect = request.cookies.get(APP_REDIRECT_COOKIE) or ""
+    if app_redirect and _allowed_app_redirect(app_redirect):
+        # 앱이 연 로그인 창: 2분짜리 일회용 코드를 앱으로 넘기고, 앱이 자기 화면에서 세션으로 바꿉니다.
+        code = _app_signer().dumps({"account_id": account.id})
+        sep = "&" if "?" in app_redirect else "?"
+        resp = RedirectResponse(f"{app_redirect}{sep}{urlencode({'code': code})}")
+        resp.delete_cookie(OAUTH_STATE_COOKIE)
+        resp.delete_cookie(APP_REDIRECT_COOKIE)
+        return resp
+
     resp = RedirectResponse(_admin_url(connected="1"))
     resp.delete_cookie(OAUTH_STATE_COOKIE)
     # 이미 연결해 둔 다른 계정은 목록에 남겨 두고, 방금 연결한 계정으로 전환합니다.
     _set_session(resp, account.id, _session(request)[1])
     return resp
+
+
+@router.get("/app-session")
+def app_session(request: Request, code: str = Query(max_length=500), db: Session = Depends(get_db)) -> Response:
+    """앱 화면(WebView)에서 일회용 코드를 세션 쿠키로 바꿉니다."""
+    from itsdangerous import BadSignature
+
+    try:
+        payload = _app_signer().loads(code, max_age=120)
+    except BadSignature:
+        return RedirectResponse(_rel_admin(error=tr("로그인 코드가 만료됐습니다. 다시 로그인해 주세요.", lang_of(request))))
+    account = db.get(Account, payload.get("account_id"))
+    if account is None:
+        return RedirectResponse(_rel_admin(error=tr("계정을 찾을 수 없습니다.", lang_of(request))))
+    resp = RedirectResponse(_rel_admin(connected="1"), status_code=status.HTTP_303_SEE_OTHER)
+    _set_session(resp, account.id, _session(request)[1])
+    return resp
+
+
+def _rel_admin(**params: str) -> str:
+    return "/admin" + (f"?{urlencode(params)}" if params else "")
 
 
 def _upsert_account(db: Session, linked: _Linked) -> Account:

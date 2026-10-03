@@ -13,6 +13,7 @@ import type { MessageKey, T } from "@/i18n/core";
 import { rich } from "@/i18n/rich";
 import { Avatar, Badge, Button, Card, cx, Field, inputClass, Notice, PageHeader, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { api, toApiError, useApi } from "@/lib/api";
+import { callNative, isNativeApp } from "@/lib/nativeBridge";
 import { mediaSrc, composeCaption, fmtDateTime, KIND_LABEL, parseHashtags, STATUS_LABEL } from "@/lib/format";
 import type { Asset, AutoReplyInput, AutoReplyRule, Job, MusicPick, Quota } from "@/lib/types";
 import { statusTone } from "@/lib/status";
@@ -610,7 +611,14 @@ async function saveFiles(files: File[]) {
   }
 }
 
+/** 앱 안에서는 사진첩에 바로 저장 (WebView 는 파일 다운로드를 못 함) */
+async function saveInApp(urls: string[], t: T) {
+  const abs = urls.map((u) => new URL(mediaSrc(u), window.location.href).href);
+  await callNative("save", { urls: abs, message: t("studio.savedToPhotos") }, 300_000);
+}
+
 async function downloadImage(url: string, name: string, t: T) {
+  if (isNativeApp()) return saveInApp([url], t);
   await saveFiles([await fetchFile(url, name, t)]);
 }
 
@@ -627,6 +635,10 @@ function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; 
     setDownloadingAll(true);
     setError(undefined);
     try {
+      if (isNativeApp()) {
+        await saveInApp(ready.map((a) => a.url), t);
+        return;
+      }
       const files = await Promise.all(
         assets.map((a, i) => (a.url ? fetchFile(a.url, fileName(a, i), t) : null)),
       );

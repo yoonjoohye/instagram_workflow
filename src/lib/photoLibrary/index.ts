@@ -6,6 +6,7 @@
  *  - 검색: 서버(Gemini)가 주제를 영어 장면 묘사·장소·날짜로 바꿔 주면, 기기 안에서 점수를 매겨 고릅니다.
  */
 import exifr from "exifr";
+import { base64ToBlob, callNative, isNativeApp } from "../nativeBridge";
 import { allPhotos, clearPhotos, deletePhotos, getMeta, putPhoto, setMeta, type PhotoRecord } from "./db";
 
 type DirHandle = FileSystemDirectoryHandle & {
@@ -47,7 +48,15 @@ const GENERIC = [
   "a photo taken at night",
 ];
 
-export const supported = () => typeof window !== "undefined" && "showDirectoryPicker" in window;
+export const supported = () => isNativeApp() || (typeof window !== "undefined" && "showDirectoryPicker" in window);
+
+/** 휴대폰 앱 안이면 폴더 대신 기기 사진첩을 씁니다 */
+export const isAppLibrary = () => isNativeApp();
+const APP_MAX = 2000; // 최근 사진부터 이만큼 색인
+const APP_NAME = "photos";
+
+type NativeMeta = { id: string; filename: string | null; creationTime: number | null };
+type NativeThumb = { id: string; b64: string; lat: number | null; lng: number | null };
 
 async function handle(): Promise<DirHandle | undefined> {
   return getMeta<DirHandle>("dir");
@@ -55,6 +64,13 @@ async function handle(): Promise<DirHandle | undefined> {
 
 export async function state(): Promise<LibraryState> {
   if (!supported()) return { status: "unsupported" };
+  if (isNativeApp()) {
+    if (!(await getMeta<boolean>("app"))) return { status: "none" };
+    const perm = await callNative<{ granted: boolean }>("permission", { request: false }).catch(() => ({ granted: false }));
+    if (!perm.granted) return { status: "permission", name: APP_NAME };
+    const photos = await allPhotos();
+    return { status: "ready", name: APP_NAME, count: photos.length, embedded: photos.filter((p) => p.emb).length };
+  }
   const dir = await handle();
   if (!dir) return { status: "none" };
   if ((await dir.queryPermission({ mode: "read" })) !== "granted") return { status: "permission", name: dir.name };
@@ -64,6 +80,12 @@ export async function state(): Promise<LibraryState> {
 
 /** 폴더 고르기 (사용자 클릭에서 호출) */
 export async function connect(): Promise<void> {
+  if (isNativeApp()) {
+    const perm = await callNative<{ granted: boolean }>("permission", { request: true });
+    if (!perm.granted) throw new Error("permission denied");
+    await setMeta("app", true);
+    return;
+  }
   const picker = (window as unknown as { showDirectoryPicker: (o: object) => Promise<DirHandle> }).showDirectoryPicker;
   const dir = await picker({ id: "instagram-photos", mode: "read", startIn: "pictures" });
   const prev = await handle();
@@ -73,12 +95,14 @@ export async function connect(): Promise<void> {
 
 /** 다시 방문했을 때 권한 다시 받기 (사용자 클릭에서 호출) */
 export async function regrant(): Promise<boolean> {
+  if (isNativeApp()) return (await callNative<{ granted: boolean }>("permission", { request: true })).granted;
   const dir = await handle();
   return !!dir && (await dir.requestPermission({ mode: "read" })) === "granted";
 }
 
 export async function disconnect() {
   await setMeta("dir", undefined);
+  await setMeta("app", undefined);
   await clearPhotos();
 }
 
@@ -136,7 +160,48 @@ function ask<T>(msg: object): Promise<T> {
 }
 
 /** 폴더를 훑어 새 사진·바뀐 사진만 색인하고, 없어진 사진은 지웁니다. 이어서 CLIP 임베딩을 만듭니다. */
+/** 앱: 사진첩의 최근 사진을 훑어 새 사진만 썸네일·위치를 받아 저장합니다 (사진 원본은 기기에 그대로). */
+async function scanApp(onProgress: (p: IndexProgress) => void, signal?: AbortSignal) {
+  const known = new Map((await allPhotos()).map((p) => [p.path, p]));
+  const seen = new Set<string>();
+  const list: NativeMeta[] = [];
+  for (let offset = 0; offset < APP_MAX; offset += 200) {
+    const page = await callNative<NativeMeta[]>("listPhotos", { offset, limit: Math.min(200, APP_MAX - offset) });
+    list.push(...page);
+    if (page.length < 200) break;
+  }
+  list.forEach((m) => seen.add(m.id));
+  const fresh = list.filter((m) => !known.has(m.id));
+  for (let i = 0; i < fresh.length; i += 12) {
+    if (signal?.aborted) return;
+    onProgress({ phase: "scan", done: i, total: fresh.length });
+    const batch = fresh.slice(i, i + 12);
+    const thumbs = await callNative<NativeThumb[]>("thumbnails", { ids: batch.map((b) => b.id), side: 256 }).catch(() => []);
+    for (const t of thumbs) {
+      const meta = batch.find((b) => b.id === t.id)!;
+      await putPhoto({
+        path: t.id,
+        name: meta.filename ?? t.id,
+        size: 0,
+        lastModified: meta.creationTime ?? 0,
+        takenAt: meta.creationTime,
+        lat: t.lat,
+        lng: t.lng,
+        thumb: base64ToBlob(t.b64),
+        emb: null,
+      });
+    }
+  }
+  const gone = [...known.keys()].filter((p) => !seen.has(p));
+  if (gone.length) await deletePhotos(gone);
+}
+
 export async function index(onProgress: (p: IndexProgress) => void, signal?: AbortSignal): Promise<{ skippedHeic: number }> {
+  if (isNativeApp()) {
+    await scanApp(onProgress, signal);
+    await embedPending(onProgress, signal);
+    return { skippedHeic: 0 };
+  }
   const dir = await handle();
   if (!dir) throw new Error("no folder");
   const known = new Map((await allPhotos()).map((p) => [p.path, p]));
@@ -181,6 +246,20 @@ export async function index(onProgress: (p: IndexProgress) => void, signal?: Abo
   const gone = [...known.keys()].filter((p) => !seen.has(p));
   if (gone.length) await deletePhotos(gone);
 
+  await embedPending(onProgress, signal);
+  return { skippedHeic };
+}
+
+/** 분석 원본: 폴더는 파일에서 448px, 앱은 사진첩에서 448px 를 받아 씁니다 (256px 썸네일로는 특징이 흐려짐). */
+async function analysisImage(p: PhotoRecord): Promise<Blob> {
+  if (isNativeApp()) {
+    const [t] = await callNative<NativeThumb[]>("thumbnails", { ids: [p.path], side: 448 });
+    return t ? base64ToBlob(t.b64) : p.thumb;
+  }
+  return fileFor(p.path).then((f) => thumbnail(f, 448));
+}
+
+async function embedPending(onProgress: (p: IndexProgress) => void, signal?: AbortSignal) {
   // CLIP 임베딩 (처음에는 모델 내려받기)
   const pending = (await allPhotos()).filter((p) => !p.emb);
   onDownload = (pct) => onProgress({ phase: "model", done: Math.round(pct), total: 100 });
@@ -188,8 +267,7 @@ export async function index(onProgress: (p: IndexProgress) => void, signal?: Abo
     if (signal?.aborted) break;
     onProgress({ phase: "embed", done: i, total: pending.length });
     try {
-      // 256px 썸네일로 분석하면 특징이 흐려져(실측 특이도 절반) 원본에서 448px 로 다시 만들어 분석합니다.
-      const source = await fileFor(pending[i].path).then((f) => thumbnail(f, 448)).catch(() => pending[i].thumb);
+      const source = await analysisImage(pending[i]).catch(() => pending[i].thumb);
       const emb = await ask<Float32Array>({ type: "image", blob: source });
       await putPhoto({ ...pending[i], emb });
     } catch {
@@ -197,7 +275,6 @@ export async function index(onProgress: (p: IndexProgress) => void, signal?: Abo
     }
   }
   onDownload = null;
-  return { skippedHeic };
 }
 
 const dot = (a: Float32Array, b: Float32Array) => {
@@ -272,6 +349,10 @@ export async function search(q: PhotoQuery): Promise<Match[]> {
 
 /** 고른 사진의 원본 파일 (업로드용) */
 export async function fileFor(path: string): Promise<File> {
+  if (isNativeApp()) {
+    const r = await callNative<{ b64: string; filename: string }>("photo", { photoId: path });
+    return new File([base64ToBlob(r.b64)], r.filename.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
+  }
   const dir = await handle();
   if (!dir) throw new Error("no folder");
   let cur: FileSystemDirectoryHandle = dir;

@@ -18,6 +18,7 @@ export function PhotoLibraryPanel({
   onReadyChange: (ready: boolean) => void;
 }) {
   const t = useT();
+  const app = lib.isAppLibrary();
   const [st, setSt] = useState<lib.LibraryState | null>(null);
   const [progress, setProgress] = useState<lib.IndexProgress | null>(null);
   const [heic, setHeic] = useState(0);
@@ -78,23 +79,23 @@ export function PhotoLibraryPanel({
   return (
     <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] font-semibold">📁 {t("studio.libTitle")}</span>
+        <span className="text-[13px] font-semibold">{app ? "🖼" : "📁"} {app ? t("studio.libTitleApp") : t("studio.libTitle")}</span>
       </div>
 
       {st.status === "none" && (
         <>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-fg-2">{t("studio.libConnectHint")}</p>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-fg-2">{app ? t("studio.libConnectHintApp") : t("studio.libConnectHint")}</p>
           <Button size="sm" className="mt-2" disabled={busy} onClick={act(async () => (await lib.connect(), await refresh(), runIndex()))}>
-            {t("studio.libConnect")}
+            {app ? t("studio.libConnectApp") : t("studio.libConnect")}
           </Button>
         </>
       )}
 
       {st.status === "permission" && (
         <>
-          <p className="mt-1.5 text-[12px] text-fg-2">{t("studio.libRegrantHint")}</p>
+          <p className="mt-1.5 text-[12px] text-fg-2">{app ? t("studio.libRegrantHintApp") : t("studio.libRegrantHint")}</p>
           <Button size="sm" className="mt-2" disabled={busy} onClick={act(async () => (await lib.regrant()) && (await refresh(), runIndex()))}>
-            {t("studio.libRegrant", { name: st.name })}
+            {app ? t("studio.libRegrantApp") : t("studio.libRegrant", { name: st.name })}
           </Button>
         </>
       )}
@@ -104,8 +105,8 @@ export function PhotoLibraryPanel({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg-2">
             <span>
               {st.embedded < st.count
-                ? t("studio.libReadyPartial", { name: st.name, count: st.count, embedded: st.embedded })
-                : t("studio.libReady", { name: st.name, count: st.count })}
+                ? t("studio.libReadyPartial", { name: app ? t("studio.libAppName") : st.name, count: st.count, embedded: st.embedded })
+                : t("studio.libReady", { name: app ? t("studio.libAppName") : st.name, count: st.count })}
             </span>
             {!progress && (
               <>
