@@ -3,6 +3,10 @@ import { defineMessages } from "../define";
 /** 만들기(검수·게시) 화면과 게시물 생성 폼 */
 export default defineMessages({
   ko: {
+    templateLabel: "템플릿", advanced: "세부 설정 (연출 방향 · 참고 이미지 · 글씨체 · 캡션 양식)",
+    topicPlaceholderSimple: "무엇을 올릴까요?\n예) 파리 여행 다녀온 거 자랑 / 집에서 만든 츄로스 / 스탈링 뱅크 개설 방법 정리",
+    topicHintSimple: "주제만 적어도 돼요. 사진이 없으면 글 내용대로 이미지를 새로 만들어요.",
+    styleHintAdvanced: "템플릿보다 우선해요. 비우면 템플릿(또는 주제)대로 만들어요.",
     libTitleApp: "내 사진첩에서 자동으로 찾기", libConnectApp: "사진첩 연결",
     libConnectHintApp: "사진첩 접근을 허용하면, 주제만 적고 만들기를 누를 때 어울리는 사진을 자동으로 골라요. 사진은 휴대폰 안에서만 분석하고, 고른 사진만 올라가요. (처음 한 번 인식 모델을 받으니 Wi-Fi 에서 해 주세요)",
     libRegrantApp: "사진첩 접근 허용", libRegrantHintApp: "설정에서 사진 접근이 꺼져 있어요. 허용하면 다시 찾을 수 있어요.",
@@ -134,6 +138,10 @@ export default defineMessages({
     submit: "게시물 만들기",
   },
   en: {
+    templateLabel: "Template", advanced: "More settings (art direction · reference images · font · caption format)",
+    topicPlaceholderSimple: "What do you want to post?\ne.g. Showing off my Paris trip / homemade churros / how to open a bank account",
+    topicHintSimple: "A topic is enough. Without photos, images are created from your copy.",
+    styleHintAdvanced: "Overrides the template. Leave empty to follow the template (or the topic).",
     libTitleApp: "Find photos automatically in my photo library", libConnectApp: "Connect photo library",
     libConnectHintApp: "Allow photo access — then just write a topic and hit Create, and matching photos are picked for you. Photos are analyzed only on this phone; only the chosen ones are uploaded. (The recognition model downloads once — use Wi-Fi.)",
     libRegrantApp: "Allow photo access", libRegrantHintApp: "Photo access is turned off in Settings. Allow it to search again.",
@@ -261,6 +269,10 @@ export default defineMessages({
     submit: "Create post",
   },
   ja: {
+    templateLabel: "テンプレート", advanced: "詳細設定(演出・参考画像・フォント・キャプション形式)",
+    topicPlaceholderSimple: "何を投稿しますか？\n例) パリ旅行の思い出 / 手作りチュロス / 口座開設の方法まとめ",
+    topicHintSimple: "テーマだけでも大丈夫。写真がなければ内容に合わせて画像を新しく作ります。",
+    styleHintAdvanced: "テンプレートより優先されます。空ならテンプレート(またはテーマ)どおりに作ります。",
     libTitleApp: "写真ライブラリから自動で探す", libConnectApp: "写真ライブラリを連携",
     libConnectHintApp: "写真へのアクセスを許可すれば、テーマを書いて作成を押すだけで合う写真を自動で選びます。写真はこのスマホ内でだけ分析し、選んだ写真だけがアップロードされます。(初回だけ認識モデルをダウンロードするのでWi-Fiで)",
     libRegrantApp: "写真へのアクセスを許可", libRegrantHintApp: "設定で写真へのアクセスがオフになっています。許可すると再び探せます。",

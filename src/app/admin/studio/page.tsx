@@ -83,7 +83,7 @@ function Studio() {
           </Notice>
         </div>
       )}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <PostForm onCreated={onCreated} />
         <div id="review" className="min-w-0 scroll-mt-20">
           {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}

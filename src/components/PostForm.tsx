@@ -3,7 +3,7 @@
 import { upload as blobUpload } from "@vercel/blob/client";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n/client";
-import type { T } from "@/i18n/core";
+import type { MessageKey, T } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
 import type { Job } from "@/lib/types";
 import { IconSpark } from "./icons";
@@ -14,6 +14,11 @@ import { Badge, Button, Card, cx, Field, inputClass, Notice } from "./ui";
 const MAX_PHOTOS = 8; // 올릴 수 있는 사진·동영상 수 (게시물은 최대 10장까지 Gemini가 구성)
 const MAX_VIDEO_MB = 300; // src/app/api/blob/upload/route.ts 와 같게
 const MAX_REFS = 3;
+
+/** 한 번 눌러 연출 방향·캡션 양식을 채우는 템플릿 (문구는 i18n/messages/templates.ts) */
+const TEMPLATES = ["auto", "travel", "daily", "info", "toon", "product", "event", "food"] as const;
+type TemplateKey = (typeof TEMPLATES)[number];
+const TEMPLATE_ICON: Record<TemplateKey, string> = { auto: "✨", travel: "✈️", daily: "📸", info: "📰", toon: "🎨", product: "🛍️", event: "🎉", food: "🍽️" };
 
 type Research = { notes: string; sources: { title: string; uri: string }[]; warning: string };
 
@@ -91,7 +96,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [refs, setRefs] = useState<Photo[]>([]);
   const [format, setFormat] = useState("");
   const refInput = useRef<HTMLInputElement>(null);
-  const [accent, setAccent] = useState("#6c5ce7");
+  const [template, setTemplate] = useState<TemplateKey>("auto");
   const [font, setFont] = useState("auto");
   const fonts = useApi<{ data: { key: string; label: string; preview: string }[] }>("/cardnews/fonts");
   const [step, setStep] = useState<Step | null>(null);
@@ -233,7 +238,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
       setStep({ label: t("studio.stepResearch"), done: 0, total: 1 });
       const research = await api<Research>("/cardnews/research", {
         method: "POST",
-        json: { prompt: prompt.trim(), caption_format: format, style, language: locale },
+        json: { prompt: prompt.trim(), caption_format: effFormat, style: effStyle, language: locale },
       });
       setStep({ label: t("studio.stepPlan"), done: 0, total: 1 });
       const plan = await api<{ job: Job; slides: { role: string }[]; warning: string }>("/cardnews/plan", {
@@ -242,11 +247,10 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           upload_ids: ids,
           reference_ids: refIds,
           prompt: prompt.trim(),
-          style,
-          caption_format: format,
+          style: effStyle,
+          caption_format: effFormat,
           research_notes: research.notes,
           sources: research.sources,
-          accent,
           font,
           language: locale,
         },
@@ -270,6 +274,12 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
     }
   }
 
+  // 직접 적은 연출 방향·캡션 양식이 템플릿보다 우선
+  const tplStyle = template === "auto" ? "" : t(`templates.${template}Style` as MessageKey);
+  const tplFormat = template === "auto" ? "" : t(`templates.${template}Format` as MessageKey);
+  const effStyle = style.trim() ? style : tplStyle;
+  const effFormat = format.trim() ? format : tplFormat;
+
   return (
     <Card
       title={t("studio.formTitle")}
@@ -282,117 +292,42 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
       className="h-fit"
     >
       <form onSubmit={submit} className="space-y-5">
-        <Field label={t("studio.topicLabel")} htmlFor="cn-prompt" hint={t("studio.topicHint")}>
+        <Field label={t("studio.topicLabel")} htmlFor="cn-prompt" hint={t("studio.topicHintSimple")}>
           <textarea
             id="cn-prompt"
             rows={3}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={t("studio.topicPlaceholder")}
-            className={cx(inputClass, "resize-y")}
+            placeholder={t("studio.topicPlaceholderSimple")}
+            className={cx(inputClass, "resize-y text-[15px]")}
             disabled={busy}
           />
         </Field>
 
-        <div className="space-y-2">
-          <Field
-            label={t("studio.styleLabel")}
-            htmlFor="cn-style"
-            hint={t("studio.styleHint")}
-          >
-            <textarea
-              id="cn-style"
-              rows={6}
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-              placeholder={t("studio.stylePlaceholder")}
-              className={cx(inputClass, "resize-y leading-relaxed")}
-              disabled={busy}
-            />
-          </Field>
-          <div className="flex flex-wrap items-center gap-2">
-            {refs.map((r, i) => (
-              <span key={r.key} className="group relative size-14 overflow-hidden rounded-md border border-line">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={r.preview} alt="" className="size-full object-cover" />
-                {!busy && (
-                  <button
-                    type="button"
-                    onClick={() => setRefs((prev) => prev.filter((_, k) => k !== i))}
-                    className={cx(
-                      "absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded-full bg-black/65 text-[11px] text-white",
-                      // 마우스가 있으면 올렸을 때만, 터치 화면에서는 항상 보이게
-                      "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
-                    )}
-                    aria-label={t("studio.removeRef")}
-                  >
-                    ✕
-                  </button>
-                )}
-              </span>
-            ))}
-            {refs.length < MAX_REFS && (
+        <div role="radiogroup" aria-label={t("studio.templateLabel")} className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+          {TEMPLATES.map((key) => {
+            const on = template === key;
+            return (
               <button
+                key={key}
                 type="button"
+                role="radio"
+                aria-checked={on}
                 disabled={busy}
-                onClick={() => refInput.current?.click()}
-                className="inline-flex h-14 items-center rounded-md border border-dashed border-line-strong px-3 text-[12px] text-fg-2 hover:bg-surface-2"
-              >
-                {t("studio.addRef", { n: refs.length, max: MAX_REFS })}
-              </button>
-            )}
-            <input
-              ref={refInput}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={(e) => {
-                if (e.target.files) addRefs(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </div>
-          <p className="text-[12px] text-fg-3">
-            {t("studio.refNote")}
-          </p>
-        </div>
-
-
-        <Field label={t("studio.fontLabel")} hint={t("studio.fontHint")}>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setFont("auto")}
-              aria-pressed={font === "auto"}
-              className={cx(
-                "flex h-14 items-center justify-center rounded-lg border text-[13px] font-medium",
-                font === "auto" ? "border-accent bg-accent/8 text-fg" : "border-line-strong text-fg-2 hover:bg-surface-2",
-              )}
-            >
-              {t("studio.fontAuto")}
-            </button>
-            {(fonts.data?.data ?? []).map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                disabled={busy}
-                onClick={() => setFont(f.key)}
-                aria-pressed={font === f.key}
-                title={f.label}
+                onClick={() => setTemplate(key)}
                 className={cx(
-                  "flex h-14 flex-col items-start justify-center overflow-hidden rounded-lg border px-2 text-left",
-                  font === f.key ? "border-accent bg-accent/8" : "border-line-strong hover:bg-surface-2",
+                  "flex w-[118px] shrink-0 snap-start flex-col items-start rounded-lg border px-2.5 py-2 text-left transition-colors",
+                  on ? "border-accent bg-accent/10" : "border-line-strong hover:bg-surface-2",
                 )}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={f.preview} alt="" className="h-6 w-auto max-w-full object-contain object-left" loading="lazy" />
-                <span className="mt-0.5 truncate text-[11px] text-fg-3">{f.label}</span>
+                <span className="text-[13px] font-semibold">
+                  {TEMPLATE_ICON[key]} {t(`templates.${key}` as MessageKey)}
+                </span>
+                <span className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-fg-3">{t(`templates.${key}Desc` as MessageKey)}</span>
               </button>
-            ))}
-          </div>
-        </Field>
+            );
+          })}
+        </div>
 
         <PhotoLibraryPanel
           busy={busy}
@@ -482,6 +417,109 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         </p>
 
 
+        <details className="group rounded-lg border border-line px-3 py-2" open={Boolean(style.trim() || format.trim() || refs.length || font !== "auto") || undefined}>
+          <summary className="cursor-pointer text-[13px] font-medium text-fg-2">{t("studio.advanced")}</summary>
+          <div className="mt-4 space-y-5">
+        <div className="space-y-2">
+          <Field
+            label={t("studio.styleLabel")}
+            htmlFor="cn-style"
+            hint={t("studio.styleHintAdvanced")}
+          >
+            <textarea
+              id="cn-style"
+              rows={4}
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              placeholder={tplStyle || t("studio.stylePlaceholder")}
+              className={cx(inputClass, "resize-y leading-relaxed")}
+              disabled={busy}
+            />
+          </Field>
+          <div className="flex flex-wrap items-center gap-2">
+            {refs.map((r, i) => (
+              <span key={r.key} className="group relative size-14 overflow-hidden rounded-md border border-line">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r.preview} alt="" className="size-full object-cover" />
+                {!busy && (
+                  <button
+                    type="button"
+                    onClick={() => setRefs((prev) => prev.filter((_, k) => k !== i))}
+                    className={cx(
+                      "absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded-full bg-black/65 text-[11px] text-white",
+                      // 마우스가 있으면 올렸을 때만, 터치 화면에서는 항상 보이게
+                      "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
+                    )}
+                    aria-label={t("studio.removeRef")}
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            ))}
+            {refs.length < MAX_REFS && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => refInput.current?.click()}
+                className="inline-flex h-14 items-center rounded-md border border-dashed border-line-strong px-3 text-[12px] text-fg-2 hover:bg-surface-2"
+              >
+                {t("studio.addRef", { n: refs.length, max: MAX_REFS })}
+              </button>
+            )}
+            <input
+              ref={refInput}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) addRefs(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          <p className="text-[12px] text-fg-3">
+            {t("studio.refNote")}
+          </p>
+        </div>
+
+
+        <Field label={t("studio.fontLabel")} hint={t("studio.fontHint")}>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setFont("auto")}
+              aria-pressed={font === "auto"}
+              className={cx(
+                "flex h-14 items-center justify-center rounded-lg border text-[13px] font-medium",
+                font === "auto" ? "border-accent bg-accent/8 text-fg" : "border-line-strong text-fg-2 hover:bg-surface-2",
+              )}
+            >
+              {t("studio.fontAuto")}
+            </button>
+            {(fonts.data?.data ?? []).map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                disabled={busy}
+                onClick={() => setFont(f.key)}
+                aria-pressed={font === f.key}
+                title={f.label}
+                className={cx(
+                  "flex h-14 flex-col items-start justify-center overflow-hidden rounded-lg border px-2 text-left",
+                  font === f.key ? "border-accent bg-accent/8" : "border-line-strong hover:bg-surface-2",
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={f.preview} alt="" className="h-6 w-auto max-w-full object-contain object-left" loading="lazy" />
+                <span className="mt-0.5 truncate text-[11px] text-fg-3">{f.label}</span>
+              </button>
+            ))}
+          </div>
+        </Field>
+
         <Field
           label={t("studio.formatLabel")}
           htmlFor="cn-format"
@@ -496,23 +534,15 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         >
           <textarea
             id="cn-format"
-            rows={7}
+            rows={5}
             value={format}
             onChange={(e) => setFormat(e.target.value)}
-            placeholder={t("studio.formatPlaceholder")}
+            placeholder={tplFormat || t("studio.formatPlaceholder")}
             className={cx(inputClass, "resize-y font-mono text-[12px]")}
             disabled={busy}
           />
         </Field>
 
-        <details className="rounded-lg border border-line px-3 py-2">
-          <summary className="cursor-pointer text-[13px] font-medium text-fg-2">{t("studio.accentSummary")}</summary>
-          <div className="mt-3 space-y-3">
-            <label className="flex items-center gap-3 text-[13px] text-fg-2">
-              {t("studio.accentLabel")}
-              <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} className="h-8 w-12 cursor-pointer rounded border border-line" disabled={busy} />
-              <span className="tnum text-fg-3">{accent}</span>
-            </label>
           </div>
         </details>
 
