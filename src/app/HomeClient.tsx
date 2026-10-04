@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useT } from "@/i18n/client";
+import { FAQ, HOW } from "./landingContent";
 import { rich } from "@/i18n/rich";
 import { LOGIN_URL, SWITCH_LOGIN_URL, useApi } from "@/lib/api";
 import type { Health, Me } from "@/lib/types";
@@ -110,6 +111,40 @@ export function HomeClient() {
             <p className="mt-1.5 text-[13px] leading-relaxed text-fg-2">{t(body)}</p>
           </div>
         ))}
+      </section>
+
+      <section className="mt-16 sm:mt-24" aria-labelledby="how">
+        <h2 id="how" className="text-xl font-semibold tracking-tight">
+          {t("landing.howTitle")}
+        </h2>
+        <ol className="mt-5 grid gap-4 sm:grid-cols-3">
+          {HOW.map((step, i) => (
+            <li key={step.title} className="rounded-xl border border-line bg-surface-1 p-5">
+              <span className="tnum text-[13px] font-semibold text-accent">{String(i + 1).padStart(2, "0")}</span>
+              <h3 className="mt-2 text-[15px] font-semibold">{t(step.title)}</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-fg-2">{t(step.body)}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="mt-16 sm:mt-24" aria-labelledby="faq">
+        <h2 id="faq" className="text-xl font-semibold tracking-tight">
+          {t("landing.faqTitle")}
+        </h2>
+        <div className="mt-5 divide-y divide-line rounded-xl border border-line bg-surface-1">
+          {FAQ.map((f) => (
+            <details key={f.q} className="group px-5 py-4">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-[14px] font-medium">
+                <h3>{t(f.q)}</h3>
+                <span aria-hidden className="text-fg-3 transition-transform group-open:rotate-45">
+                  +
+                </span>
+              </summary>
+              <p className="mt-2 text-[13px] leading-relaxed text-fg-2">{t(f.a)}</p>
+            </details>
+          ))}
+        </div>
       </section>
 
       <nav className="mt-auto flex gap-4 pt-16 text-[12px] text-fg-3">
