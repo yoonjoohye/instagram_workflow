@@ -1,4 +1,4 @@
-"""프롬프트 → 미디어·음악·캡션 생성 → 검수 → Instagram 발행."""
+"""만든 게시물(작업) 목록·검수 중 수정·삭제, Instagram 게시와 발행 한도."""
 from __future__ import annotations
 
 import datetime as dt

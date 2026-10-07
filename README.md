@@ -1,90 +1,79 @@
 # Instagram Auto Studio
 
-Instagram 계정을 연결하고 주제·컨셉과 사진을 올리면 Gemini가 그 컨셉대로 이미지와 캡션을 만들어 검수 후 게시하고, 댓글 자동 응답과 게시물 성과 대시보드를 제공하는 웹앱입니다.
+사진과 주제로 Instagram 게시물(사진·캐러셀·릴스)을 만들어 게시하고, 댓글에 자동으로 답하고, 성과를 한눈에 보는 서비스입니다.
+웹(Next.js) + API(FastAPI) + 휴대폰 앱(Expo, 웹 화면을 감싸고 사진첩 기능을 더함)으로 되어 있습니다.
 
-- **프론트엔드**: Next.js 15 (App Router) + Tailwind CSS v4 — `src/`
-- **백엔드**: FastAPI (Vercel Python 함수) — `backend/`, 엔트리포인트 `api/index.py`
-- **외부 연동**: Instagram Graph API (Instagram 로그인 또는 Facebook 로그인), Google Gemini(주제 조사·게시물 구성·이미지 연출·댓글 감정 분석)
+- 라이브: https://instagram-workflow-nine.vercel.app (Vercel)
+- 구조·요청 흐름·코드 규칙은 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** 를 먼저 읽어 주세요.
 
-## 화면
-
-| 경로 | 내용 |
+| 폴더 | 내용 |
 |---|---|
-| `/` | 소개 + Instagram 계정 연결 |
-| `/admin` | 대시보드 — 도달·프로필 조회·참여 계정 추이, 누가 봤나(팔로워/비팔로워), 콘텐츠 유형별 성과, 반응 상세, 보는 사람들, 댓글 반응 |
-| `/admin/studio` | 사진과 주제로 게시물 만들기 → 캡션·해시태그·자동 응답 검수 → 게시 |
-| `/admin/jobs` | 생성·게시 작업 기록 |
-| `/admin/posts` | 게시물별 성과(도달·조회·좋아요·저장·공유·참여율) |
-| `/admin/autoreply` | 댓글 자동 응답 — 연결 상태, 게시물별 규칙, 처리 기록 |
+| `src/` | 웹 화면 (Next.js 15 App Router, React 19, Tailwind v4) |
+| `backend/` | API (FastAPI, Vercel Python 함수 — 진입점 `api/index.py`) |
+| `mobile/` | iPhone·Android 앱 (Expo SDK 57) — [mobile/README.md](mobile/README.md) |
+| `tests/` | API 테스트 (pytest, 외부 API 는 모두 가짜) |
+| `scripts/` | 점검 스크립트 (번역 키 등) |
 
-> Meta 는 개인정보 정책상 **프로필·게시물을 본 개별 계정을 API 로 제공하지 않습니다.** 대시보드는 도달 같은 집계 수치와, 댓글·멘션으로 식별되는 계정만 보여줍니다.
+## 주요 기능
+
+| 화면 | 기능 |
+|---|---|
+| `/` (`/ko` `/en` `/ja`) | 소개 · 사용법 · 자주 묻는 질문, Instagram 계정 연결 |
+| `/admin` | 대시보드 — 도달·프로필 조회·참여 추이, 팔로워/비팔로워, 콘텐츠 유형별 성과, 연령·지역, 접속 시간대, 댓글 반응 |
+| `/admin/studio` | 게시물 만들기 — 주제 + 템플릿 + 사진(폴더·사진첩에서 자동 선택 가능) → 검수(인스타 모양 미리보기·장별 수정·음악) → 게시 |
+| `/admin/jobs` | 만든 게시물 기록 (인스타에서 지운 게시물은 '삭제됨'으로 동기화) |
+| `/admin/posts` | 게시물별 성과, 댓글 허용 켜기/끄기, 게시물별 자동 응답·댓글 감정 분석 |
+| `/admin/autoreply` | 댓글 자동 응답 — 연결 상태, 규칙, 처리 기록 |
+| `/privacy` `/data-deletion` | 개인정보처리방침 · 데이터 삭제 안내 (Meta 앱 검수용, 3개 언어) |
+
+화면은 한국어·영어·일본어를 지원합니다 (쿠키 → 주소의 언어 → 브라우저 언어 → 영어).
 
 ## 로컬 실행
 
 ```bash
 npm install
-python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
-cp .env.example .env   # APP_SECRET, INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET 등 채우기
+python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+cp .env.example .env      # APP_SECRET, INSTAGRAM_APP_ID/SECRET, GEMINI_API_KEY 등 채우기
 
-npm run dev:api        # FastAPI  → http://127.0.0.1:8000
-npm run dev            # Next.js  → http://localhost:3000 (/api/py/* 는 8000 으로 프록시)
+npm run dev:api           # FastAPI → http://127.0.0.1:8000
+npm run dev               # Next.js → http://localhost:3000 (/api/py/* 는 8000 으로 프록시)
 ```
 
-Meta 앱의 리디렉션 URL에 `http://localhost:3000/api/py/auth/callback` 을 등록하세요 (Instagram 로그인은 HTTPS 만 허용하므로 로컬 로그인 테스트는 Facebook 로그인 방식이나 터널(ngrok 등)을 쓰세요).
-Gemini 키가 없으면 올린 사진을 기본 보정해 게시물로 만듭니다.
+**로그인 없이 화면 확인**: Instagram 로그인은 HTTPS 콜백이 필요해 로컬에서는 바로 안 됩니다.
+`.env` 에 `DEV_LOGIN=1` 을 넣으면 로그인 화면에 **'로컬 테스트 로그인'** 버튼이 생겨, DB 에 이미 연결된 계정으로 들어갈 수 있습니다
+(이 컴퓨터의 localhost 요청에서만 동작, Vercel 에서는 항상 꺼짐). 처음 계정을 연결할 때는 터널(cloudflared 등)로 HTTPS 주소를 만들어 로그인하세요.
 
-## Vercel 배포
+## 확인 (커밋 전에)
 
-1. 이 저장소를 Vercel 프로젝트로 import 합니다 (Framework: Next.js).
-2. **Storage → Neon(Postgres)** 을 연결합니다 → `DATABASE_URL` 자동 주입. (Vercel 에서는 SQLite 를 쓸 수 없습니다.)
-3. 환경변수를 등록합니다: `APP_SECRET`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, `CRON_SECRET`, `WEBHOOK_VERIFY_TOKEN`, `GEMINI_API_KEY`.
-   `PUBLIC_BASE_URL` 을 비워두면 프로덕션 도메인(`https://<project>.vercel.app`)을 자동으로 사용합니다.
-4. Meta 앱 설정 (Instagram 로그인)
-   - 사용 사례 "Instagram에서 메시지 및 콘텐츠 관리" → **Instagram 로그인을 통한 API 설정**
-   - "Instagram 비즈니스 로그인 설정" → 리디렉션 URL: `https://<project>.vercel.app/api/py/auth/callback`
-   - 같은 화면 상단의 **Instagram 앱 ID / 시크릿 코드** → `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET`
-   - Webhooks 는 필요 없습니다.
-5. 재배포합니다. `vercel.json` 의 cron 이 매일 03:00(UTC)에 인사이트 스냅샷을 적재하고 Instagram 토큰(60일)을 연장합니다.
+```bash
+npm run check             # 타입 검사 + 번역 키 점검 + API 테스트 (pytest)
+npm run build             # 배포와 같은 빌드
+```
 
-> Facebook 로그인 방식을 쓰려면 `INSTAGRAM_APP_*` 대신 `META_APP_ID` / `META_APP_SECRET` 을 넣고, Facebook 로그인 for Business 의 유효한 OAuth 리디렉션 URI 에 같은 콜백 주소를 등록합니다. 이 방식은 Instagram 계정이 Facebook 페이지에 연결되어 있어야 합니다.
+## 배포 (Vercel)
 
-## 사진과 주제로 게시물 만들기
+`main` 브랜치에 push 하면 자동 배포됩니다. 저장소가 private 이면 배포가 막힐 수 있습니다(커밋 작성자 권한).
 
-스튜디오에서 주제·컨셉(필수), 사진(선택, 최대 8장), 참고 정보·연출 방향·참고 이미지·캡션 양식을 넣으면 **정해진 틀 없이 그 컨셉대로** 만듭니다.
+| 환경변수 | 용도 |
+|---|---|
+| `APP_SECRET` | 세션 서명·토큰 암호화 |
+| `DATABASE_URL` | Neon Postgres (Vercel Storage 연결 시 자동) |
+| `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` | Instagram 로그인 (없으면 `META_APP_ID/SECRET` 로 Facebook 로그인) |
+| `GEMINI_API_KEY` | 게시물 구성·이미지 연출·댓글 감정 분석 (이미지 생성은 **결제 연결된 유료 등급** 필요) |
+| `BLOB_READ_WRITE_TOKEN` | 동영상 저장소 (Vercel Blob 스토어 연결 시 자동) |
+| `WEBHOOK_VERIFY_TOKEN` | 댓글·DM Webhook 인증 |
+| `CRON_SECRET` | 매일 인사이트 적재·토큰 연장 cron 보호 |
+| `GOOGLE_SITE_VERIFICATION`, `NAVER_SITE_VERIFICATION` | 서치 콘솔·서치어드바이저 소유 확인 메타 태그 |
+| `NPM_CONFIG_ONNXRUNTIME_NODE_INSTALL=skip` | 브라우저용 AI 라이브러리의 서버용 부품 설치 생략 (빌드 시간 초과 방지) |
 
-1. **조사**: Gemini(`GEMINI_TEXT_MODEL`) + Google 검색으로 주제를 조사 (출처는 검수 화면에 표시)
-2. **설계**: 장수(1~10장, 1장이면 단일 사진 게시물)와 장별 레이아웃(사진만 / 사진 위 글 / 사진+글 영역 / 가운데 강조), 글, 연출 지시를 컨셉에 맞게 결정. 컨셉에 맞지 않는 사진은 쓰지 않고, 필요한 장면은 글 내용대로 새 이미지 생성
-3. **캡션**: 양식의 `[칸]`을 칸별로 받아 서버가 양식 그대로 조립 (`[후킹 3줄]` 줄 수 맞춤, 모르는 정보는 `⚠️ 직접 입력`)
-4. **연출**: Gemini 이미지 모델(`GEMINI_IMAGE_MODEL`, 없으면 gemini-2.5-flash-image)로 사진을 재구성하거나 새로 생성. 참고 이미지의 색감·분위기를 따름
-5. **합성**: 레이아웃대로 한글 글자를 Pretendard 폰트로 얹음 (고정 배지·번호·계정명 없음) → 검수(장별 다시 만들기) → 게시
+Meta 앱: Instagram 로그인 리디렉션 URL `https://<도메인>/api/py/auth/callback`,
+Webhooks 콜백 `https://<도메인>/api/py/webhooks/instagram` (구독 필드 `comments`, `messages`).
+앱이 개발 모드면 **앱 역할 → Instagram 테스터**로 등록된 계정만 로그인됩니다.
 
-업로드·결과 이미지는 DB 에 보관되고 `/api/py/media/<id>.jpg` 로 제공되어 Instagram 이 가져갑니다. 슬라이드는 Vercel 함수 시간 제한(60초) 때문에 한 장씩 요청해 만듭니다.
-글씨체 10종(모두 SIL Open Font License, `backend/assets/fonts/`): 프리텐다드, 블랙한산스, 도현, 주아, 나눔펜·개구(손글씨), 나눔붓(붓 손글씨), 동해독도(날림체), 송명(궁서 느낌), 나눔명조. 자동이면 Gemini가 형식에 맞게 고르고, 직접 고를 수도 있습니다. (궁서체는 Microsoft 소유 폰트라 포함할 수 없어 송명체로 대신합니다.)
+## 알아 둘 Instagram·Meta 제약
 
-## 댓글 자동 응답 (팔로워 전용 링크)
-
-스튜디오의 게시물 화면에서 설정합니다. 게시 전에 저장해 두면 게시되는 순간부터 동작합니다.
-
-1. 키워드가 포함된 댓글 → 공개 답글 + 댓글 작성자에게 DM("이 메시지에 답장하면 링크를 드려요")
-2. 사용자가 DM 에 답장 → 팔로워면 링크, 아니면 팔로우 안내 (팔로우 후 다시 답장하면 링크)
-
-Meta 정책상 댓글 작성자에게 보내는 DM 은 댓글당 1통·텍스트만 가능하고, 팔로우 여부는 상대가 먼저 DM 을 보낸 뒤에만 조회할 수 있어서 두 단계입니다.
-
-필요한 설정
-- `WEBHOOK_VERIFY_TOKEN` 환경변수
-- Meta 앱 → Webhooks: 콜백 URL `https://<project>.vercel.app/api/py/webhooks/instagram`, 인증 토큰, 구독 필드 `comments`, `messages`
-- 권한 `instagram_business_manage_messages` (기능 추가 전에 로그인했다면 다시 로그인)
-- **Meta 앱이 라이브 상태여야** Webhook 이 실제로 전달되고, 다른 사용자의 댓글·DM 이 들어옵니다 (앱 검수 필요).
-
-## 댓글 감정 분석 (긍정 / 보통 / 부정)
-
-Instagram API 는 댓글 감정 값을 주지 않아 직접 분류합니다. `GEMINI_API_KEY` 가 있으면 Gemini(`GEMINI_MODEL`)로 문맥·반어법·이모지까지 판단하고, 없거나 호출이 실패하면 한국어 키워드·이모지 규칙으로 분류합니다. 분류 결과는 댓글별로 저장해 다시 분류하지 않습니다.
-
-- 게시물 성과 → **댓글 분석** 버튼으로 최근 게시물의 새 댓글을 분류, 게시물별 막대를 누르면 댓글 목록
-- 대시보드 → 전체 긍정 비율과 분포
-- 새 댓글은 Webhook 으로 들어오는 즉시, 나머지는 매일 cron 으로 분류됩니다.
-
-## Instagram 계정 조건
-
-- 비즈니스 또는 크리에이터 계정이어야 합니다.
-- Meta 앱이 개발 모드일 때는 앱 역할에 등록된 계정만 로그인할 수 있습니다. Instagram 로그인은 **앱 역할 → Instagram 테스터**로 계정을 추가하고, Instagram 앱의 설정 → 웹사이트 권한에서 초대를 수락하세요.
+- 비즈니스·크리에이터(프로페셔널) 계정만 연결됩니다.
+- 게시물을 본 **개별 계정 목록은 API 로 제공되지 않습니다** (집계 수치만).
+- 사진 게시물에는 API 로 **음악을 붙일 수 없어**, 추천 곡을 게시 후 인스타 앱에서 추가하도록 안내합니다.
+- 댓글 작성자에게 보내는 DM 은 댓글당 1통이고, 팔로우 여부는 상대가 먼저 DM 을 보낸 뒤에만 조회됩니다 → 안내 DM 후 답장이 오면 팔로우 여부별 문구 전송.
+- Webhook·다른 사용자 댓글은 **Meta 앱이 라이브(검수 통과)** 상태여야 들어옵니다.

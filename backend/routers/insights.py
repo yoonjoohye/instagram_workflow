@@ -1,4 +1,4 @@
-"""관리자 대시보드용 데이터: 방문/도달 지표, 팔로워 인구통계, 상호작용 계정."""
+"""대시보드·게시물 성과용 데이터: 계정 지표 추이, 인구통계, 게시물별 성과, 댓글 허용 전환, 매일 cron 적재."""
 from __future__ import annotations
 
 import datetime as dt
