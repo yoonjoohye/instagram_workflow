@@ -76,3 +76,26 @@ def test_story_plan_render_and_publish_in_parts(monkeypatch, client, login, acco
     assert calls["n"] == 5  # 이미 올린 것은 다시 올리지 않음
     db.expire_all()
     assert db.get(GenerationJob, job["id"]).ig_media_id == "story-1"
+
+
+def test_story_photo_not_9_16_is_fitted_before_publish(monkeypatch, client, login, account, db):
+    """원본 그대로 올린 4:5 사진 스토리는 1080×1920(흐린 배경)으로 맞춘 사본을 올림 — 다시 시도해도 사본은 하나."""
+    login(account)
+    b = io.BytesIO()
+    Image.new("RGB", (800, 1000), "orange").save(b, "JPEG")
+    up = client.post("/media/uploads", files={"file": ("a.jpg", b.getvalue(), "image/jpeg")}).json()["id"]
+    job = client.post("/studio/manual", json={"upload_ids": [up], "post_type": "story"}).json()
+
+    urls = []
+    monkeypatch.setattr(workflow, "graph_for", lambda acc: FakeGraph())
+    monkeypatch.setattr(workflow.publishing, "publishing_limit", lambda c, u: {"remaining": 25, "used": 0, "total": 25})
+    monkeypatch.setattr(workflow.publishing, "create_container", lambda c, u, **k: urls.append(k["media_url"]) or "c1")
+    monkeypatch.setattr(workflow.publishing, "wait_until_finished", lambda c, cid: None)
+    monkeypatch.setattr(workflow.publishing, "publish", lambda c, u, cid: {"media_id": "s1", "permalink": ""})
+
+    assert client.post("/workflow/publish", json={"job_id": job["id"]}).json()["status"] == "published"
+    fitted_id = urls[0].rsplit("/media/", 1)[1][:-4]
+    assert fitted_id != up
+    fitted = db.get(MediaBlob, fitted_id)
+    assert (fitted.width, fitted.height) == (1080, 1920)
+    assert Image.open(io.BytesIO(fitted.data)).size == (1080, 1920)

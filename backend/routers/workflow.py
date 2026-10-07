@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
+import secrets
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -17,6 +19,7 @@ from ..services import blobstore, media_sync, publishing
 from ..services.meta_graph import GraphError
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
+log = logging.getLogger(__name__)
 
 
 def compose_caption(caption: str, hashtags: list[str]) -> str:
@@ -159,6 +162,11 @@ def delete_job(
     renders = [a.get("url", "") for a in (job.assets or []) if (a.get("meta") or {}).get("video_edit")]
     renders += [o.get("url", "") for o in ((job.plan or {}).get("soundtrack") or {}).get("outputs") or []]
     discard_renders(db, account, renders)
+    # 스토리용으로 9:16 에 맞춘 사본
+    for fitted_id in ((job.plan or {}).get("story_fit") or {}).values():
+        blob = db.get(MediaBlob, fitted_id)
+        if blob is not None and blob.account_id == account.id and blob.kind == "slide":
+            db.delete(blob)
     # 이 작업이 만든 이미지(완성본·글 얹기 전 이미지·고른 대표 화면)도 함께 지웁니다. 사용자가 올린 원본 사진은 남깁니다.
     for asset in job.assets or []:
         meta = asset.get("meta") or {}
@@ -295,6 +303,8 @@ def publish_job(
         db.commit()
         raise
     except GraphError as exc:
+        # 실패 이유를 서버 로그에도 남깁니다 (Vercel 로그에서 바로 확인)
+        log.warning("publish failed job=%s kind=%s status=%s: %s", job.id, job.media_kind, exc.status, exc)
         job.status = "failed"
         job.error = str(exc)
         db.commit()
@@ -316,6 +326,39 @@ def publish_job(
 
 STORY_TIME_BUDGET = 40.0  # Vercel 60초 안에서 이만큼만 올리고, 나머지는 다음 요청에서 이어서
 _now = time.monotonic  # 테스트에서 바꿔 끼울 수 있게
+
+
+STORY_RATIO = 9 / 16
+
+
+def _story_ready(db: Session, account: Account, job: GenerationJob, asset: dict) -> str:
+    """스토리 사진이 세로 9:16 이 아니면(원본 그대로 올린 4:5·3:4 사진 등) 1080×1920 에 흐린 배경으로 맞춘 사본 주소.
+    미리보기와 같은 모습으로 올라가고, 인스타가 비율 때문에 거절하지 않게 합니다. 한 번 만든 사본은 plan["story_fit"] 에 기억."""
+    url = asset["url"]
+    if asset.get("type") != "image" or "/api/py/media/" not in url:
+        return url
+    blob_id = url.rsplit("/media/", 1)[-1].removesuffix(".jpg")
+    cache = dict((job.plan or {}).get("story_fit") or {})
+    if blob_id in cache:
+        return _current_media_url(f"/api/py/media/{cache[blob_id]}.jpg")
+    blob = db.get(MediaBlob, blob_id)
+    if blob is None or blob.account_id != account.id or not blob.data:
+        return url
+    from ..services.studio import image_size
+    from ..services.studio.limits import STORY_SIZE
+    from ..services.studio.soundtrack import fit_frame
+
+    w, h = blob.width or 0, blob.height or 0
+    if not (w and h):
+        w, h = image_size(blob.data)
+    if abs(w / h - STORY_RATIO) < 0.02:
+        return url
+    fitted = MediaBlob(id=secrets.token_urlsafe(18), account_id=account.id, kind="slide", data=fit_frame(blob.data, STORY_SIZE), width=STORY_SIZE[0], height=STORY_SIZE[1])
+    db.add(fitted)
+    cache[blob_id] = fitted.id
+    job.plan = {**(job.plan or {}), "story_fit": cache}
+    db.commit()
+    return _current_media_url(f"/api/py/media/{fitted.id}.jpg")
 
 
 def _publish_stories(db: Session, account: Account, job: GenerationJob, visual: list[dict]) -> dict:
@@ -341,7 +384,8 @@ def _publish_stories(db: Session, account: Account, job: GenerationJob, visual: 
                     continue
                 if _now() - started > STORY_TIME_BUDGET:
                     break
-                container = publishing.create_container(client, account.ig_user_id, kind="STORIES", media_url=asset["url"])
+                media_url = _story_ready(db, account, job, asset)
+                container = publishing.create_container(client, account.ig_user_id, kind="STORIES", media_url=media_url)
                 if asset["type"] == "video":
                     publishing.wait_until_finished(client, container)
                 result = publishing.publish(client, account.ig_user_id, container)
@@ -356,6 +400,8 @@ def _publish_stories(db: Session, account: Account, job: GenerationJob, visual: 
         db.commit()
         raise
     except GraphError as exc:
+        # 실패 이유를 서버 로그에도 남깁니다 (Vercel 로그에서 바로 확인)
+        log.warning("publish failed job=%s kind=%s status=%s: %s", job.id, job.media_kind, exc.status, exc)
         job.status = "failed"
         job.error = str(exc)
         db.commit()
