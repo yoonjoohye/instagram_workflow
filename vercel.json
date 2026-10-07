@@ -1,29 +1,22 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "experimentalServices": {
-    "web": {
-      "root": "frontend",
-      "framework": "nextjs",
-      "routePrefix": "/"
-    },
+  "services": {
+    "web": { "root": "frontend", "framework": "nextjs" },
     "api": {
+      "root": ".",
       "entrypoint": "api/index.py",
-      "routePrefix": "/api/py",
-      "maxDuration": 60,
-      "includeFiles": "backend/**",
-      "excludeFiles": [
-        "frontend/**",
-        "mobile/**",
-        "docs/**",
-        "backend/tests/**",
-        "backend/scripts/**"
-      ]
+      "functions": {
+        "api/index.py": {
+          "maxDuration": 60,
+          "includeFiles": "backend/**",
+          "excludeFiles": "{frontend,mobile,docs,backend/tests,backend/scripts}/**"
+        }
+      }
     }
   },
-  "crons": [
-    {
-      "path": "/api/py/cron/sync-insights",
-      "schedule": "0 3 * * *"
-    }
-  ]
+  "rewrites": [
+    { "source": "/api/py(/.*)?", "destination": { "service": "api" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ],
+  "crons": [{ "path": "/api/py/cron/sync-insights", "schedule": "0 3 * * *" }]
 }
