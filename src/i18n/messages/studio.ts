@@ -3,6 +3,12 @@ import { defineMessages } from "../define";
 /** 만들기(검수·게시) 화면과 게시물 생성 폼 */
 export default defineMessages({
   ko: {
+    postTypeLabel: "게시 형태", postTypeFeed: "피드 게시물", postTypeStory: "스토리",
+    storyHint: "세로 9:16 화면 1~5개를 만들어 하나씩 스토리로 올려요. 캡션은 붙지 않고, 링크·음악·투표 스티커는 올린 뒤 인스타 앱에서 추가해야 해요.",
+    storyPreview: "스토리 미리보기", storyReply: "메시지 보내기", storyCount: "스토리 {n}개",
+    storyReviewNote: "스토리는 24시간 동안 보여요. 캡션·해시태그·자동 응답은 스토리에 쓸 수 없어요.",
+    publishStories: "스토리 올리기 ({n}개)", publishingStories: "스토리 올리는 중 {done}/{total}",
+    storiesPublished: "스토리 {n}개를 올렸어요", storiesPartial: "스토리 {done}/{total}개를 올렸어요. 나머지를 이어서 올려 주세요.",
     templateLabel: "템플릿", advanced: "세부 설정 (연출 방향 · 참고 이미지 · 글씨체 · 캡션 양식)",
     topicPlaceholderSimple: "무엇을 올릴까요?\n예) 파리 여행 다녀온 거 자랑 / 집에서 만든 츄로스 / 스탈링 뱅크 개설 방법 정리",
     topicHintSimple: "주제만 적어도 돼요. 사진이 없으면 글 내용대로 이미지를 새로 만들어요.",
@@ -138,6 +144,12 @@ export default defineMessages({
     submit: "게시물 만들기",
   },
   en: {
+    postTypeLabel: "Post type", postTypeFeed: "Feed post", postTypeStory: "Story",
+    storyHint: "Creates 1–5 vertical 9:16 screens and posts each as a Story. No caption; add link, music or poll stickers in the Instagram app afterwards.",
+    storyPreview: "Story preview", storyReply: "Send message", storyCount: "{n} stories",
+    storyReviewNote: "Stories are visible for 24 hours. Captions, hashtags and auto-replies don't apply to Stories.",
+    publishStories: "Post stories ({n})", publishingStories: "Posting stories {done}/{total}",
+    storiesPublished: "Posted {n} stories", storiesPartial: "Posted {done}/{total} stories. Continue to post the rest.",
     templateLabel: "Template", advanced: "More settings (art direction · reference images · font · caption format)",
     topicPlaceholderSimple: "What do you want to post?\ne.g. Showing off my Paris trip / homemade churros / how to open a bank account",
     topicHintSimple: "A topic is enough. Without photos, images are created from your copy.",
@@ -269,6 +281,12 @@ export default defineMessages({
     submit: "Create post",
   },
   ja: {
+    postTypeLabel: "投稿形式", postTypeFeed: "フィード投稿", postTypeStory: "ストーリーズ",
+    storyHint: "縦9:16の画面を1〜5枚作り、1枚ずつストーリーズに投稿します。キャプションは付かず、リンク・音楽・アンケートのスタンプは投稿後にInstagramアプリで追加してください。",
+    storyPreview: "ストーリーズのプレビュー", storyReply: "メッセージを送信", storyCount: "ストーリーズ{n}件",
+    storyReviewNote: "ストーリーズは24時間表示されます。キャプション・ハッシュタグ・自動返信はストーリーズには使えません。",
+    publishStories: "ストーリーズを投稿({n}件)", publishingStories: "ストーリーズを投稿中 {done}/{total}",
+    storiesPublished: "ストーリーズを{n}件投稿しました", storiesPartial: "ストーリーズを{done}/{total}件投稿しました。続けて残りを投稿してください。",
     templateLabel: "テンプレート", advanced: "詳細設定(演出・参考画像・フォント・キャプション形式)",
     topicPlaceholderSimple: "何を投稿しますか？\n例) パリ旅行の思い出 / 手作りチュロス / 口座開設の方法まとめ",
     topicHintSimple: "テーマだけでも大丈夫。写真がなければ内容に合わせて画像を新しく作ります。",

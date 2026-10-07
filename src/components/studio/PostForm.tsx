@@ -9,7 +9,7 @@ import type { Job } from "@/lib/types";
 import { IconSpark } from "@/components/icons";
 import * as photoLib from "@/lib/photoLibrary";
 import { PhotoLibraryPanel } from "@/components/studio/PhotoLibraryPanel";
-import { Badge, Button, Card, cx, Field, inputClass, Notice } from "@/components/ui";
+import { Badge, Button, Card, cx, Field, inputClass, Notice, Segmented } from "@/components/ui";
 import { TEMPLATES, TEMPLATE_ICON, TemplateKey } from "@/components/studio/templates";
 import { captureCover, uploadImageBlob, uploadPhoto } from "@/lib/uploads";
 
@@ -37,6 +37,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [format, setFormat] = useState("");
   const refInput = useRef<HTMLInputElement>(null);
   const [template, setTemplate] = useState<TemplateKey>("auto");
+  const [postType, setPostType] = useState<"feed" | "story">("feed");
   const [font, setFont] = useState("auto");
   const fonts = useApi<{ data: { key: string; label: string; preview: string }[] }>("/studio/fonts");
   const [step, setStep] = useState<Step | null>(null);
@@ -188,7 +189,8 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           reference_ids: refIds,
           prompt: prompt.trim(),
           style: effStyle,
-          caption_format: effFormat,
+          caption_format: postType === "story" ? "" : effFormat,
+          post_type: postType,
           research_notes: research.notes,
           sources: research.sources,
           font,
@@ -243,6 +245,19 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             disabled={busy}
           />
         </Field>
+
+        <div className="space-y-2">
+          <Segmented
+            ariaLabel={t("studio.postTypeLabel")}
+            value={postType}
+            onChange={setPostType}
+            options={[
+              { value: "feed", label: t("studio.postTypeFeed") },
+              { value: "story", label: t("studio.postTypeStory") },
+            ]}
+          />
+          {postType === "story" && <p className="text-[12px] leading-relaxed text-fg-3">{t("studio.storyHint")}</p>}
+        </div>
 
         <div role="radiogroup" aria-label={t("studio.templateLabel")} className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
           {TEMPLATES.map((key) => {
@@ -460,28 +475,31 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           </div>
         </Field>
 
-        <Field
-          label={t("studio.formatLabel")}
-          htmlFor="cn-format"
-          hint={
-            <>
-              {t("studio.formatHint")}{" "}
-              <button type="button" className="underline" onClick={() => setFormat(t("studio.formatExample"))} disabled={busy}>
-                {t("studio.formatInsertExample")}
-              </button>
-            </>
-          }
-        >
-          <textarea
-            id="cn-format"
-            rows={5}
-            value={format}
-            onChange={(e) => setFormat(e.target.value)}
-            placeholder={tplFormat || t("studio.formatPlaceholder")}
-            className={cx(inputClass, "resize-y font-mono text-[12px]")}
-            disabled={busy}
-          />
-        </Field>
+        {/* 스토리에는 캡션이 붙지 않아 양식이 필요 없음 */}
+        {postType === "feed" && (
+          <Field
+            label={t("studio.formatLabel")}
+            htmlFor="cn-format"
+            hint={
+              <>
+                {t("studio.formatHint")}{" "}
+                <button type="button" className="underline" onClick={() => setFormat(t("studio.formatExample"))} disabled={busy}>
+                  {t("studio.formatInsertExample")}
+                </button>
+              </>
+            }
+          >
+            <textarea
+              id="cn-format"
+              rows={5}
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+              placeholder={tplFormat || t("studio.formatPlaceholder")}
+              className={cx(inputClass, "resize-y font-mono text-[12px]")}
+              disabled={busy}
+            />
+          </Field>
+        )}
 
           </div>
         </details>

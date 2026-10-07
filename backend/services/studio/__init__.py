@@ -14,14 +14,14 @@ from .compose import ACCENT, compose
 from .fonts import DEFAULT_FONT, FONTS, font_key, font_label, font_preview
 from .gemini import GeminiError, is_busy
 from .imaging import cover_fit, image_size, normalize, to_jpeg
-from .limits import MAX_PHOTOS, MAX_SLIDES, SIZE
+from .limits import MAX_PHOTOS, MAX_SLIDES, MAX_STORIES, SIZE, STORY_SIZE
 from .music import suggest_music
 from .planning import plan_post, slide_list
 from .research import photo_query, research
 from .visuals import ASPECT, edit_visual, render_visual
 
 __all__ = [
-    "ACCENT", "ASPECT", "DEFAULT_FONT", "FONTS", "MAX_PHOTOS", "MAX_SLIDES", "SIZE", "GeminiError",
+    "ACCENT", "ASPECT", "DEFAULT_FONT", "FONTS", "MAX_PHOTOS", "MAX_SLIDES", "MAX_STORIES", "SIZE", "STORY_SIZE", "GeminiError",
     "compose", "cover_fit", "edit_visual", "font_key", "font_label", "font_preview", "image_size", "is_busy",
     "normalize", "photo_query", "plan_post", "render_visual", "research", "slide_list", "suggest_music", "to_jpeg",
 ]

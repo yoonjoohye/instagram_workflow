@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useMe } from "@/components/AdminShell";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
+import { StoryPreview } from "@/components/studio/StoryPreview";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconSpark } from "@/components/icons";
 import { useT } from "@/i18n/client";
@@ -112,11 +113,16 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
     setPublishing(true);
     setError(undefined);
     try {
-      const published = await api<Job>("/workflow/publish", {
+      let published = await api<Job>("/workflow/publish", {
         method: "POST",
         json: { job_id: job!.id, share_to_feed: shareToFeed },
       });
       onChange(published);
+      // 스토리는 한 번에 다 못 올리면(서버 시간 제한) 이어서 요청합니다.
+      for (let guard = 0; published.media_kind === "STORIES" && published.status === "publishing" && guard < 10; guard++) {
+        published = await api<Job>("/workflow/publish", { method: "POST", json: { job_id: job!.id } });
+        onChange(published);
+      }
     } catch (e) {
       setError(toApiError(e).message);
       // 실패 사유(job.error)와 상태를 다시 읽어옵니다.
@@ -128,6 +134,35 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
   }
 
   const tone = statusTone(job.status);
+  const isStory = job.media_kind === "STORIES";
+  const progress = job.story_progress;
+
+  // 스토리 카드 아래 게시 줄 (발행 한도 · 진행 · 올리기)
+  const publishBar = !locked || job.status === "publishing" ? (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+      <div className="text-[12px] text-fg-3">
+        {progress && progress.done > 0 && progress.done < progress.total
+          ? t("studio.storiesPartial", { done: progress.done, total: progress.total })
+          : quota.data
+            ? rich(t("studio.quota", { remaining: quota.data.remaining, total: quota.data.total }), {
+                b: (c) => <span className="tnum font-medium text-fg-2">{c}</span>,
+              })
+            : null}
+      </div>
+      <Button
+        variant="primary"
+        className="max-sm:w-full"
+        onClick={publish}
+        loading={publishing}
+        disabled={visual.length === 0 || quota.data?.remaining === 0}
+      >
+        {publishing && progress
+          ? t("studio.publishingStories", { done: progress.done, total: progress.total })
+          : t("studio.publishStories", { n: visual.length })}
+      </Button>
+      {error && <div className="w-full"><Notice tone="bad">{error}</Notice></div>}
+    </div>
+  ) : null;
 
   return (
     <div className="space-y-6">
@@ -218,6 +253,12 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
 
       {job.music && <MusicCard job={job} locked={locked} onChange={onChange} />}
 
+      {isStory ? (
+        <Card title={t("studio.storyPreview")} subtitle={t("studio.storyReviewNote")}>
+          <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={visual} />
+          {publishBar}
+        </Card>
+      ) : (
       <Card
         title={t("studio.captionTitle")}
         subtitle={job.media_kind === "STORIES" ? t("studio.storiesNoCaption") : undefined}
@@ -333,6 +374,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
           {error && <Notice tone="bad">{error}</Notice>}
         </div>
       </Card>
+      )}
 
     </div>
   );

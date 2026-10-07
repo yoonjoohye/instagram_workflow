@@ -8,6 +8,7 @@ from . import gemini
 from .fonts import FONTS, font_for_text
 from .gemini import GeminiError
 from .imaging import b64, basic_enhance, collage, placeholder_background, small
+from .limits import SIZE, STORY_SIZE
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ def visual_prompt(
     art_style: str = "",
     post_format: str = "",
     font: str = "",
+    story: bool = False,
 ) -> str:
     """이미지 모델 지시문. 사용자 연출 방향을 맨 앞(최우선)에, 게시물 전체 그림체를 모든 장에 공통으로."""
     role = slide["role"]
@@ -82,6 +84,11 @@ def visual_prompt(
             }[role]
             + " Do not draw any readable text, letters, numbers, logos or watermarks (text is added separately)."
         )
+    if story:
+        lines.append(
+            "This is a full-screen vertical 9:16 Instagram Story. Keep the top 13% and bottom 17% free of faces, "
+            "important objects and any text (the app's profile bar and reply box cover those areas)."
+        )
     lines.append("High quality, polished, Instagram-ready.")
     return "\n".join(lines)
 
@@ -97,8 +104,9 @@ def render_visual(
     art_style: str = "",
     post_format: str = "",
     font: str = "",
+    story: bool = False,
 ) -> tuple[bytes, str]:
-    """(이미지, 엔진). 사진이 있으면 연출 편집(여러 장이면 한 이미지로 합침), 없으면 새로 생성.
+    """(이미지, 엔진). story 면 세로 9:16 스토리로. 사진이 있으면 연출 편집(여러 장이면 한 이미지로 합침), 없으면 새로 생성.
     실패하면 기본 보정 / 콜라주 / 배경. references 는 양식 템플릿 이미지."""
     if photos is None:
         photos = []
@@ -115,7 +123,9 @@ def render_visual(
         art_style=art_style,
         post_format=post_format,
         font=font,
+        story=story,
     )
+    size = STORY_SIZE if story else SIZE
     refs = references[:3]
     if refs:
         k = len(refs)
@@ -140,12 +150,12 @@ def render_visual(
     for photo in photos:
         parts.append({"inlineData": {"mimeType": "image/jpeg", "data": b64(small(photo, side))}})
     try:
-        return gemini.image_call(parts, ASPECT[slide["role"]]), "gemini"
+        return gemini.image_call(parts, "9:16" if story else ASPECT[slide["role"]]), "gemini"
     except (GeminiError, OSError, ValueError) as exc:
         log.warning("render_visual fallback: %s", exc)
         if len(photos) > 1:
-            return collage(photos), f"basic ({exc})"
-        return (basic_enhance(photos[0]) if photos else placeholder_background()), f"basic ({exc})"
+            return collage(photos, size), f"basic ({exc})"
+        return (basic_enhance(photos[0]) if photos else placeholder_background(size)), f"basic ({exc})"
 
 
 def edit_visual(image: bytes, instruction: str, *, aspect: str = "4:5") -> tuple[bytes, str]:

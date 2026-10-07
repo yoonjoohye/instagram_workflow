@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .fonts import DEFAULT_FONT, font_for_text, load_font
 from .imaging import cover_fit, to_jpeg
-from .limits import SIZE
+from .limits import SIZE, STORY_SAFE_BOTTOM, STORY_SAFE_TOP, STORY_SIZE
 from .textutil import no_emoji
 
 
@@ -66,20 +66,26 @@ def draw_lines(draw, lines, font, x, y, fill, gap) -> int:
 ACCENT = "#6c5ce7"  # 글 영역의 강조 막대·버튼 색
 
 
-def compose(photo: bytes, slide: dict[str, Any], *, accent: str = ACCENT, font: str = DEFAULT_FONT) -> bytes:
-    """레이아웃별로 이미지 위에 이 장의 글만 얹습니다 (배지·번호·쪽수·계정명 같은 고정 요소 없음)."""
-    W, H = SIZE
+def compose(
+    photo: bytes, slide: dict[str, Any], *, accent: str = ACCENT, font: str = DEFAULT_FONT, size: tuple[int, int] = SIZE
+) -> bytes:
+    """레이아웃별로 이미지 위에 이 장의 글만 얹습니다 (배지·번호·쪽수·계정명 같은 고정 요소 없음).
+    size 가 스토리(9:16)면 위·아래 가려지는 영역을 피해 글을 둡니다."""
+    W, H = size
     pad = 84
+    story = size == STORY_SIZE
+    top_inset = STORY_SAFE_TOP if story else 0
+    bottom_inset = STORY_SAFE_BOTTOM if story else 0
     role = slide["role"]
     title, body, cta = (no_emoji(slide.get(k, "")) for k in ("title", "body", "cta"))
     font = font_for_text(font, f"{title}{body}{cta}")
 
     if role in ("designed", "photo") or not (title or body):
-        return to_jpeg(cover_fit(photo, SIZE), 92)  # designed 는 글자까지 이미지 모델이 그림
+        return to_jpeg(cover_fit(photo, size), 92)  # designed 는 글자까지 이미지 모델이 그림
 
     if role == "panel":
-        photo_h = int(H * 0.62)
-        canvas = Image.new("RGB", SIZE, (250, 250, 248))
+        photo_h = int(H * (0.55 if story else 0.62))
+        canvas = Image.new("RGB", size, (250, 250, 248))
         canvas.paste(cover_fit(photo, (W, photo_h)), (0, 0))
         draw = ImageDraw.Draw(canvas)
         draw.rectangle((pad, photo_h + 64, pad + 56, photo_h + 70), fill=accent)
@@ -90,16 +96,16 @@ def compose(photo: bytes, slide: dict[str, Any], *, accent: str = ACCENT, font: 
             draw_lines(draw, wrap(draw, body, bf, W - pad * 2, 4), bf, pad, y + 14, (80, 80, 84), 1.45)
         return to_jpeg(canvas, 92)
 
-    base = cover_fit(photo, SIZE).convert("RGBA")
+    base = cover_fit(photo, size).convert("RGBA")
     if role == "overlay":
-        base = Image.alpha_composite(base, gradient(SIZE, 0.45, 0, 220))
+        base = Image.alpha_composite(base, gradient(size, 0.45, 0, 220))
         draw = ImageDraw.Draw(base)
         tf, bf = load_font("title", 84, font), load_font("body", 40, font)
         tl = wrap(draw, title, tf, W - pad * 2, 3) if title else []
         bl = wrap(draw, body, bf, W - pad * 2, 3) if body else []
         cta_h = 84 + 32 if cta else 0
         block = len(tl) * int(tf.size * 1.18) + (24 if tl and bl else 0) + len(bl) * int(bf.size * 1.4) + cta_h
-        y = H - pad - block
+        y = H - pad - bottom_inset - block
         y = draw_lines(draw, tl, tf, pad, y, "white", 1.18)
         y = draw_lines(draw, bl, bf, pad, y + (24 if tl and bl else 0), (235, 235, 240), 1.4)
         if cta:
@@ -111,13 +117,13 @@ def compose(photo: bytes, slide: dict[str, Any], *, accent: str = ACCENT, font: 
 
     # center: 이미지 위 어두운 막 + 가운데 큰 문장
     base = base.filter(ImageFilter.GaussianBlur(2))
-    base = Image.alpha_composite(base, Image.new("RGBA", SIZE, (8, 8, 12, 150)))
+    base = Image.alpha_composite(base, Image.new("RGBA", size, (8, 8, 12, 150)))
     draw = ImageDraw.Draw(base)
     tf, bf, cf = load_font("title", 76, font), load_font("body", 38, font), load_font("title", 32, font)
     tl = wrap(draw, title, tf, W - pad * 2, 3) if title else []
     bl = wrap(draw, body, bf, W - pad * 2, 4) if body else []
     block = len(tl) * int(tf.size * 1.2) + (36 if tl and bl else 0) + len(bl) * int(bf.size * 1.45) + (60 + 76 if cta else 0)
-    y = (H - block) // 2
+    y = top_inset + (H - top_inset - bottom_inset - block) // 2
     for line in tl:
         draw.text((W // 2, y), line, font=tf, fill="white", anchor="ma")
         y += int(tf.size * 1.2)

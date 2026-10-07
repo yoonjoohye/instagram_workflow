@@ -18,7 +18,7 @@ from .captions import (
 from .fonts import FONTS, font_key
 from .gemini import GeminiError
 from .imaging import b64, small
-from .limits import MAX_SLIDES
+from .limits import MAX_SLIDES, MAX_STORIES
 from .music import MUSIC_RULES, clean_music
 from .textutil import clip
 
@@ -100,6 +100,16 @@ _ORIGINAL_RULES = """
 LAYOUTS = ("designed", "photo", "overlay", "panel", "center")
 
 
+STORY_RULES = """
+
+스토리로 올림 (매우 중요 — 위 슬라이드 규칙보다 우선)
+- 피드 게시물이 아니라 인스타그램 스토리야. slides 의 각 장이 따로따로 올라가는 세로 9:16 전체 화면 스토리 한 개씩이야.
+- 장 수는 1~{max_stories}장. 사용자가 정한 수가 있으면 그대로.
+- 글은 한 장에 아주 짧게(제목 1~2줄), 크고 굵게. 위쪽 13%와 아래쪽 17%는 프로필·답장창에 가려지니 글·얼굴을 두지 마.
+- 스토리에는 캡션·해시태그가 붙지 않아. caption_parts 는 빈 문자열 1개, hashtags 는 빈 배열로.
+- 첫 장은 넘기고 싶게 만드는 장면으로, 마지막 장은 마무리(정리·한 줄 메시지)로."""
+
+
 def plan_schema(k: int) -> dict[str, Any]:
     return {
         "type": "OBJECT",
@@ -156,7 +166,6 @@ def plan_post(
     photos: list[bytes],
     *,
     prompt: str,
-    tone: str = "",  # (사용 안 함) 말투는 주제·연출 방향을 따름
     style: str,
     caption_format: str,
     notes: str = "",
@@ -165,9 +174,11 @@ def plan_post(
     language: str = "ko",
     original: bool = False,
     kinds: list[str] | None = None,
+    story: bool = False,
 ) -> tuple[dict[str, Any], str, str]:
     """(설계안, 사용 엔진, 경고) — Gemini 실패 시 기본 설계안. references 는 연출 참고 이미지.
-    language 는 사용자 화면 언어: 검수용 설명(requirements·concept)을 이 언어로, 게시물 글은 [주제]의 언어로."""
+    language 는 사용자 화면 언어: 검수용 설명(requirements·concept)을 이 언어로, 게시물 글은 [주제]의 언어로.
+    story 면 세로 9:16 스토리 여러 개로 (장마다 따로 올라감, 캡션 없음)."""
     n = len(photos)
     references = references or []
     template = caption_format.strip()
@@ -203,6 +214,8 @@ def plan_post(
         ),
     )
     text += MUSIC_RULES.format(ui_lang=LANG_NAME.get(language, "English"))
+    if story:
+        text += STORY_RULES.format(max_stories=MAX_STORIES)
     if original:
         text += _ORIGINAL_RULES.format(kinds=", ".join(f"{i}번={'동영상(대표 화면)' if k == 'video' else '사진'}" for i, k in enumerate(kinds or [])))
     parts: list[dict[str, Any]] = [{"text": text}]
@@ -238,6 +251,9 @@ def plan_post(
     else:
         # 지시·자유 모드: Gemini 가 쓴 캡션 그대로 (지시문 자체를 캡션으로 쓰지 않음)
         caption, tags_inline = "\n".join(str(p) for p in raw.get("caption_parts") or []).strip(), False
+    if story:  # 스토리는 캡션·해시태그를 붙일 수 없음 (API)
+        caption, tags_inline, design["hashtags"] = "", False, []
+        design["slides"] = design["slides"][:MAX_STORIES]
     design["caption"] = caption[:2200]
     design["hashtags_inline"] = tags_inline
     design["caption_format"] = template

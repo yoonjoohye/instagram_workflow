@@ -42,7 +42,10 @@ def sync_deleted(db: Session, account: Account, client: GraphClient, *, force: b
     ids |= set(
         db.scalars(
             select(GenerationJob.ig_media_id).where(
-                GenerationJob.account_id == account.id, GenerationJob.status == "published", GenerationJob.ig_media_id != ""
+                GenerationJob.account_id == account.id,
+                GenerationJob.status == "published",
+                GenerationJob.ig_media_id != "",
+                GenerationJob.media_kind != "STORIES",  # 스토리는 24시간 뒤 원래 사라짐
             )
         )
     )

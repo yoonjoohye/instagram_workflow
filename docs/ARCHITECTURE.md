@@ -52,6 +52,11 @@ PostForm (src/components/studio/PostForm.tsx)
  7. POST /workflow/publish       → services/publishing.py
 ```
 
+**스토리**(`post_type: "story"`)는 같은 흐름에서 장마다 세로 9:16(1080×1920)으로 만들고(`limits.STORY_SIZE`, 위·아래 가려지는 영역에는 글을 두지 않음),
+캡션·해시태그 없이 장마다 **따로** 올립니다. 여러 개를 60초 안에 다 못 올리면 `plan["story_media_ids"]` 에 올린 것을 기록하고
+`status: "publishing"` 으로 돌려주며, 화면(`Review.tsx`)이 같은 요청을 다시 보내 이어서 올립니다.
+스토리는 24시간 뒤 사라지므로 '인스타에서 삭제됨' 동기화에서 제외합니다.
+
 Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 응답이 없거나 혼잡하면 25초 안에 다음 모델로 넘어가고, 실패한 모델은 5분간 건너뜁니다.
 
 ## 프론트엔드 (`src/`)

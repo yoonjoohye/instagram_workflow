@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import desc, select
@@ -26,6 +27,14 @@ def compose_caption(caption: str, hashtags: list[str]) -> str:
     return f"{body}\n\n" + " ".join(f"#{t.lstrip('#')}" for t in hashtags)
 
 
+def _story_progress(job: GenerationJob) -> dict | None:
+    if job.media_kind != "STORIES":
+        return None
+    ids = (job.plan or {}).get("story_media_ids") or [] if isinstance(job.plan, dict) else []
+    total = len([a for a in (job.assets or []) if a.get("type") in {"image", "video"}])
+    return {"done": sum(1 for i in ids if i), "total": total}
+
+
 def _job_dict(job: GenerationJob) -> dict:
     return {
         "id": job.id,
@@ -46,6 +55,8 @@ def _job_dict(job: GenerationJob) -> dict:
         "sources": (job.plan or {}).get("sources", []) if isinstance(job.plan, dict) else [],
         # 게시물 만들기: 주제·연출 방향에서 뽑은 요구사항과 반영 위치 (검수용)
         "requirements": (job.plan or {}).get("requirements", []) if isinstance(job.plan, dict) else [],
+        # 스토리: 올린 개수 / 전체 (여러 개를 이어서 올리는 중일 때 화면에 표시)
+        "story_progress": _story_progress(job),
         # 인스타 음악 추천·선택 (사진 게시물은 게시 후 인스타 앱에서 추가)
         "music": (job.plan or {}).get("music") if isinstance(job.plan, dict) else None,
     }
@@ -163,6 +174,9 @@ def publish_job(
     if not visual:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "발행할 미디어가 없습니다.")
 
+    if job.media_kind == "STORIES":
+        return _publish_stories(db, account, job, visual)
+
     caption = compose_caption(job.caption, job.hashtags or [])
     job.status = "publishing"
     job.error = ""
@@ -253,6 +267,61 @@ def publish_job(
     rule = db.scalar(select(AutoReplyRule).where(AutoReplyRule.job_id == job.id))
     if rule is not None:
         rule.ig_media_id = job.ig_media_id
+    db.commit()
+    db.refresh(job)
+    return _job_dict(job)
+
+
+STORY_TIME_BUDGET = 40.0  # Vercel 60초 안에서 이만큼만 올리고, 나머지는 다음 요청에서 이어서
+_now = time.monotonic  # 테스트에서 바꿔 끼울 수 있게
+
+
+def _publish_stories(db: Session, account: Account, job: GenerationJob, visual: list[dict]) -> dict:
+    """스토리는 한 장씩 따로 올라갑니다. 올린 것은 plan["story_media_ids"] 에 기록해 두고, 시간이 모자라면
+    status 를 publishing 으로 두고 돌려줍니다 → 화면이 같은 요청을 다시 보내 이어서 올립니다."""
+    started = _now()
+    done: list[str | None] = list((job.plan or {}).get("story_media_ids") or [None] * len(visual))
+    done += [None] * (len(visual) - len(done))
+    job.status = "publishing"
+    job.error = ""
+    db.commit()
+    try:
+        with graph_for(account) as client:
+            remaining_needed = sum(1 for d in done if not d)
+            limit = publishing.publishing_limit(client, account.ig_user_id)
+            if limit["remaining"] < remaining_needed:
+                raise HTTPException(
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    f"24시간 발행 한도를 모두 썼습니다 ({limit['used']}/{limit['total']}).",
+                )
+            for i, asset in enumerate(visual):
+                if done[i]:
+                    continue
+                if _now() - started > STORY_TIME_BUDGET:
+                    break
+                container = publishing.create_container(client, account.ig_user_id, kind="STORIES", media_url=asset["url"])
+                if asset["type"] == "video":
+                    publishing.wait_until_finished(client, container)
+                result = publishing.publish(client, account.ig_user_id, container)
+                done[i] = result["media_id"]
+                # 새 리스트로 넣어야 DB 가 바뀐 것으로 알아챕니다 (같은 리스트를 고치면 저장이 안 됨)
+                job.plan = {**(job.plan or {}), "story_media_ids": list(done)}
+                if not job.ig_media_id:
+                    job.ig_media_id, job.permalink = result["media_id"], result.get("permalink", "")
+                db.commit()
+    except HTTPException:
+        job.status = "ready" if not any(done) else "publishing"
+        db.commit()
+        raise
+    except GraphError as exc:
+        job.status = "failed"
+        job.error = str(exc)
+        db.commit()
+        raise HTTPException(exc.status, str(exc)) from exc
+
+    if all(done):
+        job.status = "published"
+        job.published_at = dt.datetime.now(dt.timezone.utc)
     db.commit()
     db.refresh(job)
     return _job_dict(job)

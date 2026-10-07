@@ -17,6 +17,8 @@ from fastapi import (
     UploadFile,
     status,
 )
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -132,6 +134,8 @@ class PlanIn(BaseModel):
     font: str = Field(default="auto", max_length=40)  # auto = Gemini 가 형식에 맞게 선택
     # 화면 언어 (ko|en|ja). 게시물 글은 사용자가 주제를 쓴 언어를 따르고, 애매할 때만 이 언어.
     language: str | None = Field(default=None, max_length=8)
+    # feed = 피드 게시물(사진·캐러셀·릴스), story = 스토리(세로 9:16, 장마다 따로 올라감)
+    post_type: Literal["feed", "story"] = "feed"
 
 
 class RenderIn(BaseModel):
@@ -219,6 +223,7 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
     refs = _blobs(db, account, body.reference_ids)
     # 동영상이 있으면 이미지 편집 없이 올린 원본 그대로 게시하고, Gemini 는 캡션·해시태그·음악만 만듭니다.
     original = any(b.kind == "video" for b in blobs)
+    story = body.post_type == "story"
     kinds = ["video" if b.kind == "video" else "photo" for b in blobs]
     ai_images = [(db.get(MediaBlob, b.cover_id).data if b.kind == "video" else b.data) for b in blobs]  # type: ignore[union-attr]
     try:
@@ -232,6 +237,7 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             language=norm_lang(body.language or lang_of(request)),
             original=original,
             kinds=kinds,
+            story=story,
         )
     except svc.GeminiError as exc:
         # 엉뚱한 기본 구성으로 만들지 않고 멈춥니다.
@@ -244,8 +250,8 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
     slides = svc.slide_list(design)
     music = design.get("music") or []
     if original:
-        items = blobs[:10]  # 캐러셀은 최대 10장
-        media_kind = "CAROUSEL" if len(items) > 1 else ("REELS" if items[0].kind == "video" else "IMAGE")
+        items = blobs[: svc.MAX_STORIES if story else 10]  # 캐러셀은 최대 10장
+        media_kind = "STORIES" if story else "CAROUSEL" if len(items) > 1 else ("REELS" if items[0].kind == "video" else "IMAGE")
         assets = [
             {
                 "type": "video",
@@ -263,7 +269,7 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             for b in items
         ]
     else:
-        media_kind = "CAROUSEL" if len(slides) > 1 else "IMAGE"
+        media_kind = "STORIES" if story else "CAROUSEL" if len(slides) > 1 else "IMAGE"
         assets = [
             {"type": "image", "url": "", "thumbnail_url": "", "meta": {"role": s["role"], "status": "pending"}}
             for s in slides
@@ -290,6 +296,7 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             "topic": body.prompt,
             "sources": [s.model_dump() for s in body.sources],
             "original": original,
+            "post_type": body.post_type,
             # 인스타 음악 추천 — 첫 곡을 기본 선택 (사진 게시물에는 API 로 음악을 붙일 수 없어 앱에서 추가하도록 안내)
             "music": {"suggestions": music, "selected": music[0] if music else None},
         },
@@ -376,6 +383,8 @@ def render_slide(
     slides = svc.slide_list(job.plan)
     if not 0 <= index < len(slides):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "이미지 번호가 올바르지 않습니다.")
+    story = job.plan.get("post_type") == "story"
+    size = svc.STORY_SIZE if story else svc.SIZE
     slide = slides[index]
     uploads = _blobs(db, account, job.plan.get("upload_ids") or [])
     ids = slide.get("photos")
@@ -401,7 +410,7 @@ def render_slide(
     if current is not None and current.account_id != account.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "고칠 이미지를 찾지 못했습니다.")
     if current is not None:
-        edited, engine = svc.edit_visual(current.data, instruction, aspect=svc.ASPECT[slide["role"]])
+        edited, engine = svc.edit_visual(current.data, instruction, aspect="9:16" if story else svc.ASPECT[slide["role"]])
     else:
         baked = False
         references = [b.data for b in _blobs(db, account, job.plan.get("reference_ids") or [])]
@@ -415,6 +424,7 @@ def render_slide(
             art_style=job.plan.get("art_style", ""),
             post_format=job.plan.get("format", ""),
             font=job.plan.get("font", ""),
+            story=story,
         )
     if body and body.strict and engine.startswith("basic"):
         # 사용자가 요청한 수정이 적용되지 않았는데 조용히 같은/보정본 이미지로 바꾸지 않습니다.
@@ -423,11 +433,13 @@ def render_slide(
         # 이미지 생성이 실패하면 그림 속 글자(말풍선·손글씨)가 사라지므로 서버 글자로라도 내용을 살립니다.
         slide = {**slide, "role": "overlay", "title": slide["image_text"], "body": ""}
     if baked:
-        card = svc.to_jpeg(svc.cover_fit(edited, svc.SIZE), 92)
+        card = svc.to_jpeg(svc.cover_fit(edited, size), 92)
     else:
         # accent: 포인트 색을 고를 수 있던 때 만든 작업은 그 색을 유지 (지금은 기본 색)
-        card = svc.compose(edited, slide, accent=job.plan.get("accent", svc.ACCENT), font=job.plan.get("font", svc.DEFAULT_FONT))
-    blob = _save_blob(db, account, card, *svc.SIZE, kind="slide")
+        card = svc.compose(
+            edited, slide, accent=job.plan.get("accent", svc.ACCENT), font=job.plan.get("font", svc.DEFAULT_FONT), size=size
+        )
+    blob = _save_blob(db, account, card, *size, kind="slide")
     # 글을 얹기 전 이미지도 보관해 '지금 이미지에서 고치기'에 씁니다.
     vw, vh = svc.image_size(edited)
     visual_blob = _save_blob(db, account, edited, vw, vh, kind="visual")

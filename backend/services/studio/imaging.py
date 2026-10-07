@@ -41,9 +41,9 @@ def image_size(data: bytes) -> tuple[int, int]:
     return Image.open(io.BytesIO(data)).size
 
 
-def collage(photos: list[bytes]) -> bytes:
+def collage(photos: list[bytes], size: tuple[int, int] = SIZE) -> bytes:
     """이미지 생성이 안 될 때 여러 사진을 한 장에 담는 필름 사진 콜라주 (크림색 배경 + 흰 테두리 + 살짝 기울임)."""
-    w, h = SIZE
+    w, h = size
     k = len(photos)
     canvas = Image.new("RGB", (w, h), (243, 238, 228))
     if k == 2:
@@ -70,9 +70,9 @@ def collage(photos: list[bytes]) -> bytes:
     return to_jpeg(canvas, 92)
 
 
-def placeholder_background() -> bytes:
+def placeholder_background(size: tuple[int, int] = SIZE) -> bytes:
     """이미지 생성에 실패했고 원본 사진도 없을 때 쓰는 은은한 배경."""
-    w, h = SIZE
+    w, h = size
     img = Image.linear_gradient("L").resize((w, h)).convert("RGB")
     img = ImageOps.colorize(img.convert("L"), black=(38, 38, 52), white=(120, 110, 170))
     return to_jpeg(img.filter(ImageFilter.GaussianBlur(40)))

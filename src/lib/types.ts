@@ -56,6 +56,8 @@ export type Job = {
   requirements?: { requirement: string; how: string }[];
   /** 인스타 음악 추천·선택 (사진 게시물은 게시 후 인스타 앱에서 추가) */
   music?: { suggestions: MusicPick[]; selected: MusicPick | null } | null;
+  /** 스토리: 올린 개수 / 전체 */
+  story_progress?: { done: number; total: number } | null;
 };
 
 export type MusicPick = { title: string; artist: string; reason?: string; section?: string };
