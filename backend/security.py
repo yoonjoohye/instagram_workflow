@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
+import secrets
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -47,3 +49,30 @@ def load_session(token: str) -> dict[str, Any] | None:
         return _serializer().loads(token, max_age=SESSION_MAX_AGE)
     except BadSignature:
         return None
+
+
+# ── 비밀번호 (scrypt, 표준 라이브러리) ─────────────────────────────────────
+_SCRYPT = {"n": 2**14, "r": 8, "p": 1}
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, dklen=32, **_SCRYPT)
+    return f"scrypt${_SCRYPT['n']}${_SCRYPT['r']}${_SCRYPT['p']}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, n, r, p, salt, digest = stored.split("$")
+        if algo != "scrypt":
+            return False
+        got = hashlib.scrypt(password.encode("utf-8"), salt=bytes.fromhex(salt), dklen=32, n=int(n), r=int(r), p=int(p))
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(got.hex(), digest)
+
+
+def hash_code(email: str, purpose: str, code: str) -> str:
+    """이메일 인증번호 해시 (APP_SECRET 으로 HMAC — DB 가 새어도 번호를 알 수 없게)."""
+    msg = f"{purpose}:{email}:{code}".encode("utf-8")
+    return hmac.new(settings.app_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()

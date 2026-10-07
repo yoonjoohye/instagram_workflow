@@ -30,7 +30,7 @@ export default async function DataDeletionPage() {
 
       <Section title={t("legal.d1Title")}>
         <ol className="list-decimal space-y-1.5 pl-5">
-          <li>{rich(t("legal.d1Step1"), { link: (c) => <Link href="/admin">{c}</Link> })}</li>
+          <li>{rich(t("legal.d1Step1"), { link: (c) => <Link href="/admin/profile">{c}</Link>, b })}</li>
           <li>{rich(t("legal.d1Step2"), { b })}</li>
           <li>{t("legal.d1Step3")}</li>
         </ol>

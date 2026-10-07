@@ -11,7 +11,7 @@ from starlette.requests import Request
 from .config import settings
 from .db import init_db
 from .i18n import lang_of, translate_payload
-from .routers import auth, autoreply, insights, sentiment, video, studio, webhooks, workflow
+from .routers import auth, autoreply, members, insights, sentiment, video, studio, webhooks, workflow
 from .services.meta_graph import GraphError
 
 
@@ -64,6 +64,8 @@ def health(request: Request) -> dict:
         "ok": True,
         "meta_configured": settings.meta_configured,
         "auth_mode": settings.auth_mode,
+        # 회원에 연동할 수 있는 방식
+        "can_link": {"instagram": settings.instagram_configured, "facebook": settings.facebook_configured},
         # 게시물 구성·이미지 연출과 댓글 감정 분석에 쓰는 엔진
         "ai_engine": "gemini" if settings.gemini_api_key else "basic",
         "public_base_url": settings.public_base_url,
@@ -72,6 +74,7 @@ def health(request: Request) -> dict:
     }
 
 
+app.include_router(members.router)
 app.include_router(auth.router)
 app.include_router(workflow.router)
 app.include_router(insights.router)

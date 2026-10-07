@@ -42,6 +42,11 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 _ADDED_COLUMNS = {
     "insight_snapshots": {"totals_synced": "INTEGER DEFAULT 0"},
     "generation_jobs": {"plan": "JSON"},
+    "accounts": {
+        "user_id": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "provider": "VARCHAR(16) DEFAULT 'instagram'",
+        "fb_page_token_enc": "TEXT DEFAULT ''",
+    },
     "media_blobs": {"url": "TEXT DEFAULT ''", "cover_id": "VARCHAR(40) DEFAULT ''"},
     "auto_reply_rules": {
         "public_reply_enabled": "INTEGER DEFAULT 1",
@@ -62,6 +67,8 @@ _BACKFILL = {
     ),
     # 기존 규칙은 마이그레이션 시점부터 새 댓글로 간주
     ("auto_reply_rules", "enabled_at"): "UPDATE auto_reply_rules SET enabled_at = CURRENT_TIMESTAMP WHERE enabled = 1",
+    # 회원 기능 이전에 연결된 계정: 그때의 로그인 방식(Facebook 페이지가 있으면 facebook)
+    ("accounts", "provider"): "UPDATE accounts SET provider = CASE WHEN fb_page_id <> '' THEN 'facebook' ELSE 'instagram' END",
     ("auto_reply_rules", "dm_enabled"): (
         "UPDATE auto_reply_rules SET dm_enabled = "
         "CASE WHEN link_url <> '' OR link_message <> '' THEN 1 ELSE 0 END"

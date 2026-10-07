@@ -6,7 +6,7 @@ const AI_SEARCH = ["OAI-SearchBot", "ChatGPT-User", "PerplexityBot", "Perplexity
 // AI 모델 학습용 크롤러. 학습에 쓰이길 원하지 않으면 이 목록을 disallow 로 바꾸면 됩니다.
 const AI_TRAINING = ["GPTBot", "ClaudeBot", "Google-Extended", "Applebot-Extended", "CCBot", "meta-externalagent"];
 
-const PRIVATE = ["/admin", "/api/"];
+const PRIVATE = ["/admin", "/api/", "/login", "/signup", "/reset-password"];
 
 export default function robots(): MetadataRoute.Robots {
   return {

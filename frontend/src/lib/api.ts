@@ -6,9 +6,15 @@ import { getFormatLocale } from "./format";
 
 // 로컬: next.config 의 rewrite 가 uvicorn(8000) 으로, Vercel: vercel.json 이 api/index.py 로 보냅니다.
 export const API_BASE = "/api/py";
-export const LOGIN_URL = `${API_BASE}/auth/login`;
-/** 브라우저에 로그인된 인스타 계정으로 바로 넘어가지 않고 로그인 화면을 띄워 다른 계정을 연결 */
-export const SWITCH_LOGIN_URL = `${LOGIN_URL}?switch=1`;
+
+/** Instagram·Facebook 계정 연동 창으로 이동합니다 (로그인한 회원만).
+ *  휴대폰 앱은 이 주소(/api/py/auth/login)를 시스템 브라우저로 여는데 거기엔 회원 세션이 없어서,
+ *  먼저 받은 5분짜리 티켓을 붙여 보냅니다. switch: 브라우저에 로그인된 계정 말고 다른 계정을 고르게. */
+export async function startLink(provider: "instagram" | "facebook", opts: { switch?: boolean } = {}) {
+  const { ticket } = await api<{ ticket: string }>("/auth/link-ticket", { method: "POST" });
+  const q = new URLSearchParams({ provider, ticket, ...(opts.switch ? { switch: "1" } : {}) });
+  window.location.href = `${API_BASE}/auth/login?${q}`;
+}
 
 export class ApiError extends Error {
   constructor(

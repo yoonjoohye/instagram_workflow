@@ -88,10 +88,10 @@ def setup_status(account: Account = Depends(current_account)) -> dict:
     """자동 응답이 실제로 동작하기 위한 준비 상태 (UI 체크리스트용)."""
     scopes = set(account.granted_scopes.split(",")) if account.granted_scopes else set()
     return {
-        "auth_mode": settings.auth_mode,
+        "auth_mode": account.provider,
         "webhook_url": settings.webhook_url,
         "verify_token_set": bool(settings.webhook_verify_token),
-        "app_secret_set": bool(settings.webhook_secret),
+        "app_secret_set": bool(settings.webhook_secrets),
         "messages_permission": bool(
             scopes & {"instagram_business_manage_messages", "instagram_manage_messages"}
         ),
@@ -104,7 +104,7 @@ def setup_status(account: Account = Depends(current_account)) -> dict:
 @router.post("/subscribe")
 def subscribe(account: Account = Depends(current_account)) -> dict:
     """이 계정의 댓글·DM 이벤트를 앱 Webhook 으로 받도록 구독합니다."""
-    if settings.auth_mode != "instagram":
+    if account.provider != "instagram":
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Facebook 로그인 방식은 Meta 앱 대시보드에서 페이지 구독을 설정하세요.",

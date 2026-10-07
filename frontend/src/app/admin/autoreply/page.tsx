@@ -8,7 +8,7 @@ import { autoReplySummary } from "@/components/AutoReplyCard";
 import { useT } from "@/i18n/client";
 import type { MessageKey } from "@/i18n/core";
 import { rich } from "@/i18n/rich";
-import { api, LOGIN_URL, toApiError, useApi } from "@/lib/api";
+import { api, startLink, toApiError, useApi } from "@/lib/api";
 import { fmtInt, fmtRelative, mediaSrc } from "@/lib/format";
 import type { AutoReplyLog, AutoReplyLogStatus, AutoReplyRule, AutoReplyStatus, ListOf } from "@/lib/types";
 
@@ -200,12 +200,12 @@ function SetupCard({ status, loading }: { status?: AutoReplyStatus; loading: boo
     {
       ok: status.comments_permission,
       label: t("autoreply.checkComments"),
-      fix: <a href={LOGIN_URL} className="underline">{t("autoreply.fixComments")}</a>,
+      fix: <button type="button" onClick={() => startLink("instagram")} className="underline">{t("autoreply.fixComments")}</button>,
     },
     {
       ok: status.messages_permission,
       label: t("autoreply.checkMessages"),
-      fix: <a href={LOGIN_URL} className="underline">{t("autoreply.fixMessages")}</a>,
+      fix: <button type="button" onClick={() => startLink("instagram")} className="underline">{t("autoreply.fixMessages")}</button>,
     },
     {
       ok: status.verify_token_set,

@@ -68,6 +68,18 @@ export const IconInstagram = (p: P) => (
     <circle cx="17.5" cy="6.5" r="0.8" fill="currentColor" />
   </svg>
 );
+export const IconFacebook = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M13.5 21v-7h2.5l.4-3h-2.9V9.3c0-.9.3-1.5 1.5-1.5H16.6V5.2a20 20 0 00-2.2-.1c-2.2 0-3.6 1.3-3.6 3.8V11H8.5v3h2.3v7" />
+  </svg>
+);
+export const IconUser = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" />
+  </svg>
+);
 export const IconReply = (p: P) => (
   <svg {...base} {...p}>
     <path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z" />

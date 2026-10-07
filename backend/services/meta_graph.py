@@ -73,9 +73,11 @@ def _raise_for_graph(resp: httpx.Response) -> dict[str, Any]:
 class GraphClient:
     """동기 httpx 클라이언트. 서버리스 함수 수명에 맞춰 짧게 쓰고 닫습니다."""
 
-    def __init__(self, access_token: str | None = None, *, timeout: float = 30.0):
+    def __init__(self, access_token: str | None = None, *, provider: str | None = None, timeout: float = 30.0):
+        """provider: 이 토큰을 받은 연결 방식 (instagram | facebook). 비우면 기본 로그인 방식."""
         self.access_token = access_token
-        self._client = httpx.Client(base_url=settings.graph_base, timeout=timeout)
+        self.provider = provider or settings.auth_mode
+        self._client = httpx.Client(base_url=settings.graph_base_for(self.provider), timeout=timeout)
 
     def __enter__(self) -> "GraphClient":
         return self
@@ -196,7 +198,7 @@ class GraphClient:
 
     def ig_profile(self, ig_user_id: str) -> dict[str, Any]:
         # Instagram 로그인 토큰은 본인 계정만 조회하므로 /me 로 읽습니다.
-        target = "me" if settings.auth_mode == "instagram" else ig_user_id
+        target = "me" if self.provider == "instagram" else ig_user_id
         return self.get(
             target,
             {

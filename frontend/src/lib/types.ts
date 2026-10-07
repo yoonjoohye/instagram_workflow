@@ -13,8 +13,23 @@ export type Me = {
   follows_count: number;
   media_count: number;
   fb_page_name: string;
+  /** instagram: Instagram 로그인으로 연동 · facebook: Facebook 페이지를 통해 연동 */
+  provider: "instagram" | "facebook";
+  facebook_linked: boolean;
   granted_scopes: string[];
   token_expires_at: string | null;
+};
+
+/** 서비스 회원 (이메일 로그인) */
+export type SessionUser = { id: number; email: string; name: string; created_at: string };
+
+/** GET /auth/session — 회원 + 지금 고른 Instagram 계정(없으면 null) + 연동 상태 */
+export type Session = {
+  user: SessionUser;
+  account: Me | null;
+  accounts: LinkedAccount[];
+  facebook: { name: string; pages: { id: string; name: string; ig_username: string }[]; linked_at: string } | null;
+  can_link: { instagram: boolean; facebook: boolean };
 };
 
 export type Health = {
@@ -259,10 +274,4 @@ export type PostDetailData = {
 
 
 /** 이 브라우저에서 연결한 계정 (다시 로그인하지 않고 전환) */
-export type LinkedAccount = {
-  id: number;
-  username: string;
-  name: string;
-  profile_picture_url: string;
-  current: boolean;
-};
+export type LinkedAccount = Me & { current: boolean };

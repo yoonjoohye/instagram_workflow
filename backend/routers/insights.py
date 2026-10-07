@@ -297,7 +297,7 @@ def cron_sync(request: Request, db: Session = Depends(get_db)) -> dict:
 
     synced, failed = 0, []
     for account in db.scalars(select(Account)).all():
-        if settings.auth_mode == "instagram":
+        if account.provider == "instagram":
             try:
                 _refresh_ig_token(db, account)
             except GraphError as exc:  # 갱신 실패해도 현재 토큰이 살아 있으면 동기화는 계속합니다.

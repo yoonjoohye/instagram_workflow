@@ -38,9 +38,11 @@ npm run dev:api           # FastAPI → http://127.0.0.1:8000 (저장소 맨 위
 npm run dev               # Next.js → http://localhost:3000 (/api/py/* 는 8000 으로 프록시)
 ```
 
-**로그인 없이 화면 확인**: Instagram 로그인은 HTTPS 콜백이 필요해 로컬에서는 바로 안 됩니다.
-`.env` 에 `DEV_LOGIN=1` 을 넣으면 로그인 화면에 **'로컬 테스트 로그인'** 버튼이 생겨, DB 에 이미 연결된 계정으로 들어갈 수 있습니다
-(이 컴퓨터의 localhost 요청에서만 동작, Vercel 에서는 항상 꺼짐). 처음 계정을 연결할 때는 터널(cloudflared 등)로 HTTPS 주소를 만들어 로그인하세요.
+**회원·연동**: 이메일로 가입·로그인하고(인증번호 메일), 프로필에서 Instagram·Facebook 계정을 연동합니다.
+`RESEND_API_KEY` 가 없으면 로컬에서는 인증번호를 화면에 보여 줍니다.
+Instagram·Facebook 연동은 HTTPS 콜백이 필요해 로컬에서는 바로 안 됩니다. `.env` 에 `DEV_LOGIN=1` 을 넣으면 로그인 화면에
+**'로컬 테스트 로그인'** 버튼이 생겨, 개발용 회원으로 DB 에 이미 있는 계정을 씁니다
+(이 컴퓨터의 localhost 요청에서만 동작, Vercel 에서는 항상 꺼짐). 처음 연동할 때는 터널(cloudflared 등)로 HTTPS 주소를 만드세요.
 
 ## 확인 (커밋 전에)
 
@@ -59,7 +61,9 @@ npm run build             # 웹 빌드
 |---|---|
 | `APP_SECRET` | 세션 서명·토큰 암호화 |
 | `DATABASE_URL` | Neon Postgres (Vercel Storage 연결 시 자동) |
-| `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` | Instagram 로그인 (없으면 `META_APP_ID/SECRET` 로 Facebook 로그인) |
+| `RESEND_API_KEY`, `MAIL_FROM` | 회원가입·비밀번호 재설정 인증번호 메일 |
+| `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` | Instagram 계정 연동 (Instagram 로그인) |
+| `META_APP_ID` / `META_APP_SECRET` | Facebook 계정 연동 (Facebook 로그인) |
 | `GEMINI_API_KEY` | 게시물 구성·이미지 연출·댓글 감정 분석 (이미지 생성은 **결제 연결된 유료 등급** 필요) |
 | `BLOB_READ_WRITE_TOKEN` | 동영상·편집한 영상 저장소 (Vercel Blob 스토어 연결 시 자동) |
 | `WEBHOOK_VERIFY_TOKEN` | 댓글·DM Webhook 인증 |
@@ -67,7 +71,7 @@ npm run build             # 웹 빌드
 | `GOOGLE_SITE_VERIFICATION`, `NAVER_SITE_VERIFICATION` | 서치 콘솔·서치어드바이저 소유 확인 메타 태그 |
 | `NPM_CONFIG_ONNXRUNTIME_NODE_INSTALL=skip` | 브라우저용 AI 라이브러리의 서버용 부품 설치 생략 (빌드 시간 초과 방지) |
 
-Meta 앱: Instagram 로그인 리디렉션 URL `https://<도메인>/api/py/auth/callback`,
+Meta 앱: Instagram 로그인·Facebook 로그인 **둘 다** 리디렉션 URL `https://<도메인>/api/py/auth/callback`,
 Webhooks 콜백 `https://<도메인>/api/py/webhooks/instagram` (구독 필드 `comments`, `messages`).
 앱이 개발 모드면 **앱 역할 → Instagram 테스터**로 등록된 계정만 로그인됩니다.
 

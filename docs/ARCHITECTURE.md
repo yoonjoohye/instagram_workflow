@@ -25,10 +25,11 @@
 |---|---|
 | `main.py` | 앱 생성, 라우터 연결, **응답 문구 번역 미들웨어**(아래 i18n) |
 | `config.py` | 환경변수 (`.env`, `.env.local`) |
-| `deps.py` | 로그인한 계정 꺼내기(`current_account`), Instagram API 클라이언트 |
-| `security.py` | 세션 쿠키 서명, 액세스 토큰 암호화 |
+| `deps.py` | 로그인한 회원(`current_user`)·지금 고른 Instagram 계정(`current_account`, 없으면 409) 꺼내기, 계정별 Graph API 클라이언트 |
+| `security.py` | 세션 쿠키 서명(`{uid, sv, account_id}`), 액세스 토큰 암호화, 비밀번호(scrypt)·인증번호 해시 |
 | `i18n.py` | 서버 메시지(한국어) → 요청 언어 번역표 |
-| `routers/auth.py` | Instagram 로그인·콜백, 여러 계정 연결·전환, **앱 로그인 코드 교환**, 로컬 테스트 로그인, 데이터 삭제 콜백 |
+| `routers/members.py` | **회원**: 이메일 인증번호 가입, 로그인(10회 틀리면 15분 잠금), 비밀번호 재설정·변경, 프로필, 탈퇴, `/auth/session` |
+| `routers/auth.py` | 회원에 **Instagram(여러 개)·Facebook(하나) 연동** OAuth·콜백, 계정 전환·연동 해제, 앱 연동 티켓·코드 교환, 로컬 테스트 로그인, Meta 데이터 삭제 콜백 |
 | `routers/studio.py` | 게시물 만들기: 업로드, 조사, 구성, 장별 이미지, AI 없이 직접 만들기, 순서 바꾸기, 캡션 다시 쓰기·해시태그 추천, 마무리 |
 | `routers/video.py` | **동영상 편집** (자르기·소리 끄기·대표 화면) |
 | `routers/workflow.py` | 만든 게시물 목록·수정·삭제, **Instagram 게시** |
@@ -110,7 +111,9 @@ Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 
 | `photo` | `photoId` | `{ b64, filename }` (긴 변 1600px) | 〃 |
 | `save` | `urls, message` | 저장한 개수 | 〃 (사진첩에 저장) |
 
-로그인은 메시지 대신 앱이 `/api/py/auth/login` 으로 가는 이동을 가로채 시스템 로그인 창을 엽니다 → 콜백이 2분짜리 코드를 앱 주소로 돌려줌 → 앱 화면이 `/auth/app-session?code=` 로 세션을 받습니다.
+회원 로그인(이메일)은 앱 화면 안에서 그대로 합니다. 계정 연동은 앱이 `/api/py/auth/login` 으로 가는 이동을 가로채 시스템 로그인 창을 여는데,
+그 브라우저엔 회원 세션이 없으므로 화면이 먼저 받은 5분짜리 연동 티켓(`/auth/link-ticket`)을 주소에 붙입니다
+→ 콜백이 2분짜리 코드를 앱 주소로 돌려줌 → 앱 화면이 `/auth/app-session?code=` 로 세션을 받습니다.
 돌려줄 수 있는 주소는 `instaautostudio://` 와 같은 와이파이의 Expo Go(`exp://<사설 IP>`)뿐입니다.
 
 ## 테스트

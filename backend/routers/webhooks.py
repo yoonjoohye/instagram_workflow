@@ -45,10 +45,13 @@ def verify(
 
 
 def valid_signature(body: bytes, header: str | None) -> bool:
-    if not settings.webhook_secret or not header or not header.startswith("sha256="):
+    # Instagram 로그인·Facebook 로그인 앱 시크릿 중 하나로 서명돼 있으면 통과
+    if not settings.webhook_secrets or not header or not header.startswith("sha256="):
         return False
-    expected = hmac.new(settings.webhook_secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(header.removeprefix("sha256="), expected)
+    got = header.removeprefix("sha256=")
+    return any(
+        hmac.compare_digest(got, hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()) for secret in settings.webhook_secrets
+    )
 
 
 @router.post("/instagram")

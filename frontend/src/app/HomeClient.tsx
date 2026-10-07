@@ -6,9 +6,9 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useT } from "@/i18n/client";
 import { FAQ, HOW } from "./landingContent";
 import { rich } from "@/i18n/rich";
-import { LOGIN_URL, SWITCH_LOGIN_URL, useApi } from "@/lib/api";
-import type { Health, Me } from "@/lib/types";
-import { IconChart, IconInstagram, IconReply, IconSpark } from "@/components/icons";
+import { useApi } from "@/lib/api";
+import type { Health, Session } from "@/lib/types";
+import { IconChart, IconReply, IconSpark } from "@/components/icons";
 import { Logo } from "@/components/Logo";
 import { Notice, Spinner } from "@/components/ui";
 
@@ -21,13 +21,12 @@ const FEATURES = [
 export function HomeClient() {
   const t = useT();
   const code = (c: ReactNode) => <code>{c}</code>;
-  const me = useApi<Me>("/auth/me");
+  const me = useApi<Session>("/auth/session");
   const health = useApi<Health>("/health");
   const loggedIn = Boolean(me.data);
+  const username = me.data?.account?.username;
   // Next 프록시는 백엔드 연결 실패를 500 으로 돌려주므로 0 과 5xx 를 모두 "백엔드 꺼짐"으로 봅니다.
   const backendDown = Boolean(health.error && (health.error.status === 0 || health.error.status >= 500));
-  const loginBlocked = backendDown || health.data?.meta_configured === false;
-  const viaFacebook = health.data?.auth_mode === "facebook";
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-4xl flex-col px-4 py-10 sm:px-6 sm:py-16">
@@ -57,30 +56,21 @@ export function HomeClient() {
               href="/admin"
               className="inline-flex h-11 items-center rounded-lg bg-accent px-5 text-sm font-semibold text-on-accent hover:opacity-90"
             >
-              {t("landing.goDashboard", { username: me.data!.username })}
+              {username ? t("landing.goDashboard", { username }) : t("landing.goApp")}
             </Link>
-          ) : null}
-          {loggedIn && !me.loading ? (
-            <a href={SWITCH_LOGIN_URL} className="text-[13px] text-fg-3 underline-offset-2 hover:text-fg hover:underline">
-              {t("shell.addAccount")}
-            </a>
-          ) : null}
-          {me.loading || loggedIn ? null : loginBlocked ? (
-            <span className="inline-flex h-11 cursor-not-allowed items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-on-accent opacity-50">
-              <IconInstagram /> {t("common.connectInstagram")}
-            </span>
           ) : (
-            <a
-              href={LOGIN_URL}
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-on-accent hover:opacity-90"
-            >
-              <IconInstagram /> {t("common.connectInstagram")}
-            </a>
-          )}
-          {!loggedIn && !me.loading && !loginBlocked && (
-            <span className="text-[13px] text-fg-3">
-              {viaFacebook ? t("landing.viaFacebook") : t("landing.viaInstagram")}
-            </span>
+            <>
+              <Link
+                href="/signup"
+                className="inline-flex h-11 items-center rounded-lg bg-accent px-5 text-sm font-semibold text-on-accent hover:opacity-90"
+              >
+                {t("landing.start")}
+              </Link>
+              <Link href="/login" className="inline-flex h-11 items-center rounded-lg border border-line px-5 text-sm font-semibold hover:bg-surface-2">
+                {t("auth.loginTitle")}
+              </Link>
+              <span className="w-full text-[13px] text-fg-3">{t("landing.startNote")}</span>
+            </>
           )}
         </div>
 
@@ -156,7 +146,7 @@ export function HomeClient() {
         </Link>
       </nav>
       <p className="pt-3 text-[12px] leading-relaxed text-fg-3">
-        {t("landing.footnote", { fb: viaFacebook ? t("landing.footnoteFb") : "" })}
+        {t("landing.footnote", { fb: "" })}
       </p>
     </main>
   );

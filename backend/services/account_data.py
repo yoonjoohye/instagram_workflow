@@ -24,6 +24,7 @@ from ..models import (
     CommentReply,
     CommentSentiment,
     DataDeletionRequest,
+    FacebookLink,
     GenerationJob,
     InsightSnapshot,
     MediaBlob,
@@ -41,8 +42,11 @@ def parse_signed_request(signed_request: str) -> dict[str, Any] | None:
     """'<서명>.<페이로드>' — 서명이 맞으면 페이로드(dict), 아니면 None."""
     try:
         sig_b64, payload_b64 = signed_request.split(".", 1)
-        expected = hmac.new(settings.webhook_secret.encode(), payload_b64.encode(), hashlib.sha256).digest()
-        if not settings.webhook_secret or not hmac.compare_digest(_b64url(sig_b64), expected):
+        sig = _b64url(sig_b64)
+        if not any(
+            hmac.compare_digest(sig, hmac.new(secret.encode(), payload_b64.encode(), hashlib.sha256).digest())
+            for secret in settings.webhook_secrets
+        ):
             return None
         payload = json.loads(_b64url(payload_b64))
     except (ValueError, json.JSONDecodeError):
@@ -70,8 +74,12 @@ def delete_by_platform_user(db: Session, user_id: str, *, source: str) -> DataDe
     ).all() if user_id else []
     for account in accounts:
         delete_account(db, account)
+    # Facebook 연동 기록도 (회원 정보 자체는 이메일 회원이라 남김)
+    links = db.scalars(select(FacebookLink).where(FacebookLink.fb_user_id == user_id)).all() if user_id else []
+    for link in links:
+        db.delete(link)
     record = DataDeletionRequest(
-        code=secrets.token_hex(8), source=source, status="completed" if accounts else "not_found"
+        code=secrets.token_hex(8), source=source, status="completed" if accounts or links else "not_found"
     )
     db.add(record)
     db.commit()

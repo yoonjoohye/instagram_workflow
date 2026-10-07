@@ -17,6 +17,9 @@ os.environ.update(
     PUBLIC_BASE_URL="https://testserver",
     DEV_LOGIN="0",
     BLOB_READ_WRITE_TOKEN="",
+    META_APP_ID="",
+    META_APP_SECRET="",
+    RESEND_API_KEY="",
 )
 
 import pytest  # noqa: E402
@@ -24,8 +27,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from backend.db import SessionLocal, init_db  # noqa: E402
 from backend.main import app  # noqa: E402
-from backend.models import Account  # noqa: E402
-from backend.security import SESSION_COOKIE, encrypt, sign_session  # noqa: E402
+from backend.models import Account, User  # noqa: E402
+from backend.security import SESSION_COOKIE, encrypt, hash_password, sign_session  # noqa: E402
 
 init_db()
 
@@ -65,11 +68,30 @@ def client():
 
 
 @pytest.fixture
-def login(client):
-    """client 를 그 계정으로 로그인시킵니다: login(account, linked=[...])"""
+def login(client, db):
+    """client 를 그 계정의 회원으로 로그인시킵니다: login(account, linked=[...]).
+    계정에 회원이 없으면 테스트용 회원을 만들어 계정들을 붙입니다 (테스트 끝나면 회원 삭제)."""
+    import secrets
+
+    made: list[int] = []
 
     def _login(acc, linked=None):
-        client.cookies.set(SESSION_COOKIE, sign_session({"account_id": acc.id, "linked": linked or [acc.id]}))
+        acc = db.get(Account, acc.id)
+        user = db.get(User, acc.user_id) if acc.user_id else None
+        if user is None:
+            user = User(email=f"t{secrets.token_hex(4)}@test.dev", password_hash=hash_password("pass1234"), name="T")
+            db.add(user)
+            db.commit()
+            made.append(user.id)
+        for account_id in [acc.id, *(linked or [])]:
+            db.get(Account, account_id).user_id = user.id
+        db.commit()
+        client.cookies.set(SESSION_COOKIE, sign_session({"uid": user.id, "sv": user.session_version, "account_id": acc.id}))
         return client
 
-    return _login
+    yield _login
+    for user_id in made:
+        user = db.get(User, user_id)
+        if user is not None:
+            db.delete(user)
+    db.commit()

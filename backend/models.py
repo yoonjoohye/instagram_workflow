@@ -26,12 +26,66 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    """서비스 회원 (이메일 + 비밀번호). Instagram·Facebook 계정은 회원에 연동합니다."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True, index=True)  # 소문자로 저장
+    password_hash: Mapped[str] = mapped_column(String(255))
+    name: Mapped[str] = mapped_column(String(80), default="")
+    email_verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # 비밀번호를 바꾸면 1 올려 다른 기기의 로그인(세션)을 끊습니다.
+    session_version: Mapped[int] = mapped_column(Integer, default=1)
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class EmailCode(Base):
+    """이메일 인증번호 (회원가입·비밀번호 재설정). 번호는 해시로만 보관합니다."""
+
+    __tablename__ = "email_codes"
+    __table_args__ = (Index("ix_email_codes_email_purpose", "email", "purpose"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(254))
+    purpose: Mapped[str] = mapped_column(String(16))  # signup | reset
+    code_hash: Mapped[str] = mapped_column(String(128))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FacebookLink(Base):
+    """회원에 연동한 Facebook 계정 (회원당 하나). 페이지에 연결된 Instagram 계정은 Account 로 따로 연결합니다."""
+
+    __tablename__ = "facebook_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    fb_user_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    access_token_enc: Mapped[str] = mapped_column(Text)  # 장기 사용자 토큰 (Fernet 암호화)
+    token_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    granted_scopes: Mapped[str] = mapped_column(Text, default="")
+    pages: Mapped[Any] = mapped_column(JSON, default=list)  # [{id, name, ig_username}] 표시용
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Account(Base):
-    """Facebook 로그인으로 연결된 Instagram 프로페셔널 계정 하나."""
+    """회원에 연동한 Instagram 프로페셔널 계정 하나.
+    provider: instagram(Instagram 로그인으로 연결) | facebook(Facebook 페이지를 통해 연결)."""
 
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    provider: Mapped[str] = mapped_column(String(16), default="instagram")
     ig_user_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     username: Mapped[str] = mapped_column(String(128), default="")
     name: Mapped[str] = mapped_column(String(255), default="")
@@ -44,7 +98,10 @@ class Account(Base):
     fb_page_id: Mapped[str] = mapped_column(String(64), default="")
     fb_page_name: Mapped[str] = mapped_column(String(255), default="")
 
-    # Fernet 으로 암호화된 페이지 액세스 토큰
+    # Instagram 로그인으로 연결한 계정에 Facebook 도 연동했다면 그 페이지 토큰 (Facebook 전용 API 용, 암호화)
+    fb_page_token_enc: Mapped[str] = mapped_column(Text, default="")
+
+    # Fernet 으로 암호화된 액세스 토큰 (provider 에 맞는 것)
     access_token_enc: Mapped[str] = mapped_column(Text)
     token_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     granted_scopes: Mapped[str] = mapped_column(Text, default="")

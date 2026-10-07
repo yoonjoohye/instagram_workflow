@@ -27,7 +27,16 @@ class Settings(BaseSettings):
     instagram_app_id: str = ""
     instagram_app_secret: str = ""
 
+    # Threads 연동용 (아직 화면 없음 — Threads API 앱 ID / 시크릿)
+    threads_app_id: str = ""
+    threads_app_secret: str = ""
+
     cron_secret: str = ""
+
+    # 이메일 인증번호 발송 (Resend: https://resend.com → API Keys). 비워 두면 로컬에서는 화면·서버 로그에 번호를 보여 줍니다.
+    resend_api_key: str = ""
+    # 보내는 사람. 도메인 인증 전에는 onboarding@resend.dev (Resend 가입 메일 주소로만 발송됨)
+    mail_from: str = "Auto Studio <onboarding@resend.dev>"
 
     # 댓글 감정 분석(긍정/보통/부정). 비워두면 한국어 키워드·이모지 규칙으로 분류합니다.
     gemini_api_key: str = ""
@@ -51,6 +60,24 @@ class Settings(BaseSettings):
         if prod and "localhost" in self.public_base_url:
             self.public_base_url = f"https://{prod}"
         return self
+
+    @property
+    def instagram_configured(self) -> bool:
+        return bool(self.instagram_app_id and self.instagram_app_secret)
+
+    @property
+    def facebook_configured(self) -> bool:
+        return bool(self.meta_app_id and self.meta_app_secret)
+
+    def graph_base_for(self, provider: str) -> str:
+        """연결 방식별 Graph API 주소: Instagram 로그인으로 연결한 계정은 graph.instagram.com, Facebook 은 graph.facebook.com."""
+        host = "graph.instagram.com" if provider == "instagram" else "graph.facebook.com"
+        return f"https://{host}/{self.meta_api_version}"
+
+    @property
+    def webhook_secrets(self) -> list[str]:
+        """Webhook·signed_request 서명 검증에 쓰는 앱 시크릿 (두 연결 방식 모두)."""
+        return [s for s in (self.instagram_app_secret, self.meta_app_secret) if s]
 
     @property
     def auth_mode(self) -> str:
