@@ -62,7 +62,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   if (!session.data) return <LoadError message={session.error?.message} onRetry={session.reload} />;
 
   const s = session.data;
-  const body = s.account || pathname === PROFILE ? children : <ConnectGate />;
+  const body = s.account || pathname.startsWith(PROFILE) ? children : <ConnectGate />;
   const page = (
     <div className="min-h-dvh md:grid md:grid-cols-[232px_1fr]">
       <Sidebar session={s} />

@@ -1,7 +1,8 @@
 "use client";
 
-/** 프로필: 회원 정보 · 연동한 계정(Instagram 여러 개, Facebook 하나) · 비밀번호 변경 · 회원 탈퇴 */
+/** 프로필 (한 줄): 회원 정보(→ 비밀번호 변경 페이지) · 계정 연동(Instagram 여러 개, Facebook 하나) · 회원 탈퇴 */
 
+import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { useSession } from "@/components/AdminShell";
 import { IconFacebook, IconInstagram } from "@/components/icons";
@@ -14,18 +15,11 @@ import type { LinkedAccount } from "@/lib/types";
 export default function ProfilePage() {
   const t = useT();
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <PageHeader title={t("auth.profileTitle")} description={t("auth.profileSubtitle")} />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0 space-y-6">
-          <LinkedAccounts />
-        </div>
-        <div className="min-w-0 space-y-6">
-          <MemberInfo />
-          <PasswordCard />
-          <WithdrawCard />
-        </div>
-      </div>
+      <MemberInfo />
+      <LinkedAccounts />
+      <WithdrawCard />
     </div>
   );
 }
@@ -77,7 +71,15 @@ function MemberInfo() {
   );
 
   return (
-    <Card title={t("auth.memberInfo")} subtitle={t("auth.joined", { date: fmtDateTime(u.created_at) })}>
+    <Card
+      title={t("auth.memberInfo")}
+      subtitle={t("auth.joined", { date: fmtDateTime(u.created_at) })}
+      action={
+        <Link href="/admin/profile/password" className="inline-flex h-8 items-center rounded-lg border border-line-strong px-3 text-[13px] font-medium hover:bg-surface-2">
+          {t("auth.changePassword")} →
+        </Link>
+      }
+    >
       <form onSubmit={save} className="space-y-3">
         <div>
           <p className="mb-1.5 text-[13px] font-medium text-fg-2">{t("auth.email")}</p>
@@ -256,57 +258,6 @@ function LinkedAccounts() {
         </section>
         {error && <Notice tone="bad">{error}</Notice>}
       </div>
-    </Card>
-  );
-}
-
-function PasswordCard() {
-  const t = useT();
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (next !== confirm) return setMsg({ ok: false, text: t("auth.passwordMismatch") });
-    setBusy(true);
-    setMsg(undefined);
-    try {
-      await api("/auth/password", { method: "POST", json: { current_password: current, new_password: next } });
-      setCurrent("");
-      setNext("");
-      setConfirm("");
-      setMsg({ ok: true, text: t("auth.passwordChanged") });
-    } catch (err) {
-      setMsg({ ok: false, text: toApiError(err).message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const field = (label: string, value: string, set: (v: string) => void, auto: string, hint?: string) => (
-    <label className="block">
-      <span className="mb-1.5 block text-[13px] font-medium text-fg-2">{label}</span>
-      <input type="password" required value={value} onChange={(e) => set(e.target.value)} autoComplete={auto} className={cx(inputClass, "h-10")} />
-      {hint && <span className="mt-1 block text-[12px] text-fg-3">{hint}</span>}
-    </label>
-  );
-
-  return (
-    <Card title={t("auth.changePassword")}>
-      <form onSubmit={submit} className="space-y-3">
-        {field(t("auth.currentPassword"), current, setCurrent, "current-password")}
-        {field(t("auth.newPassword"), next, setNext, "new-password", t("auth.passwordHint"))}
-        {field(t("auth.passwordConfirm"), confirm, setConfirm, "new-password")}
-        <div className="flex items-center gap-3">
-          <Button type="submit" size="sm" loading={busy}>
-            {t("auth.changePassword")}
-          </Button>
-        </div>
-        <Msg {...msg} />
-      </form>
     </Card>
   );
 }
