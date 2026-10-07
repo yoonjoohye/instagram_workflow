@@ -11,6 +11,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Request,
     Response,
@@ -378,8 +379,11 @@ def render_slide(
     job = _own_job(db, account, job_id)
     if job.status == "published":
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 게시된 작업입니다.")
-    if job.plan.get("original"):
+    # 원본 그대로 게시하는 작업: 처음부터 다시 만들 연출이 없으므로 '지금 이미지에서 고치기'만 됩니다 (동영상은 불가).
+    if job.plan.get("original") and not (body and body.from_current):
         raise HTTPException(status.HTTP_409_CONFLICT, "원본 그대로 게시하는 작업은 이미지를 다시 만들 수 없습니다.")
+    if (job.assets or [{}])[index if 0 <= index < len(job.assets or []) else 0].get("type") == "video":
+        raise HTTPException(status.HTTP_409_CONFLICT, "동영상은 AI 로 고칠 수 없습니다.")
     slides = svc.slide_list(job.plan)
     if not 0 <= index < len(slides):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "이미지 번호가 올바르지 않습니다.")
@@ -432,14 +436,16 @@ def render_slide(
     if slide["role"] == "designed" and engine.startswith("basic") and slide.get("image_text"):
         # 이미지 생성이 실패하면 그림 속 글자(말풍선·손글씨)가 사라지므로 서버 글자로라도 내용을 살립니다.
         slide = {**slide, "role": "overlay", "title": slide["image_text"], "body": ""}
-    if baked:
+    if baked and job.plan.get("original"):
+        card = edited  # 원본 사진은 비율을 그대로 (피드 4:5 로 자르지 않음)
+    elif baked:
         card = svc.to_jpeg(svc.cover_fit(edited, size), 92)
     else:
         # accent: 포인트 색을 고를 수 있던 때 만든 작업은 그 색을 유지 (지금은 기본 색)
         card = svc.compose(
             edited, slide, accent=job.plan.get("accent", svc.ACCENT), font=job.plan.get("font", svc.DEFAULT_FONT), size=size
         )
-    blob = _save_blob(db, account, card, *size, kind="slide")
+    blob = _save_blob(db, account, card, *svc.image_size(card), kind="slide")
     # 글을 얹기 전 이미지도 보관해 '지금 이미지에서 고치기'에 씁니다.
     vw, vh = svc.image_size(edited)
     visual_blob = _save_blob(db, account, edited, vw, vh, kind="visual")
@@ -450,6 +456,8 @@ def render_slide(
         db.delete(old)
     if (old_visual := db.get(MediaBlob, prev_meta.get("visual_id") or "")) is not None and old_visual.kind == "visual":
         db.delete(old_visual)
+    # 직접 편집했던 이미지라면 편집 전 원본도 정리 (AI 로 새로 만들었으므로 편집 내용은 버림)
+    _drop(db, account, ((prev_meta.get("edit") or {}).get("base_id") or ""), keep=blob.id)
     assets[index] = {
         "type": "image",
         "url": _media_url(blob.id),
@@ -470,6 +478,125 @@ def render_slide(
     flag_modified(job, "assets")
     db.commit()
     return {"index": index, "asset": assets[index], "engine": engine}
+
+
+def _blob_id(url: str) -> str:
+    return (url or "").rsplit("/media/", 1)[-1].removesuffix(".jpg")
+
+
+def _drop(db: Session, account: Account, blob_id: str, *, keep: str = "") -> None:
+    """이 작업이 만든 이미지(slide)만 지웁니다. 사용자가 올린 원본(upload)은 남깁니다."""
+    if not blob_id or blob_id == keep:
+        return
+    blob = db.get(MediaBlob, blob_id)
+    if blob is not None and blob.account_id == account.id and blob.kind == "slide":
+        db.delete(blob)
+
+
+MAX_LAYERS_BYTES = 1_500_000  # 편집 내용(JSON) 최대 크기
+
+
+@router.post("/studio/{job_id}/slides/{index}/edit")
+async def save_manual_edit(
+    job_id: int,
+    index: int,
+    file: UploadFile = File(...),
+    layers: str = Form(default=""),
+    base_id: str = Form(max_length=40),
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+) -> dict:
+    """편집기에서 직접 꾸민 이미지를 저장합니다.
+    base_id(편집 전 원본)와 편집 내용(layers: 글자·스티커·그림·필터)을 함께 보관해 다시 열어 고칠 수 있게 합니다."""
+    job = db.get(GenerationJob, job_id)
+    if not job or job.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
+    if job.status == "published":
+        raise HTTPException(status.HTTP_409_CONFLICT, "이미 게시된 작업입니다.")
+    assets = list(job.assets or [])
+    if not 0 <= index < len(assets) or assets[index].get("type") != "image":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "이미지 번호가 올바르지 않습니다.")
+    if len(layers.encode()) > MAX_LAYERS_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "편집 내용이 너무 큽니다. 그림을 조금 줄여 주세요.")
+    base = db.get(MediaBlob, base_id)
+    if base is None or base.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "이미지를 찾을 수 없습니다.")
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "사진이 너무 큽니다 (최대 8MB).")
+    try:
+        data, w, h = svc.normalize(raw, max_side=1920)
+    except OSError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "이미지 파일을 읽을 수 없습니다.") from exc
+    blob = _save_blob(db, account, data, w, h, kind="slide")
+
+    prev = assets[index]
+    prev_meta = prev.get("meta") or {}
+    # 이전에 편집해 저장한 결과는 지우고(편집 전 원본은 남김), AI 의 글 얹기 전 이미지는 더 이상 쓰지 않으므로 정리
+    _drop(db, account, _blob_id(prev.get("url", "")), keep=base_id)
+    if (old_visual := db.get(MediaBlob, prev_meta.get("visual_id") or "")) is not None and old_visual.kind == "visual":
+        db.delete(old_visual)
+    assets[index] = {
+        **prev,
+        "url": _media_url(blob.id),
+        "thumbnail_url": _media_url(blob.id),
+        "meta": {
+            **prev_meta,
+            "status": "done",
+            "edited": True,
+            "edit": {"base_id": base_id, "layers": layers},
+            # '지금 이미지에서 고치기'는 편집한 결과에서 (글자가 이미 들어가 있음)
+            "visual_id": "",
+            "text_baked": True,
+        },
+    }
+    job.assets = assets
+    flag_modified(job, "assets")
+    db.commit()
+    return {"index": index, "asset": assets[index]}
+
+
+@router.get("/studio/fonts/{key}.font")
+def font_file(key: str) -> Response:
+    """편집기(브라우저)에서 같은 글씨체를 쓰도록 제목용 글꼴 파일을 줍니다."""
+    if key not in svc.FONTS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "없는 글씨체입니다.")
+    path = svc.fonts.FONT_DIR / svc.FONTS[key]["title"]
+    media = "font/otf" if path.suffix == ".otf" else "font/ttf"
+    return Response(path.read_bytes(), media_type=media, headers={"Cache-Control": "public, max-age=2592000, immutable"})
+
+
+class CaptionRewriteIn(BaseModel):
+    instruction: str = Field(default="", max_length=500)  # 예: 더 짧게, 이모지 많이, 영어로
+    caption: str = Field(default="", max_length=2200)  # 화면에서 지금 고치고 있는 캡션 (저장 전일 수 있음)
+    language: str | None = Field(default=None, max_length=8)
+
+
+@router.post("/studio/{job_id}/caption")
+def rewrite_caption(
+    job_id: int, body: CaptionRewriteIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> dict:
+    """캡션을 요청대로 다시 씁니다 (처음 정한 캡션 양식 유지). 저장은 화면에서 '임시저장'·'게시' 때."""
+    job = db.get(GenerationJob, job_id)
+    if not job or job.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
+    plan = job.plan if isinstance(job.plan, dict) else {}
+    try:
+        return svc.rewrite_caption(
+            topic=plan.get("topic") or job.prompt,
+            style=plan.get("style", ""),
+            caption=body.caption or job.caption,
+            instruction=body.instruction,
+            caption_format=plan.get("caption_format", ""),
+            language=norm_lang(body.language or lang_of(request)),
+        )
+    except svc.GeminiError as exc:
+        if svc.is_busy(exc):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})",
+            ) from exc
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"캡션을 다시 쓰지 못했습니다: {exc}") from exc
 
 
 def _image_failure_hint(engine: str) -> str:

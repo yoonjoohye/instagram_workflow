@@ -11,6 +11,7 @@
 Gemini 호출·재시도는 모두 gemini.py 를 거칩니다 (테스트에서는 gemini.call 을 가짜로 바꿉니다).
 """
 from .compose import ACCENT, compose
+from .copywriting import rewrite_caption
 from .fonts import DEFAULT_FONT, FONTS, font_key, font_label, font_preview
 from .gemini import GeminiError, is_busy
 from .imaging import cover_fit, image_size, normalize, to_jpeg
@@ -23,5 +24,5 @@ from .visuals import ASPECT, edit_visual, render_visual
 __all__ = [
     "ACCENT", "ASPECT", "DEFAULT_FONT", "FONTS", "MAX_PHOTOS", "MAX_SLIDES", "MAX_STORIES", "SIZE", "STORY_SIZE", "GeminiError",
     "compose", "cover_fit", "edit_visual", "font_key", "font_label", "font_preview", "image_size", "is_busy",
-    "normalize", "photo_query", "plan_post", "render_visual", "research", "slide_list", "suggest_music", "to_jpeg",
+    "normalize", "photo_query", "rewrite_caption", "plan_post", "render_visual", "research", "slide_list", "suggest_music", "to_jpeg",
 ]

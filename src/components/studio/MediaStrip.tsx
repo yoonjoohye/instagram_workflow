@@ -57,7 +57,21 @@ export async function downloadImage(url: string, name: string, t: T) {
   await saveFiles([await fetchFile(url, name, t)]);
 }
 
-export function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; onRedo?: RedoFn; filePrefix?: string }) {
+export function MediaStrip({
+  assets,
+  onRedo,
+  onManualEdit,
+  canRedoFromScratch = true,
+  filePrefix = "post",
+}: {
+  assets: Asset[];
+  onRedo?: RedoFn;
+  /** 이미지 편집기 열기 (글자·스티커·그리기·보정·자르기) */
+  onManualEdit?: (index: number) => void;
+  /** 원본 그대로 게시하는 작업은 '처음부터 다시'가 없음 */
+  canRedoFromScratch?: boolean;
+  filePrefix?: string;
+}) {
   const t = useT();
   const [error, setError] = useState<string>();
   const [downloadingAll, setDownloadingAll] = useState(false);
@@ -105,6 +119,8 @@ export function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: As
             single={single}
             fileName={fileName(a, i)}
             onRedo={onRedo}
+            onManualEdit={onManualEdit}
+            canRedoFromScratch={canRedoFromScratch}
             onError={setError}
           />
         ))}
@@ -120,6 +136,8 @@ export function MediaItem({
   single,
   fileName,
   onRedo,
+  onManualEdit,
+  canRedoFromScratch = true,
   onError,
 }: {
   asset: Asset;
@@ -128,6 +146,8 @@ export function MediaItem({
   single: boolean;
   fileName: string;
   onRedo?: RedoFn;
+  onManualEdit?: (index: number) => void;
+  canRedoFromScratch?: boolean;
   onError: (message?: string) => void;
 }) {
   const t = useT();
@@ -204,18 +224,29 @@ export function MediaItem({
         >
           {downloading ? <Spinner className="size-3" /> : "↓"} {t("studio.download")}
         </button>
-        {onRedo && (
+        {onManualEdit && a.type === "image" && (
+          <button
+            type="button"
+            onClick={() => onManualEdit(i)}
+            disabled={busy}
+            className="ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-fg-2 hover:bg-surface-2 disabled:opacity-50"
+          >
+            ✏️ {t("studio.manualEdit")}
+          </button>
+        )}
+        {onRedo && a.type === "image" && (
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
             disabled={busy}
             aria-expanded={open}
             className={cx(
-              "ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium hover:bg-surface-2 disabled:opacity-50",
+              "inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium hover:bg-surface-2 disabled:opacity-50",
+              !onManualEdit && "ml-auto",
               open ? "text-accent" : "text-fg-2",
             )}
           >
-            ✎ {t("studio.editImage")}
+            ✨ {t("studio.editImage")}
           </button>
         )}
       </div>
@@ -223,7 +254,7 @@ export function MediaItem({
         <p className="border-t border-line bg-surface-1 px-2 py-1 text-[11px] text-warn">{t("studio.fallbackImage")}</p>
       )}
 
-      {onRedo && open && (
+      {onRedo && open && a.type === "image" && (
         <div className="space-y-2 border-t border-line bg-surface-1 p-2">
           {lastPrompt && <p className="line-clamp-2 text-[11px] text-fg-3">{t("studio.lastRequest", { prompt: lastPrompt })}</p>}
           <textarea
@@ -242,7 +273,7 @@ export function MediaItem({
           <div className="flex rounded-md border border-line p-0.5 text-[11px]" role="radiogroup" aria-label={t("studio.editMode")}>
             {[
               { v: true, label: t("studio.modeCurrent"), disabled: !canEditCurrent },
-              { v: false, label: t("studio.modeRedo"), disabled: false },
+              { v: false, label: t("studio.modeRedo"), disabled: !canRedoFromScratch },
             ].map((o) => (
               <button
                 key={o.label}

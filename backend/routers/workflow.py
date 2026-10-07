@@ -137,7 +137,8 @@ def delete_job(
             db.delete(blob)
     # 이 작업이 만든 이미지(완성본·글 얹기 전 이미지)도 함께 지웁니다. 사용자가 올린 원본 사진은 남깁니다.
     for asset in job.assets or []:
-        ids = [(asset.get("url") or "").rsplit("/media/", 1)[-1].removesuffix(".jpg"), (asset.get("meta") or {}).get("visual_id")]
+        meta = asset.get("meta") or {}
+        ids = [(asset.get("url") or "").rsplit("/media/", 1)[-1].removesuffix(".jpg"), meta.get("visual_id"), (meta.get("edit") or {}).get("base_id")]
         for blob_id in filter(None, ids):
             blob = db.get(MediaBlob, blob_id)
             if blob is not None and blob.account_id == account.id and blob.kind in ("slide", "visual"):

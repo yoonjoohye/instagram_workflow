@@ -73,3 +73,55 @@ def test_plan_busy_gemini_returns_503(monkeypatch, client, login, account):
     r = client.post(f"{PREFIX}/plan", json={"upload_ids": [], "prompt": "파리 여행"})
     assert r.status_code == 503
     gemini._cooldown.clear()
+
+
+def test_manual_edit_keeps_base_and_cleans_up(monkeypatch, client, login, account, db):
+    monkeypatch.setattr(gemini, "call", fake_gemini)
+    login(account)
+    up = client.post("/media/uploads", files={"file": ("a.jpg", jpeg(), "image/jpeg")}).json()["id"]
+    job = client.post(f"{PREFIX}/plan", json={"upload_ids": [up], "prompt": "편집 테스트"}).json()["job"]
+    first = client.post(f"{PREFIX}/{job['id']}/slides/0").json()["asset"]
+    base_id = first["url"].rsplit("/media/", 1)[1][:-4]
+
+    def save(layers):
+        r = client.post(
+            f"{PREFIX}/{job['id']}/slides/0/edit",
+            files={"file": ("e.jpg", jpeg("yellow"), "image/jpeg")},
+            data={"layers": layers, "base_id": base_id},
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["asset"]
+
+    a1 = save('{"objects":[1]}')
+    a2 = save('{"objects":[1,2]}')
+    db.expire_all()
+    edited1, edited2 = (a["url"].rsplit("/media/", 1)[1][:-4] for a in (a1, a2))
+    assert a2["meta"]["edit"] == {"base_id": base_id, "layers": '{"objects":[1,2]}'}
+    assert a2["meta"]["text_baked"] is True
+    assert db.get(MediaBlob, base_id) is not None  # 편집 전 원본은 남김
+    assert db.get(MediaBlob, edited1) is None  # 이전 편집 결과는 정리
+    assert client.get(f"{PREFIX}/fonts/pretendard.font").status_code == 200
+
+    client.delete(f"/workflow/jobs/{job['id']}")
+    db.expire_all()
+    assert db.get(MediaBlob, base_id) is None and db.get(MediaBlob, edited2) is None
+    assert db.get(MediaBlob, up) is not None  # 올린 사진은 유지
+
+
+def test_caption_rewrite_keeps_template(monkeypatch, client, login, account):
+    seen = {}
+
+    def fake(model, parts, cfg=None, **_):
+        if "캡션 작가" in parts[0]["text"]:
+            seen["prompt"] = parts[0]["text"]
+            return {"candidates": [{"content": {"parts": [{"text": json.dumps({"caption_parts": ["짧게 다시 씀"], "hashtags": ["#파리"]})}]}}]}
+        return fake_gemini(model, parts, cfg)
+
+    monkeypatch.setattr(gemini, "call", fake)
+    login(account)
+    job = client.post(f"{PREFIX}/plan", json={"prompt": "파리", "caption_format": "[본문]\n👉 링크는 프로필"}).json()["job"]
+    r = client.post(f"{PREFIX}/{job['id']}/caption", json={"instruction": "더 짧게", "caption": "지금 캡션"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"caption": "짧게 다시 씀\n👉 링크는 프로필", "hashtags": ["파리"], "hashtags_inline": False}
+    assert "더 짧게" in seen["prompt"] and "지금 캡션" in seen["prompt"]
+    client.delete(f"/workflow/jobs/{job['id']}")

@@ -46,10 +46,7 @@ function Studio() {
   const onCreated = (j: Job) => {
     setJob(j);
     router.replace(`/admin/studio?job=${j.id}`, { scroll: false });
-    // 휴대폰·태블릿에서는 검수 화면이 입력 폼 아래에 있으므로 그쪽으로 내려 줍니다.
-    if (!window.matchMedia("(min-width: 1024px)").matches) {
-      setTimeout(() => document.getElementById("review")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   return (
@@ -72,12 +69,19 @@ function Studio() {
           </Notice>
         </div>
       )}
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <PostForm onCreated={onCreated} />
+      {jobId ? (
+        // 작업 공간: 왼쪽 편집 · 오른쪽 고정 미리보기
         <div id="review" className="min-w-0 scroll-mt-20">
           {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}
         </div>
-      </div>
+      ) : (
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <PostForm onCreated={onCreated} />
+          <div className="min-w-0">
+            <Review job={null} onChange={setJob} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
