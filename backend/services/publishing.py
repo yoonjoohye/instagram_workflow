@@ -1,6 +1,8 @@
-"""콘텐츠 발행: 컨테이너 생성 → (영상이면) 처리 대기 → media_publish.
+"""콘텐츠 발행: 컨테이너 생성 → 처리 대기(status_code FINISHED) → media_publish.
 
 문서: https://developers.facebook.com/docs/instagram-platform/content-publishing
+사진도 인스타그램이 우리 주소에서 이미지를 가져가는 동안은 발행할 수 없어(오류 9007 "The media is not ready
+for publishing"), 사진·동영상 모두 FINISHED 를 확인한 뒤 발행합니다.
 """
 from __future__ import annotations
 
@@ -110,9 +112,27 @@ def wait_until_finished(
     )
 
 
+NOT_READY_CODE = 9007  # "The media is not ready for publishing, please wait for a moment"
+PUBLISH_RETRIES = 4
+PUBLISH_RETRY_SEC = 2
+
+
+def _not_ready(exc: GraphError) -> bool:
+    p = exc.payload if isinstance(exc.payload, dict) else {}
+    return p.get("code") == NOT_READY_CODE or p.get("error_subcode") == 2207027
+
+
 def publish(client: GraphClient, ig_user_id: str, container_id: str) -> dict[str, Any]:
-    """컨테이너를 실제 게시물로 발행하고 permalink 까지 조회해 돌려줍니다."""
-    result = client.post(f"{ig_user_id}/media_publish", {"creation_id": container_id})
+    """컨테이너를 실제 게시물로 발행하고 permalink 까지 조회해 돌려줍니다.
+    아직 준비 중이라고 하면(9007) 잠깐 기다렸다 다시 시도합니다."""
+    for attempt in range(PUBLISH_RETRIES):
+        try:
+            result = client.post(f"{ig_user_id}/media_publish", {"creation_id": container_id})
+            break
+        except GraphError as exc:
+            if not _not_ready(exc) or attempt == PUBLISH_RETRIES - 1:
+                raise
+            time.sleep(PUBLISH_RETRY_SEC)
     media_id = result.get("id")
     if not media_id:
         raise GraphError("발행 후 미디어 ID 를 받지 못했습니다.", payload=result)

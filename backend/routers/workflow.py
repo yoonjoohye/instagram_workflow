@@ -46,6 +46,9 @@ def _settings(job: GenerationJob) -> dict:
         "template": plan.get("template", "auto"),
         "style": plan.get("style", ""),
         "caption_format": plan.get("caption_format", ""),
+        "caption_tone": plan.get("caption_tone", "casual"),
+        "caption_length": plan.get("caption_length", "auto"),
+        "caption_requests": plan.get("caption_requests", []),
     }
 
 
@@ -280,8 +283,8 @@ def publish_job(
             job.plan = {**(job.plan or {}), "container_fingerprint": fingerprint}
             db.commit()
 
-            if kind in {"REELS", "CAROUSEL"} or visual[0]["type"] == "video":
-                publishing.wait_until_finished(client, container_id)
+            # 사진도 인스타그램이 이미지를 다 가져가야 발행할 수 있습니다 (안 기다리면 400 "media is not ready")
+            publishing.wait_until_finished(client, container_id, interval=publishing.POLL_INTERVAL_SEC if kind in {"REELS", "CAROUSEL"} or visual[0]["type"] == "video" else 1)
 
             result = publishing.publish(client, account.ig_user_id, container_id)
     except HTTPException:
@@ -371,8 +374,8 @@ def _publish_stories(db: Session, account: Account, job: GenerationJob, visual: 
                     break
                 media_url = _story_ready(db, account, job, asset)
                 container = publishing.create_container(client, account.ig_user_id, kind="STORIES", media_url=media_url)
-                if asset["type"] == "video":
-                    publishing.wait_until_finished(client, container)
+                # 사진 스토리도 처리가 끝나야 발행됩니다 (안 기다리면 400 "The media is not ready for publishing")
+                publishing.wait_until_finished(client, container, interval=publishing.POLL_INTERVAL_SEC if asset["type"] == "video" else 1)
                 result = publishing.publish(client, account.ig_user_id, container)
                 done[i] = result["media_id"]
                 # 새 리스트로 넣어야 DB 가 바뀐 것으로 알아챕니다 (같은 리스트를 고치면 저장이 안 됨)

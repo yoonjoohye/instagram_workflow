@@ -361,36 +361,7 @@ export function ImageEditor({
     );
   }
 
-  /** 글자에 이모지 넣기: 고친 중이면 커서 자리에, 아니면 끝에. 고른 글자가 없으면 이모지로 새 글자 상자. */
-  async function insertEmoji(e: string) {
-    const o = selected;
-    if (!isText(o)) {
-      await addText();
-      const added = canvas.current?.getActiveObject() ?? null;
-      if (isText(added)) {
-        added.set("text", e);
-        canvas.current!.requestRenderAll();
-        snapshot();
-      }
-      return;
-    }
-    const text = o.text ?? "";
-    const editing = (o as Named).isEditing;
-    const start = editing ? o.selectionStart ?? text.length : text.length;
-    const end = editing ? o.selectionEnd ?? start : text.length;
-    o.set("text", text.slice(0, start) + e + text.slice(end));
-    if (editing) {
-      o.selectionStart = o.selectionEnd = start + e.length;
-      if (o.hiddenTextarea) {
-        o.hiddenTextarea.value = o.text ?? "";
-        o.hiddenTextarea.selectionStart = o.hiddenTextarea.selectionEnd = start + e.length;
-      }
-    }
-    o.initDimensions?.();
-    canvas.current!.requestRenderAll();
-    snapshot();
-    force((n) => n + 1);
-  }
+
 
   // ── 스토리 링크·게시물 스티커 (모양만 — 누를 수 있는 링크는 게시 후 인스타 앱에서 붙임) ─────────
   type LinkObj = Named & { link?: string };
@@ -744,21 +715,6 @@ export function ImageEditor({
                     </button>
                     <span className="text-[11px] text-white/50">{t("editor.textHint")}</span>
                   </div>
-                  <Row className="text-xl">
-                    {EMOJIS.map((e) => (
-                      <button
-                        key={e}
-                        type="button"
-                        // 누르는 순간 글자 고치기가 끝나지 않게 (커서 자리에 넣기)
-                        onMouseDown={(ev) => ev.preventDefault()}
-                        onClick={() => insertEmoji(e)}
-                        aria-label={t("editor.insertEmoji", { e })}
-                        className="shrink-0 rounded-md px-1 py-0.5 hover:bg-white/10"
-                      >
-                        {e}
-                      </button>
-                    ))}
-                  </Row>
                   {textSel && (
                     <>
                       <Row>

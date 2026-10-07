@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from ...i18n import LANG_NAME
-from . import gemini
+from . import gemini, voice
 from .captions import (
     FREE_RULES,
     INSTRUCTION_RULES,
@@ -24,10 +24,15 @@ _REWRITE_PROMPT = """너는 인스타그램 캡션 작가야. 첨부한 사진�
 {caption}
 
 [사용자의 요청 — 가장 우선] {instruction}
+[앞서 바란 점 — 계속 지켜. 지금 요청과 부딪히면 지금 요청을 따라] {history}
+
+말투·길이 (인스타그램에서 반응 좋은 계정들의 글 방식)
+{voice}
 
 규칙
-- 요청에 언어 지정이 없으면 지금 캡션의 언어를 유지해.
+- 요청에 언어 지정이 없으면 지금 캡션의 언어를 유지해. 지금 캡션이 비어 있으면 화면 언어로 써.
 - 지금 캡션에 있는 사실(장소·가격·코드·링크 등)은 바꾸거나 지어내지 마. 요청이 없으면 빼지도 마.
+- 사용자의 요청·앞서 바란 점에 적힌 사실(가게 이름·장소·가격·날짜 등)은 확정 정보야. 사진과 달라 보여도 반드시 캡션에 그대로 넣어.
 - 사진에 보이지 않고 주제 메모에도 없는 사실(장소 이름·가격·날짜 등)은 지어내지 마.
 - 해시태그는 caption_parts 에 넣지 말고 hashtags 배열(# 없이 8~15개)로. 요청에 맞게 새로 골라.
 {caption_rules}"""
@@ -35,9 +40,11 @@ _REWRITE_PROMPT = """너는 인스타그램 캡션 작가야. 첨부한 사진�
 
 def rewrite_caption(
     *, topic: str, style: str, caption: str, instruction: str, caption_format: str, language: str = "ko",
-    images: list[bytes] | None = None,
+    images: list[bytes] | None = None, template: str = "auto", tone: str = "casual", length: str = "auto",
+    history: list[str] | None = None,
 ) -> dict:
-    """{'caption', 'hashtags', 'hashtags_inline'} — 실패하면 GeminiError. images: 참고할 사진 (최대 4장)."""
+    """{'caption', 'hashtags', 'hashtags_inline'} — 실패하면 GeminiError. images: 참고할 사진 (최대 4장).
+    template·tone·length 로 말투·길이를 맞추고, history(앞서 사용자가 바란 점)도 계속 지킵니다."""
     template = caption_format.strip()
     names = [p for p in placeholders(template) if "해시태그" not in p and "hashtag" not in p.lower()]
     if names:
@@ -52,6 +59,8 @@ def rewrite_caption(
         caption=caption[:2200] or "(비어 있음)",
         instruction=instruction.strip()[:500] or ("사진과 주제에 어울리게" if not caption.strip() else "더 자연스럽고 읽기 좋게"),
         caption_rules=rules,
+        history=" / ".join(h.strip()[:200] for h in (history or []) if h.strip()) or "없음",
+        voice=voice.guide(template, tone=tone, length=length, language=language),
     ) + f"\n\n(사용자 화면 언어: {LANG_NAME.get(language, 'English')})"
     schema = {
         "type": "OBJECT",

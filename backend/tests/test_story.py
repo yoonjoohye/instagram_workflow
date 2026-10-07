@@ -59,7 +59,7 @@ def test_story_plan_render_and_publish_in_parts(monkeypatch, client, login, acco
     monkeypatch.setattr(workflow, "graph_for", lambda acc: FakeGraph())
     monkeypatch.setattr(workflow.publishing, "publishing_limit", lambda c, u: {"remaining": 25, "used": 0, "total": 25})
     monkeypatch.setattr(workflow.publishing, "create_container", lambda c, u, **k: f"container-{k['media_url'][-12:]}")
-    monkeypatch.setattr(workflow.publishing, "wait_until_finished", lambda c, cid: None)
+    monkeypatch.setattr(workflow.publishing, "wait_until_finished", lambda c, cid, **k: None)
 
     def fake_publish(c, u, cid):
         calls["n"] += 1
@@ -90,12 +90,45 @@ def test_story_photo_not_9_16_is_fitted_before_publish(monkeypatch, client, logi
     monkeypatch.setattr(workflow, "graph_for", lambda acc: FakeGraph())
     monkeypatch.setattr(workflow.publishing, "publishing_limit", lambda c, u: {"remaining": 25, "used": 0, "total": 25})
     monkeypatch.setattr(workflow.publishing, "create_container", lambda c, u, **k: urls.append(k["media_url"]) or "c1")
-    monkeypatch.setattr(workflow.publishing, "wait_until_finished", lambda c, cid: None)
+    waited = []
+    monkeypatch.setattr(workflow.publishing, "wait_until_finished", lambda c, cid, **k: waited.append(cid))
     monkeypatch.setattr(workflow.publishing, "publish", lambda c, u, cid: {"media_id": "s1", "permalink": ""})
 
     assert client.post("/workflow/publish", json={"job_id": job["id"]}).json()["status"] == "published"
+    assert waited == ["c1"]  # 사진 스토리도 처리가 끝난 뒤 발행 (안 기다리면 400 "media is not ready")
     fitted_id = urls[0].rsplit("/media/", 1)[1][:-4]
     assert fitted_id != up
     fitted = db.get(MediaBlob, fitted_id)
     assert (fitted.width, fitted.height) == (1080, 1920)
     assert Image.open(io.BytesIO(fitted.data)).size == (1080, 1920)
+
+
+def test_publish_retries_when_media_not_ready(monkeypatch):
+    """인스타가 아직 이미지를 가져가는 중이면(9007) 잠깐 기다렸다 다시 발행합니다."""
+    from backend.services import publishing
+    from backend.services.meta_graph import GraphError
+
+    calls = []
+
+    class Graph:
+        def post(self, path, data):
+            calls.append(path)
+            if len(calls) < 3:
+                raise GraphError("The media is not ready for publishing, please wait for a moment", status=400,
+                                 payload={"code": 9007, "error_subcode": 2207027})
+            return {"id": "m1"}
+
+        def get(self, path, params):
+            return {"permalink": "https://instagram.com/p/x"}
+
+    monkeypatch.setattr(publishing.time, "sleep", lambda s: None)
+    assert publishing.publish(Graph(), "ig", "c1")["media_id"] == "m1"
+    assert len(calls) == 3
+
+    class Broken(Graph):
+        def post(self, path, data):
+            raise GraphError("Invalid parameter", status=400, payload={"code": 100})
+
+    import pytest
+    with pytest.raises(GraphError):
+        publishing.publish(Broken(), "ig", "c1")

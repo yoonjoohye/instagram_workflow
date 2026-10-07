@@ -19,7 +19,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -345,7 +345,7 @@ def manual(body: ManualIn, request: Request, account: Account = Depends(current_
             written = svc.rewrite_caption(
                 topic=body.prompt.strip(), style=body.style, caption="", instruction="",
                 caption_format=body.caption_format, language=norm_lang(body.language or lang_of(request)),
-                images=_job_images(db, account, job),
+                images=_job_images(db, account, job), template=body.template,
             )
             job.caption, job.hashtags = written["caption"], written["hashtags"]
         except svc.GeminiError as exc:
@@ -357,6 +357,7 @@ def manual(body: ManualIn, request: Request, account: Account = Depends(current_
 
 
 MAX_MEDIA = 10  # 캐러셀 최대 장수 (스토리도 같은 한도)
+CAPTION_HISTORY = 10  # 기억해 두는 캡션 '바란 점' 개수
 
 
 def _sync_kind(job: GenerationJob) -> None:
@@ -385,6 +386,9 @@ class SettingsIn(BaseModel):
     style: str | None = Field(default=None, max_length=2000)
     caption_format: str | None = Field(default=None, max_length=2000)
     template: str | None = Field(default=None, max_length=40)
+    caption_tone: Literal["casual", "polite"] | None = None  # 캡션 말투: 반말 / 해요체
+    caption_length: Literal["auto", "short", "medium", "long"] | None = None
+    caption_requests: list[Annotated[str, Field(max_length=500)]] | None = Field(default=None, max_length=CAPTION_HISTORY)
 
 
 @router.patch("/studio/{job_id}/settings")
@@ -395,7 +399,7 @@ def update_settings(job_id: int, body: SettingsIn, account: Account = Depends(cu
     if body.prompt is not None:
         plan["topic"] = body.prompt.strip()
         job.prompt = body.prompt.strip() or job.prompt
-    for key in ("style", "caption_format", "template"):
+    for key in ("style", "caption_format", "template", "caption_tone", "caption_length", "caption_requests"):
         if getattr(body, key) is not None:
             plan[key] = getattr(body, key)
     if body.post_type is not None:
@@ -759,9 +763,10 @@ def rewrite_caption(
     job = db.get(GenerationJob, job_id)
     if not job or job.account_id != account.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
-    plan = job.plan if isinstance(job.plan, dict) else {}
+    plan = dict(job.plan) if isinstance(job.plan, dict) else {}
+    history = list(plan.get("caption_requests") or [])
     try:
-        return svc.rewrite_caption(
+        written = svc.rewrite_caption(
             topic=plan.get("topic") or job.prompt,
             style=plan.get("style", ""),
             caption=body.caption or job.caption,
@@ -769,6 +774,10 @@ def rewrite_caption(
             caption_format=plan.get("caption_format", ""),
             language=norm_lang(body.language or lang_of(request)),
             images=_job_images(db, account, job),
+            template=plan.get("template", "auto"),
+            tone=plan.get("caption_tone", "casual"),
+            length=plan.get("caption_length", "auto"),
+            history=history,
         )
     except svc.GeminiError as exc:
         if svc.is_busy(exc):
@@ -777,6 +786,15 @@ def rewrite_caption(
                 "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})",
             ) from exc
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"캡션을 다시 쓰지 못했습니다: {exc}") from exc
+    # 바란 점은 기록해 두고 다음 자동 작성에도 계속 반영 (같은 요청은 맨 뒤로)
+    wish = body.instruction.strip()
+    if wish and job.status not in ("published", "publishing"):
+        history = [h for h in history if h != wish] + [wish]
+        plan["caption_requests"] = history[-CAPTION_HISTORY:]
+        job.plan = plan
+        flag_modified(job, "plan")
+        db.commit()
+    return {**written, "requests": plan.get("caption_requests", [])}
 
 
 def _job_images(db: Session, account: Account, job: GenerationJob) -> list[bytes]:

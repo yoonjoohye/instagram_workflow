@@ -29,6 +29,10 @@ def fill_template(template: str, parts: list[str], hashtags: list[str]) -> tuple
             used_hashtags = True
             return " ".join(f"#{t.lstrip('#')}" for t in hashtags)
         text = (parts[i] if i < len(parts) else "").strip() or f"⚠️ [{name}] 직접 입력"
+        # 양식에 이미 있는 줄 머리(예: '📍 ')를 답에서 또 쓰면 한 번만 ('📍 📍 가게' 방지)
+        head = match.string[match.string.rfind("\n", 0, match.start()) + 1 : match.start()].strip()
+        while head and text.startswith(head):
+            text = text[len(head):].lstrip()
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         want = _LINES.search(name)
         if want and lines:

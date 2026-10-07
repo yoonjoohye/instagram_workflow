@@ -365,6 +365,9 @@ export function Review({
                 count={finalCaption.length}
                 max={CAPTION_LIMIT}
                 disabled={locked}
+                prefs={job.settings ?? DEFAULT_SETTINGS}
+                onPrefs={async (patch) => onChange(await api<Job>(`/studio/${job.id}/settings`, { method: "PATCH", json: patch }))}
+                onRequests={(requests) => onChange({ ...job, settings: { ...(job.settings ?? DEFAULT_SETTINGS), caption_requests: requests } })}
               />
               <HashtagField jobId={job.id} value={hashtags} onChange={setHashtags} caption={caption} max={HASHTAG_LIMIT} disabled={locked} />
 

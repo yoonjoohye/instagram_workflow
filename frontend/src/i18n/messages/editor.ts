@@ -21,12 +21,11 @@ export default defineMessages({
     presets: "필터", presetNone: "원본", presetMono: "흑백", presetVintage: "빈티지", presetWarm: "따뜻하게", presetCool: "차갑게", presetVivid: "선명하게",
     brightness: "밝기", contrast: "대비", saturation: "채도", reset: "초기화",
     cropHint: "사진을 끌어서 위치를 맞추고, 확대로 잘라낼 범위를 정해요.", zoom: "확대", rotate: "90° 회전", flip: "좌우 반전",
-    insertEmoji: "글자에 {e} 넣기", deleteSelected: "선택한 것 삭제", bringFront: "맨 앞으로", edited: "직접 편집함",
+    deleteSelected: "선택한 것 삭제", bringFront: "맨 앞으로", edited: "직접 편집함",
   },
   en: {
     storyLinks: "Link & post stickers", linkLabelPh: "Text to show (optional)", addLink: "Add link", myPosts: "My posts", addPost: "Add a sticker for this post", postView: "View post",
     linkNote: "Instagram doesn't let other services attach tappable link stickers. Add the look here, then add a real link sticker in the Instagram app after publishing (you can copy the address on the publish screen).",
-    insertEmoji: "Insert {e} into text",
     warmth: "Warmth", fade: "Fade", vignette: "Vignette", sharpen: "Sharpen", straighten: "Straighten",
     brushPen: "Pen", brushMarker: "Marker", brushNeon: "Neon", eraser: "Eraser", eraserHint: "Rub over drawings, text or stickers to erase them.",
     shapeRect: "Rectangle", shapeLine: "Line", fill: "Fill", customColor: "Other color",
@@ -48,7 +47,6 @@ export default defineMessages({
   ja: {
     storyLinks: "リンク・投稿スタンプ", linkLabelPh: "表示する文字(任意)", addLink: "リンクを追加", myPosts: "自分の投稿", addPost: "この投稿のスタンプを追加", postView: "投稿を見る",
     linkNote: "Instagramでは、他のサービスからタップできるリンクスタンプを付けられません。ここで見た目を入れておき、投稿後にInstagramアプリでリンクスタンプを付け直してください(アドレスは投稿画面でコピーできます)。",
-    insertEmoji: "文字に{e}を入れる",
     warmth: "暖かさ", fade: "フェード", vignette: "ビネット", sharpen: "シャープ", straighten: "傾き補正",
     brushPen: "ペン", brushMarker: "マーカー", brushNeon: "ネオン", eraser: "消しゴム", eraserHint: "消したい絵・文字・スタンプをこすると消えます。",
     shapeRect: "四角", shapeLine: "線", fill: "塗りつぶし", customColor: "ほかの色",

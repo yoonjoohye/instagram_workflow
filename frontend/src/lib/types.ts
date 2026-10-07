@@ -60,7 +60,19 @@ export type Job = {
   settings?: JobSettings;
 };
 
-export type JobSettings = { post_type: "feed" | "story"; topic: string; template: string; style: string; caption_format: string };
+export type CaptionTone = "casual" | "polite";
+export type CaptionLength = "auto" | "short" | "medium" | "long";
+export type JobSettings = {
+  post_type: "feed" | "story";
+  topic: string;
+  template: string;
+  style: string;
+  caption_format: string;
+  /** 캡션 자동 작성: 말투·길이·앞서 바란 점 (다음 자동 작성에도 계속 반영) */
+  caption_tone?: CaptionTone;
+  caption_length?: CaptionLength;
+  caption_requests?: string[];
+};
 
 
 /** 동영상 편집 내용 (asset.meta.video_edit) — 원본(source)에서 언제든 다시 만듭니다 */

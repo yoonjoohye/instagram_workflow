@@ -119,8 +119,20 @@ def test_caption_rewrite_keeps_template(monkeypatch, client, login, account):
     job = client.post(f"{PREFIX}/plan", json={"prompt": "파리", "caption_format": "[본문]\n👉 링크는 프로필"}).json()["job"]
     r = client.post(f"{PREFIX}/{job['id']}/caption", json={"instruction": "더 짧게", "caption": "지금 캡션"})
     assert r.status_code == 200, r.text
-    assert r.json() == {"caption": "짧게 다시 씀\n👉 링크는 프로필", "hashtags": ["파리"], "hashtags_inline": False}
+    assert r.json() == {"caption": "짧게 다시 씀\n👉 링크는 프로필", "hashtags": ["파리"], "hashtags_inline": False, "requests": ["더 짧게"]}
     assert "더 짧게" in seen["prompt"] and "지금 캡션" in seen["prompt"]
+    assert "존댓말은 쓰지 마" in seen["prompt"]  # 기본 말투는 반말
+
+    # 바란 점은 기록되고 다음 자동 작성에도 계속 반영
+    r = client.post(f"{PREFIX}/{job['id']}/caption", json={"instruction": "이모지 많이", "caption": "x"})
+    assert r.json()["requests"] == ["더 짧게", "이모지 많이"]
+    assert "앞서 바란 점" in seen["prompt"] and "더 짧게" in seen["prompt"].split("앞서 바란 점")[1]
+    # 말투·길이를 바꾸고 기록 하나를 지우면 그대로 반영
+    s = client.patch(f"{PREFIX}/{job['id']}/settings", json={"caption_tone": "polite", "caption_length": "short", "caption_requests": ["이모지 많이"]}).json()["settings"]
+    assert s["caption_tone"] == "polite" and s["caption_length"] == "short" and s["caption_requests"] == ["이모지 많이"]
+    client.post(f"{PREFIX}/{job['id']}/caption", json={"instruction": "", "caption": "x"})
+    assert "해요체" in seen["prompt"] and "15~60자" in seen["prompt"] and "더 짧게" not in seen["prompt"]
+    assert client.patch(f"{PREFIX}/{job['id']}/settings", json={"caption_tone": "formal"}).status_code == 422
     client.delete(f"/workflow/jobs/{job['id']}")
 
 

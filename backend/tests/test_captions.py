@@ -21,3 +21,8 @@ def test_fill_template_hashtag_slot_and_missing_part():
 
 def test_no_emoji_for_server_drawn_text():
     assert textutil.no_emoji("PARIS\n꿈같던 밤 ✨") == "PARIS\n꿈같던 밤"
+
+
+def test_fill_template_drops_repeated_line_head():
+    caption, _ = captions.fill_template("[첫 줄]\n📍 [가게 위치]", ["맛있다", "📍 성수 소바집"], [])
+    assert caption == "맛있다\n📍 성수 소바집"
