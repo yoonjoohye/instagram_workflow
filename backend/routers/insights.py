@@ -226,19 +226,21 @@ def post_detail(media_id: str, account: Account = Depends(current_account)) -> d
 @router.get("/posts")
 def posts(
     limit: int = Query(default=12, ge=1, le=50),
+    after: str | None = Query(default=None, max_length=500),  # 다음 페이지 커서 (앞 페이지 응답의 paging.after)
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ) -> dict:
-    """최근 게시물 + 게시물별 성과."""
+    """게시물 한 페이지(최신순) + 게시물별 성과. paging.after 로 다음 페이지를 이어서 받습니다."""
     with graph_for(account) as client:
         try:
-            media = svc.recent_media(client, account.ig_user_id, limit=limit)
+            media, next_cursor = svc.media_page(client, account.ig_user_id, limit=limit, after=after)
         except GraphError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
         # 게시물별 인사이트 호출을 동시에 보냅니다 (순차로는 12개에 ~9초).
         with ThreadPoolExecutor(max_workers=6) as pool:
             insights = list(pool.map(lambda m: svc.media_insights(client, m), media))
-        media_sync.sync_deleted(db, account, client)  # 지운 게시물의 자동 응답·댓글 분석 정리
+        if not after:  # 첫 페이지를 볼 때만: 지운 게시물의 자동 응답·댓글 분석 정리
+            media_sync.sync_deleted(db, account, client)
     rules = {
         r.ig_media_id: r
         for r in db.scalars(
@@ -266,7 +268,8 @@ def posts(
                 ),
             }
             for m, i in zip(media, insights)
-        ]
+        ],
+        "paging": {"after": next_cursor},
     }
 
 

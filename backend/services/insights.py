@@ -138,16 +138,25 @@ def follower_demographics(client: GraphClient, ig_user_id: str) -> dict[str, lis
     return out
 
 
+_MEDIA_FIELDS = (
+    "id,caption,media_type,media_product_type,media_url,thumbnail_url,"
+    "permalink,timestamp,like_count,comments_count,is_comment_enabled"
+)
+
+
 def recent_media(client: GraphClient, ig_user_id: str, *, limit: int = 12) -> list[dict[str, Any]]:
-    data = client.get(
-        f"{ig_user_id}/media",
-        {
-            "fields": "id,caption,media_type,media_product_type,media_url,thumbnail_url,"
-            "permalink,timestamp,like_count,comments_count,is_comment_enabled",
-            "limit": limit,
-        },
-    )
-    return data.get("data", [])
+    return media_page(client, ig_user_id, limit=limit)[0]
+
+
+def media_page(client: GraphClient, ig_user_id: str, *, limit: int = 12, after: str | None = None) -> tuple[list[dict[str, Any]], str | None]:
+    """게시물 한 페이지 (최신순) + 다음 페이지 커서 (없으면 None). Instagram 은 커서로 페이지를 넘깁니다."""
+    params: dict[str, Any] = {"fields": _MEDIA_FIELDS, "limit": limit}
+    if after:
+        params["after"] = after
+    data = client.get(f"{ig_user_id}/media", params)
+    paging = data.get("paging") or {}
+    nxt = (paging.get("cursors") or {}).get("after") if paging.get("next") else None
+    return data.get("data", []), nxt
 
 
 # 게시물 종류별로 지원 지표가 다릅니다.

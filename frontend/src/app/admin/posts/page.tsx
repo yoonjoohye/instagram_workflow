@@ -26,7 +26,18 @@ export default function PostsPage() {
 function Posts() {
   const t = useT();
   const [limit, setLimit] = useState(24);
-  const posts = useApi<ListOf<IgPost>>(`/posts?limit=${limit}`);
+  // 페이지마다 받은 '다음 페이지 커서'를 쌓아 두고 이전으로 돌아갈 땐 하나씩 뺍니다 (Instagram 은 커서로 페이지를 넘김).
+  const [cursors, setCursors] = useState<string[]>([]);
+  const after = cursors[cursors.length - 1];
+  const posts = useApi<ListOf<IgPost> & { paging?: { after: string | null } }>(
+    `/posts?limit=${limit}${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+  );
+  const page = cursors.length + 1;
+  const nextCursor = posts.data?.paging?.after ?? null;
+  const goPage = (next: string[]) => {
+    setCursors(next);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const jobs = useApi<ListOf<Job>>("/workflow/jobs?limit=100");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "timestamp", desc: true });
   const [togglingId, setTogglingId] = useState<string>();
@@ -51,7 +62,7 @@ function Posts() {
     router.replace(id ? `/admin/posts?autoreply=${id}` : "/admin/posts", { scroll: false });
 
   const patchPost = (id: string, patch: Partial<IgPost>) =>
-    posts.setData({ data: (posts.data?.data ?? []).map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+    posts.setData({ ...posts.data, data: (posts.data?.data ?? []).map((p) => (p.id === id ? { ...p, ...patch } : p)) });
 
   async function toggleComments(p: IgPost) {
     const next = !(p.is_comment_enabled ?? true);
@@ -114,7 +125,10 @@ function Posts() {
             <Segmented
               ariaLabel={t("posts.countAria")}
               value={limit}
-              onChange={setLimit}
+              onChange={(n) => {
+                setLimit(n);
+                setCursors([]); // 개수를 바꾸면 첫 페이지부터
+              }}
               options={[
                 { value: 12, label: t("posts.countOption", { n: 12 }) },
                 { value: 24, label: t("posts.countOption", { n: 24 }) },
@@ -388,6 +402,17 @@ function Posts() {
           </>
         )}
       </Card>
+      {(page > 1 || nextCursor) && (
+        <nav aria-label={t("posts.pagination")} className="mt-4 flex items-center justify-center gap-3">
+          <Button size="sm" disabled={page === 1 || posts.loading} onClick={() => goPage(cursors.slice(0, -1))}>
+            ← {t("posts.prev")}
+          </Button>
+          <span className="tnum min-w-[4.5rem] text-center text-[13px] text-fg-2">{t("posts.page", { n: page })}</span>
+          <Button size="sm" disabled={!nextCursor || posts.loading} onClick={() => nextCursor && goPage([...cursors, nextCursor])}>
+            {t("posts.next")} →
+          </Button>
+        </nav>
+      )}
       {sentimentPost && <SentimentDialog post={sentimentPost} onClose={() => setSentimentPost(null)} />}
 
       {editing && (

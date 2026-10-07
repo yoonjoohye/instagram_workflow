@@ -11,7 +11,7 @@ export default defineMessages({
     noticeBody:
       "여기서는 <b>댓글 켜기/끄기</b>와 <b>댓글 자동 응답</b>을 바꿀 수 있습니다. 캡션 수정과 삭제는 Instagram API 가 지원하지 않아 (삭제는 Facebook 페이지 연결 계정만 가능) 각 게시물의 ↗ 링크로 Instagram 에서 처리해 주세요.",
     loadFailed: "게시물을 불러오지 못했습니다",
-    summaryAll: "전체 게시물",
+    summaryAll: "이 페이지 게시물", pagination: "페이지 이동", prev: "이전", next: "다음", page: "{n}페이지",
     summaryStudio: "스튜디오에서 만든 게시물",
     summaryCount: "{title} · <n>{n}</n>개",
     avgReach: "평균 도달",
@@ -104,7 +104,7 @@ export default defineMessages({
     noticeBody:
       "Here you can change <b>comments on/off</b> and <b>comment auto-reply</b>. The Instagram API doesn't support editing captions or deleting posts (deletion is only available for accounts linked to a Facebook Page), so use each post's ↗ link to do that on Instagram.",
     loadFailed: "Couldn't load posts",
-    summaryAll: "All posts",
+    summaryAll: "Posts on this page", pagination: "Pages", prev: "Previous", next: "Next", page: "Page {n}",
     summaryStudio: "Posts made in Studio",
     summaryCount: "{title} · <n>{n}</n>",
     avgReach: "Avg. reach",
@@ -192,7 +192,7 @@ export default defineMessages({
     noticeBody:
       "ここでは<b>コメントのオン/オフ</b>と<b>コメント自動返信</b>を変更できます。キャプションの編集と削除はInstagram APIが対応していないため(削除はFacebookページ連携アカウントのみ可能)、各投稿の ↗ リンクからInstagramで操作してください。",
     loadFailed: "投稿を読み込めませんでした",
-    summaryAll: "すべての投稿",
+    summaryAll: "このページの投稿", pagination: "ページ移動", prev: "前へ", next: "次へ", page: "{n}ページ",
     summaryStudio: "スタジオで作成した投稿",
     summaryCount: "{title} · <n>{n}</n>件",
     avgReach: "平均リーチ",
