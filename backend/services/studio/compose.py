@@ -63,7 +63,10 @@ def draw_lines(draw, lines, font, x, y, fill, gap) -> int:
     return y
 
 
-def compose(photo: bytes, slide: dict[str, Any], *, accent: str = "#6c5ce7", font: str = DEFAULT_FONT, **_: Any) -> bytes:
+ACCENT = "#6c5ce7"  # 글 영역의 강조 막대·버튼 색
+
+
+def compose(photo: bytes, slide: dict[str, Any], *, accent: str = ACCENT, font: str = DEFAULT_FONT) -> bytes:
     """레이아웃별로 이미지 위에 이 장의 글만 얹습니다 (배지·번호·쪽수·계정명 같은 고정 요소 없음)."""
     W, H = SIZE
     pad = 84

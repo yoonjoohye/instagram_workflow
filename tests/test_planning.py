@@ -35,7 +35,6 @@ def test_sanitize_plan_dedupes_and_bounds_photos():
     design = planning.sanitize_plan(PLAN, n=2)
     slide = design["slides"][0]
     assert slide["photos"] == [0, 1]  # 중복·범위 밖(9) 제거
-    assert slide["photo"] == 0  # 예전 코드 호환
     assert design["hashtags"] == ["파리", "여행"]
     assert [m["title"] for m in design["music"]] == ["La Vie en rose"]  # 제목 없는 곡 제거
 

@@ -41,7 +41,6 @@ export type Job = {
   media_kind: MediaKind;
   tone: string;
   language: string;
-  with_music: boolean;
   status: JobStatus;
   provider: string;
   error: string;

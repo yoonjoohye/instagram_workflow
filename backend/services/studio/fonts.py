@@ -80,9 +80,9 @@ def font_key(key: str | None) -> str:
 
 
 def load_font(kind: str, size: int, key: str = DEFAULT_FONT) -> ImageFont.FreeTypeFont:
-    """kind: 'title' | 'body' (예전 호출의 'ExtraBold'/'Medium' 도 받음)."""
+    """kind: 'title' | 'body'"""
     spec = FONTS[font_key(key)]
-    kind = "title" if kind in ("title", "ExtraBold") else "body"
+    kind = "title" if kind == "title" else "body"
     font = ImageFont.truetype(str(FONT_DIR / spec[kind]), int(size * spec["scale"]))
     if "wght" in spec:  # 가변 글꼴
         font.set_variation_by_axes([spec["wght"][kind]])

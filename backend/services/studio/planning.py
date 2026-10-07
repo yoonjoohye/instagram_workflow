@@ -249,7 +249,7 @@ def sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
 
     def slide(s: dict[str, Any]) -> dict[str, Any]:
         raw_photos = s.get("photos")
-        if raw_photos is None and isinstance(s.get("photo"), int):  # 예전 형식
+        if raw_photos is None and isinstance(s.get("photo"), int):  # 모델이 예전 형식(photo 하나)으로 답한 경우
             raw_photos = [s["photo"]]
         photos = []
         for x in raw_photos or []:
@@ -264,7 +264,6 @@ def sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
         server_text = layout in ("overlay", "panel", "center")
         return {
             "photos": photos,
-            "photo": photos[0] if photos else -1,  # 예전 코드 호환
             "layout": layout,
             "title": title if server_text else "",
             "body": body if server_text else "",
@@ -301,19 +300,20 @@ def fallback_plan(n: int, prompt: str, style: str = "") -> dict[str, Any]:
     topic = clip(prompt.splitlines()[0] if prompt else "", 26)
     blank = {"layout": "photo", "title": "", "body": "", "cta": "", "image_text": "", "visual": ""}
     if n == 0:
-        return {"concept": topic, "slides": [{**blank, "photos": [], "photo": -1, "layout": "center" if topic else "photo", "title": topic}], "hashtags": []}
+        return {"concept": topic, "slides": [{**blank, "photos": [], "layout": "center" if topic else "photo", "title": topic}], "hashtags": []}
     if n > 1 and _ONE_SLIDE.search(f"{prompt}\n{style}"):
         ids = list(range(min(n, 4)))
-        return {"concept": topic, "slides": [{**blank, "photos": ids, "photo": 0}], "hashtags": []}
-    slides = [{**blank, "photos": [i], "photo": i} for i in range(min(n, MAX_SLIDES))]
+        return {"concept": topic, "slides": [{**blank, "photos": ids}], "hashtags": []}
+    slides = [{**blank, "photos": [i]} for i in range(min(n, MAX_SLIDES))]
     if topic:
         slides[0].update(layout="overlay", title=topic)
     return {"concept": topic, "slides": slides, "hashtags": []}
 
 
 def slide_list(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    """렌더링 순서. role 은 레이아웃 (예전 작업의 cover/content/conclusion 구조도 읽습니다)."""
-    if "cover" in plan:  # 이전 형식 호환
+    """렌더링 순서. role 은 레이아웃.
+    카드뉴스 전용이던 때(표지·내용·결론 고정) 만든 작업은 cover/content/conclusion 구조라 그것도 읽습니다."""
+    if "cover" in plan:
         legacy = (
             [{"role": "overlay", **plan["cover"], "body": plan["cover"].get("subtitle", "")}]
             + [{"role": "panel", **s, "title": s.get("heading", "")} for s in plan.get("slides", [])]

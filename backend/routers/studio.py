@@ -111,7 +111,6 @@ def serve_media(blob_id: str, db: Session = Depends(get_db)) -> Response:
 
 class ResearchIn(BaseModel):
     prompt: str = Field(min_length=2, max_length=2000)
-    notes: str = Field(default="", max_length=3000)  # (예전 필드) 사용자 확정 정보
     caption_format: str = Field(default="", max_length=2000)  # 캡션 양식 — 안에 적힌 사실도 확정 정보
     style: str = Field(default="", max_length=2000)  # 연출 방향 — 조사 방향도 여기에 맞춤
     language: str | None = Field(default=None, max_length=8)  # 화면 언어 (ko|en|ja) — 조사 요약을 이 언어로
@@ -125,14 +124,11 @@ class Source(BaseModel):
 class PlanIn(BaseModel):
     upload_ids: list[str] = Field(default_factory=list, max_length=svc.MAX_PHOTOS)  # 없으면 전부 새로 생성
     prompt: str = Field(min_length=2, max_length=2000)
-    tone: str = Field(default="", max_length=64)  # (사용 안 함) 예전 요청 호환용
     style: str = Field(default="", max_length=2000)  # 연출 방향 — 주제와 함께 절대 기준
     caption_format: str = Field(default="", max_length=2000)
-    notes: str = Field(default="", max_length=3000)
     research_notes: str = Field(default="", max_length=8000)
     sources: list[Source] = Field(default_factory=list, max_length=20)
     reference_ids: list[str] = Field(default_factory=list, max_length=3)  # 연출 참고 이미지
-    accent: str = Field(default="#6c5ce7", pattern=r"^#[0-9a-fA-F]{6}$")
     font: str = Field(default="auto", max_length=40)  # auto = Gemini 가 형식에 맞게 선택
     # 화면 언어 (ko|en|ja). 게시물 글은 사용자가 주제를 쓴 언어를 따르고, 애매할 때만 이 언어.
     language: str | None = Field(default=None, max_length=8)
@@ -209,7 +205,7 @@ def research(body: ResearchIn, request: Request, account: Account = Depends(curr
     # 캡션 양식에 적은 사실(추천인 코드 등)도 확정 정보로 조사에 넘깁니다.
     result, warning = svc.research(
         body.prompt,
-        "\n".join(p for p in (body.notes, body.caption_format) if p.strip()),
+        body.caption_format,
         body.style,
         language=norm_lang(body.language or lang_of(request)),
     )
@@ -232,7 +228,6 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             prompt=body.prompt,
             style=body.style,
             caption_format=body.caption_format,
-            notes=body.notes,
             research_notes=body.research_notes,
             language=norm_lang(body.language or lang_of(request)),
             original=original,
@@ -290,7 +285,6 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             "upload_ids": body.upload_ids,
             "reference_ids": body.reference_ids,
             "style": body.style,
-            "accent": body.accent,
             # 사용자가 고른 글씨체가 있으면 Gemini 선택보다 우선
             "font": svc.font_key(body.font) if body.font in svc.FONTS else design.get("font", svc.DEFAULT_FONT),
             "topic": body.prompt,
@@ -385,7 +379,7 @@ def render_slide(
     slide = slides[index]
     uploads = _blobs(db, account, job.plan.get("upload_ids") or [])
     ids = slide.get("photos")
-    if ids is None:  # 예전 작업
+    if ids is None:  # 사진 여러 장 합치기 전에 만든 작업은 photo 하나
         ids = [slide.get("photo", -1)]
     sources = [uploads[i].data for i in ids if isinstance(i, int) and 0 <= i < len(uploads)]
 
@@ -431,7 +425,8 @@ def render_slide(
     if baked:
         card = svc.to_jpeg(svc.cover_fit(edited, svc.SIZE), 92)
     else:
-        card = svc.compose(edited, slide, accent=job.plan.get("accent", "#6c5ce7"), font=job.plan.get("font", svc.DEFAULT_FONT))
+        # accent: 포인트 색을 고를 수 있던 때 만든 작업은 그 색을 유지 (지금은 기본 색)
+        card = svc.compose(edited, slide, accent=job.plan.get("accent", svc.ACCENT), font=job.plan.get("font", svc.DEFAULT_FONT))
     blob = _save_blob(db, account, card, *svc.SIZE, kind="slide")
     # 글을 얹기 전 이미지도 보관해 '지금 이미지에서 고치기'에 씁니다.
     vw, vh = svc.image_size(edited)

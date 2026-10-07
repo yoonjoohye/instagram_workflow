@@ -67,6 +67,7 @@ class GenerationJob(Base):
 
     prompt: Mapped[str] = mapped_column(Text)
     media_kind: Mapped[str] = mapped_column(String(16))  # IMAGE | REELS | STORIES | CAROUSEL
+    # 아래 세 칸은 초기 버전(프롬프트로 생성)에서 쓰던 것으로 지금은 쓰지 않습니다. DB 에 칸이 있어 모델에서도 유지합니다.
     tone: Mapped[str] = mapped_column(String(64), default="친근한")
     language: Mapped[str] = mapped_column(String(16), default="ko")
     with_music: Mapped[int] = mapped_column(Integer, default=0)

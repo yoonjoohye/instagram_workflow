@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 
 from ..config import settings
 from ..db import get_db
-from ..deps import current_account, graph_for
+from ..deps import current_account
 from ..models import Account, DataDeletionRequest
 from ..services import account_data
 from ..i18n import lang_of, tr
