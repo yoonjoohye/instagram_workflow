@@ -106,3 +106,15 @@ def test_text_call_stops_on_non_transient_error(monkeypatch):
     gemini._cooldown.clear()
     with pytest.raises(gemini.GeminiError, match="API key not valid"):
         gemini.text_call([{"text": "x"}], {})
+
+
+def test_depleted_credits_become_a_clear_message(monkeypatch):
+    class Resp:
+        status_code = 429
+
+        def json(self):
+            return {"error": {"message": "Your prepayment credits are depleted. Please go to AI Studio"}}
+
+    monkeypatch.setattr(gemini.httpx, "post", lambda *a, **k: Resp())
+    with pytest.raises(gemini.GeminiError, match="크레딧이 모두 소진"):
+        gemini.call("m", [{"text": "x"}])

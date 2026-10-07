@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 
+CREDITS_DEPLETED = "Gemini 선불 크레딧이 모두 소진됐습니다. Google AI Studio(https://ai.studio/projects)에서 결제·충전을 확인해 주세요."
+
+
 class GeminiError(RuntimeError):
     pass
 
@@ -52,7 +55,10 @@ def call(
     except (httpx.HTTPError, ValueError) as exc:
         raise GeminiError(f"Gemini 연결 실패: {exc}") from exc
     if resp.status_code >= 400:
-        raise GeminiError((data.get("error") or {}).get("message") or f"Gemini 오류 ({resp.status_code})")
+        message = (data.get("error") or {}).get("message") or f"Gemini 오류 ({resp.status_code})"
+        if "credits are depleted" in message:  # 선불 결제를 썼는데 잔액이 없을 때 — 모든 모델이 같으므로 바로 알림
+            raise GeminiError(CREDITS_DEPLETED)
+        raise GeminiError(message)
     return data
 
 

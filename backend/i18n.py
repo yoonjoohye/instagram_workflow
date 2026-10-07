@@ -106,6 +106,10 @@ CATALOG: dict[str, tuple[str, str]] = {
     ),
     "주제 조사(검색) 실패로 사진·입력 정보만 사용: {e}": ("Topic research (search) failed, so only your photos and input were used: {e}", "テーマ調査(検索)に失敗したため、写真と入力情報のみを使用しました: {e}"),
     "GEMINI_API_KEY 가 없어 기본 구성을 사용했습니다.": ("GEMINI_API_KEY isn't set, so a basic layout was used.", "GEMINI_API_KEY が未設定のため、基本構成を使用しました。"),
+    "Gemini 선불 크레딧이 모두 소진됐습니다. Google AI Studio(https://ai.studio/projects)에서 결제·충전을 확인해 주세요.": (
+        "Your Gemini prepaid credits are used up. Check billing and top up in Google AI Studio (https://ai.studio/projects).",
+        "Geminiのプリペイドクレジットを使い切りました。Google AI Studio(https://ai.studio/projects)で支払い・チャージを確認してください。",
+    ),
     "GEMINI_API_KEY 가 설정되지 않았습니다.": ("GEMINI_API_KEY is not set.", "GEMINI_API_KEY が設定されていません。"),
     "Gemini 연결 실패: {e}": ("Couldn't connect to Gemini: {e}", "Geminiに接続できません: {e}"),
     "Gemini 오류 ({e})": ("Gemini error ({e})", "Geminiエラー({e})"),
