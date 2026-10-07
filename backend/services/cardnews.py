@@ -100,26 +100,44 @@ def _gemini(
     return data
 
 
-TEXT_FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-lite-latest")
+TEXT_FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-flash-latest", "gemini-flash-lite-latest")
 _TRANSIENT = ("high demand", "overloaded", "unavailable", "try again", "quota", "exhausted", "rate", "deadline", "timed out", "연결 실패", "not found", "no longer available", "not supported")
 
 
-def _text_call(parts: list[dict[str, Any]], generation_config: dict[str, Any], *, tools=None, budget: float = 55.0) -> dict:
-    """구성·조사용 텍스트 호출. 혼잡·한도 오류면 다른 텍스트 모델로 다시 시도합니다 (Vercel 60초 안에서)."""
+# 최근에 응답하지 않거나 혼잡했던 모델은 잠시 건너뜁니다 (같은 서버 인스턴스 안에서).
+_COOLDOWN_SEC = 300
+_cooldown: dict[str, float] = {}
+# 앞 모델이 멈춰 있어도 뒤 모델을 시도할 시간이 남도록, 마지막이 아닌 시도는 이 시간까지만 기다립니다.
+ATTEMPT_CAP_SEC = 25.0
+
+
+def _text_call(
+    parts: list[dict[str, Any]], generation_config: dict[str, Any], *, tools=None, budget: float = 55.0, attempt_cap: float = ATTEMPT_CAP_SEC
+) -> dict:
+    """구성·조사용 텍스트 호출. 혼잡·한도·무응답이면 다른 텍스트 모델로 다시 시도합니다 (Vercel 60초 안에서)."""
     models = list(dict.fromkeys((settings.gemini_text_model, *TEXT_FALLBACK_MODELS)))
-    deadline = time.monotonic() + budget
+    now = time.monotonic()
+    fresh = [m for m in models if _cooldown.get(m, 0) <= now]
+    # 모두 쉬는 중이면 원래 순서대로 다시 시도
+    order = fresh or models
+    deadline = now + budget
     last: Exception | None = None
-    for model in models:
+    for i, model in enumerate(order):
         remaining = deadline - time.monotonic()
         if remaining < 8:
             break
+        is_last = i == len(order) - 1
+        timeout = remaining if is_last else min(remaining - 8, attempt_cap)
         try:
-            return _gemini(model, parts, generation_config, tools=tools, timeout=remaining)
+            data = _gemini(model, parts, generation_config, tools=tools, timeout=timeout)
+            _cooldown.pop(model, None)
+            return data
         except GeminiError as exc:
             last = exc
             log.warning("gemini text %s failed: %s", model, exc)
             if not any(k in str(exc).lower() for k in _TRANSIENT):
                 break
+            _cooldown[model] = time.monotonic() + _COOLDOWN_SEC
     raise GeminiError(str(last or "Gemini 시간 초과"))
 
 
@@ -378,7 +396,7 @@ def photo_query(prompt: str, today: str) -> dict[str, Any]:
         "required": ["queries", "count"],
     }
     cfg = {"temperature": 0.0, "responseMimeType": "application/json", "responseSchema": schema}  # 같은 주제엔 같은 검색어
-    data = _text_call([{"text": _PHOTO_QUERY_PROMPT.format(prompt=prompt[:1000], today=today)}], cfg, budget=40.0)
+    data = _text_call([{"text": _PHOTO_QUERY_PROMPT.format(prompt=prompt[:1000], today=today)}], cfg, budget=55.0, attempt_cap=12.0)  # 짧은 요청
     try:
         raw = json.loads(_text_of(data))
     except ValueError as exc:

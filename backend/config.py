@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     dev_login: bool = False
     gemini_model: str = "gemini-flash-lite-latest"
     # 게시물 만들기: 조사·구성은 gemini_text_model, 이미지 연출(편집·생성)은 gemini_image_model
-    gemini_text_model: str = "gemini-flash-latest"
+    gemini_text_model: str = "gemini-3.5-flash"  # gemini-flash-latest 는 2026-10 기준 자주 응답 없음
     gemini_image_model: str = "gemini-3.1-flash-image"
 
     # Meta Webhooks 구독 시 '인증 토큰' 칸에 넣는 값과 같아야 합니다 (아무 임의 문자열).
