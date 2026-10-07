@@ -2,7 +2,8 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { PostForm } from "@/components/studio/PostForm";
+import { DraftPreview } from "@/components/studio/DraftPreview";
+import { PostForm, type Draft } from "@/components/studio/PostForm";
 import { useT } from "@/i18n/client";
 import { Button, Notice, PageHeader, Skeleton } from "@/components/ui";
 import { api, toApiError } from "@/lib/api";
@@ -28,6 +29,9 @@ function Studio() {
   const [job, setJob] = useState<Job | null>(null);
   const [loadingJob, setLoadingJob] = useState(Boolean(jobId));
   const [jobError, setJobError] = useState<string>();
+  // 만들기 전: 고른 사진·주제를 오른쪽에 바로 보여 줌
+  const [draft, setDraft] = useState<Draft>({ media: [], prompt: "", postType: "feed" });
+  const hasDraft = draft.media.length > 0 || draft.prompt.trim().length > 0;
 
   useEffect(() => {
     if (!jobId) {
@@ -76,10 +80,8 @@ function Studio() {
         </div>
       ) : (
         <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-          <PostForm onCreated={onCreated} />
-          <div className="min-w-0">
-            <Review job={null} onChange={setJob} />
-          </div>
+          <PostForm onCreated={onCreated} onDraft={setDraft} />
+          <div className="min-w-0">{hasDraft ? <DraftPreview draft={draft} /> : <Review job={null} onChange={setJob} />}</div>
         </div>
       )}
     </>

@@ -28,6 +28,8 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
+  // Vercel services 배포는 Edge 런타임을 지원하지 않아 Node.js 런타임으로 실행합니다 (Next 15.5+).
+  runtime: "nodejs",
   // 페이지만 (API·정적 파일·이미지 제외)
   matcher: ["/((?!api|_next|.*\\..*).*)"],
 };

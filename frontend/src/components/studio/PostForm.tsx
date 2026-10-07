@@ -29,7 +29,10 @@ type Photo = { key: string; file: File; preview: string; kind: "image" | "video"
 // auto = 폴더에서 자동으로 고름
 type Step = { label: string; done: number; total: number };
 
-export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
+/** 만들기 전 오른쪽 미리보기에 쓰는 지금 입력값 */
+export type Draft = { media: { url: string; kind: "image" | "video" }[]; prompt: string; postType: "feed" | "story" };
+
+export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void; onDraft?: (d: Draft) => void }) {
   const { t, locale } = useI18n();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -40,6 +43,11 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [template, setTemplate] = useState<TemplateKey>("auto");
   const [group, setGroup] = useState<TemplateGroup>(groupOf("auto"));
   const [postType, setPostType] = useState<"feed" | "story">("feed");
+
+  // 고른 사진·주제가 바뀔 때마다 오른쪽 미리보기에 알림
+  useEffect(() => {
+    onDraft?.({ media: photos.map((p) => ({ url: p.preview, kind: p.kind })), prompt, postType });
+  }, [photos, prompt, postType]); // eslint-disable-line react-hooks/exhaustive-deps
   const [font, setFont] = useState("auto");
   const fonts = useApi<{ data: { key: string; label: string; preview: string }[] }>("/studio/fonts");
   const [step, setStep] = useState<Step | null>(null);
