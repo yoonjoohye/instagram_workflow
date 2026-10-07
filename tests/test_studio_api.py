@@ -176,3 +176,19 @@ def test_caption_written_from_photos_when_empty(monkeypatch, client, login, acco
     assert r.status_code == 200, r.text
     assert r.json()["caption"] == "에펠탑 앞 노을 🌅"
     assert seen["images"] == 1 and "사진과 주제에 어울리게" in seen["text"] and "파리 여행" in seen["text"]
+
+
+def test_manual_edit_keeps_story_links(client, login, account, db):
+    login(account)
+    up = client.post("/media/uploads", files={"file": ("a.jpg", jpeg("red"), "image/jpeg")}).json()["id"]
+    job = client.post("/studio/manual", json={"upload_ids": [up], "post_type": "story"}).json()
+    links = json.dumps([{"kind": "link", "url": "https://shop.example.com"}, {"kind": "post", "url": "https://instagram.com/p/x"}, {"url": "javascript:alert(1)"}])
+    r = client.post(
+        f"{PREFIX}/{job['id']}/slides/0/edit",
+        files={"file": ("e.jpg", jpeg("blue"), "image/jpeg")},
+        data={"layers": "{}", "base_id": up, "links": links},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["asset"]["meta"]["story_links"] == [
+        {"kind": "link", "url": "https://shop.example.com"}, {"kind": "post", "url": "https://instagram.com/p/x"},
+    ]

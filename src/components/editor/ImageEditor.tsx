@@ -110,6 +110,13 @@ export function ImageEditor({
   const [crop, setCropState] = useState<Crop>(NO_CROP);
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [showPreview, setShowPreview] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkLabel, setLinkLabel] = useState("");
+  const isStory = preview?.kind === "story";
+  const myPosts = useApi<{ data: { id: number; status: string; permalink: string; media_kind: string; assets: Asset[] }[] }>(
+    isStory ? "/workflow/jobs?limit=30" : null,
+  );
+  const published = (myPosts.data?.data ?? []).filter((j) => j.status === "published" && j.permalink && j.media_kind !== "STORIES");
   const adjustRef = useRef(adjust);
   const cropRef = useRef(crop);
 
@@ -118,18 +125,22 @@ export function ImageEditor({
   const find = (name: string) => canvas.current?.getObjects().find((o) => (o as Named).name === name);
   const base = () => find("base") as F.FabricImage | undefined;
 
-  // ── 미리보기: 편집할 때마다(잠깐 쉬었다가) 작은 이미지로 갱신 ──────────────
+  // ── 미리보기: 캔버스가 다시 그려질 때마다(끄는 중·슬라이더 움직이는 중에도) 작은 이미지로 갱신 ──────
+  // 선택 테두리는 위쪽 캔버스에 그려져 toDataURL 에는 들어가지 않습니다. 1초에 최대 8번.
+  const capturing = useRef(false);
   const refreshPreview = useCallback(() => {
-    clearTimeout(previewTimer.current);
+    if (!preview || capturing.current || previewTimer.current) return;
     previewTimer.current = setTimeout(() => {
+      previewTimer.current = undefined;
       const c = canvas.current;
-      if (!c || !preview) return;
-      const active = c.getActiveObject();
-      c.discardActiveObject();
-      setPreviewUrl(c.toDataURL({ format: "jpeg", quality: 0.8, multiplier: 540 / size.current.w / zoom.current }));
-      if (active) c.setActiveObject(active);
-      c.requestRenderAll();
-    }, 350);
+      if (!c) return;
+      capturing.current = true; // toDataURL 도 그리기 이벤트를 내므로 그동안은 무시
+      try {
+        setPreviewUrl(c.toDataURL({ format: "jpeg", quality: 0.8, multiplier: 540 / size.current.w / zoom.current }));
+      } finally {
+        capturing.current = false;
+      }
+    }, 120);
   }, [preview]);
 
   // ── 기록 (되돌리기) ─────────────────────────────────────────
@@ -137,7 +148,7 @@ export function ImageEditor({
     const c = canvas.current;
     const h = history.current;
     if (!c || h.restoring) return;
-    const json = JSON.stringify({ canvas: c.toObject(["name", "selectable", "evented"]), adjust: adjustRef.current, crop: cropRef.current });
+    const json = JSON.stringify({ canvas: c.toObject(["name", "selectable", "evented", "link"]), adjust: adjustRef.current, crop: cropRef.current });
     if (h.stack[h.at] === json) return;
     h.stack = h.stack.slice(0, h.at + 1).concat(json).slice(-40);
     h.at = h.stack.length - 1;
@@ -221,6 +232,7 @@ export function ImageEditor({
         c.on("selection:created", (e) => setSelected((e.selected?.[0] as Named) ?? null));
         c.on("selection:updated", (e) => setSelected((e.selected?.[0] as Named) ?? null));
         c.on("selection:cleared", () => setSelected(null));
+        c.on("after:render", refreshPreview);
         for (const ev of ["object:added", "object:modified", "object:removed", "path:created", "text:changed"] as const) c.on(ev, () => snapshot());
         snapshot();
         setReady(true);
@@ -378,6 +390,63 @@ export function ImageEditor({
     canvas.current!.requestRenderAll();
     snapshot();
     force((n) => n + 1);
+  }
+
+  // ── 스토리 링크·게시물 스티커 (모양만 — 누를 수 있는 링크는 게시 후 인스타 앱에서 붙임) ─────────
+  type LinkObj = Named & { link?: string };
+  const storyLinks = () =>
+    (canvas.current?.getObjects() ?? [])
+      .filter((o) => (o as Named).name === "link-sticker" || (o as Named).name === "post-sticker")
+      .map((o) => ({ kind: (o as Named).name === "post-sticker" ? "post" : "link", url: (o as LinkObj).link ?? "" }))
+      .filter((l) => l.url);
+
+  async function addLinkSticker() {
+    const f = fab.current!;
+    let url = linkUrl.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    await loadFont("pretendard");
+    const label = linkLabel.trim() || url.replace(/^https?:\/\//i, "").replace(/\/$/, "").slice(0, 28);
+    const fs = Math.round(size.current.w * 0.042);
+    const text = new f.FabricText(`🔗 ${label.toUpperCase()}`, {
+      fontFamily: fontFamily("pretendard"), fontSize: fs, fontWeight: "bold", fill: "#2563eb", originX: "center", originY: "center", left: 0, top: 0,
+    });
+    const h = text.height + fs * 1.1;
+    const pill = new f.Rect({
+      width: text.width + fs * 1.8, height: h, rx: h / 2, ry: h / 2, fill: "#ffffff", originX: "center", originY: "center", left: 0, top: 0,
+      shadow: new f.Shadow({ color: "rgba(0,0,0,0.25)", blur: 12, offsetY: 3 }),
+    });
+    const g = new f.Group([pill, text], { ...center() }) as LinkObj;
+    g.name = "link-sticker";
+    g.link = url;
+    add(g);
+    setLinkUrl("");
+    setLinkLabel("");
+  }
+
+  async function addPostSticker(job: { permalink: string; assets: Asset[] }) {
+    const f = fab.current!;
+    const thumb = job.assets.find((a) => a.type === "image")?.url ?? job.assets[0]?.thumbnail_url;
+    if (!thumb) return;
+    await loadFont("pretendard");
+    const W = size.current.w * 0.44;
+    const pad = W * 0.05;
+    const img = await f.FabricImage.fromURL(mediaSrc(thumb), { crossOrigin: "anonymous" });
+    img.scaleToWidth(W - pad * 2);
+    const imgH = img.getScaledHeight();
+    img.set({ left: pad, top: pad, originX: "left", originY: "top" });
+    const fs = W * 0.075;
+    const label = new f.FabricText(`${t("editor.postView")} ›`, {
+      fontFamily: fontFamily("pretendard"), fontSize: fs, fontWeight: "bold", fill: "#111111", left: pad, top: pad * 2 + imgH, originX: "left", originY: "top",
+    });
+    const card = new f.Rect({
+      left: 0, top: 0, originX: "left", originY: "top", width: W, height: imgH + pad * 3 + fs * 1.2, rx: pad, ry: pad, fill: "#ffffff",
+      shadow: new f.Shadow({ color: "rgba(0,0,0,0.3)", blur: 16, offsetY: 4 }),
+    });
+    const g = new f.Group([card, img, label], { ...center() }) as LinkObj;
+    g.name = "post-sticker";
+    g.link = job.permalink;
+    add(g);
   }
 
   function addEmoji(e: string) {
@@ -552,7 +621,7 @@ export function ImageEditor({
         v: 1,
         w: size.current.w,
         h: size.current.h,
-        canvas: c.toObject(["name", "selectable", "evented"]),
+        canvas: c.toObject(["name", "selectable", "evented", "link"]),
         adjust: adjustRef.current,
         crop: cropRef.current,
       };
@@ -560,6 +629,7 @@ export function ImageEditor({
       body.append("file", image, "edited.jpg");
       body.append("layers", JSON.stringify(layers));
       body.append("base_id", baseId);
+      body.append("links", JSON.stringify(storyLinks()));
       const res = await fetch(`/api/py/studio/${jobId}/slides/${index}/edit`, { method: "POST", body, credentials: "include" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.detail || res.status);
@@ -728,6 +798,49 @@ export function ImageEditor({
 
               {tab === "sticker" && (
                 <div className="space-y-2.5">
+                  {isStory && (
+                    <div className="space-y-2 rounded-lg border border-white/10 p-2">
+                      <p className="text-[12px] font-semibold text-white/80">🔗 {t("editor.storyLinks")}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        <input
+                          value={linkUrl}
+                          onChange={(e) => setLinkUrl(e.target.value)}
+                          placeholder="https://"
+                          inputMode="url"
+                          className="h-8 min-w-0 flex-[2_1_10rem] rounded-md border border-white/15 bg-white/5 px-2 text-[12px] text-white outline-none placeholder:text-white/35 focus:border-[#8b5cf6]"
+                        />
+                        <input
+                          value={linkLabel}
+                          onChange={(e) => setLinkLabel(e.target.value)}
+                          placeholder={t("editor.linkLabelPh")}
+                          maxLength={28}
+                          className="h-8 min-w-0 flex-[1_1_7rem] rounded-md border border-white/15 bg-white/5 px-2 text-[12px] text-white outline-none placeholder:text-white/35 focus:border-[#8b5cf6]"
+                        />
+                        <Chip onClick={addLinkSticker}>{t("editor.addLink")}</Chip>
+                      </div>
+                      {published.length > 0 && (
+                        <Row>
+                          <span className="shrink-0 text-[11px] text-white/50">{t("editor.myPosts")}</span>
+                          {published.map((j) => {
+                            const thumb = j.assets.find((a) => a.type === "image")?.url ?? j.assets[0]?.thumbnail_url;
+                            return (
+                              <button
+                                key={j.id}
+                                type="button"
+                                onClick={() => addPostSticker(j)}
+                                aria-label={t("editor.addPost")}
+                                className="size-11 shrink-0 overflow-hidden rounded-md ring-1 ring-white/15 hover:ring-[#8b5cf6]"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={mediaSrc(thumb)} alt="" className="size-full object-cover" />
+                              </button>
+                            );
+                          })}
+                        </Row>
+                      )}
+                      <p className="text-[11px] leading-relaxed text-white/45">{t("editor.linkNote")}</p>
+                    </div>
+                  )}
                   <Row className="text-2xl">
                     {EMOJIS.map((e) => (
                       <button key={e} type="button" onClick={() => addEmoji(e)} className="shrink-0 rounded-md px-1.5 py-1 hover:bg-white/10">

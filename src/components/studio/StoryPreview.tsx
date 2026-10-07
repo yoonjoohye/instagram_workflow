@@ -30,8 +30,13 @@ export function StoryPreview({ username, avatar, assets }: { username: string; a
             className="absolute inset-0 size-full object-cover"
           />
         ) : current?.url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img key={current.url} src={mediaSrc(current.url)} alt="" className="absolute inset-0 size-full object-cover" draggable={false} />
+          // 9:16 이 아닌 사진은 인스타처럼 자르지 않고 통째로, 뒤는 같은 사진을 흐리게 채움
+          <div key={current.url} className="absolute inset-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={mediaSrc(current.url)} alt="" aria-hidden className="absolute inset-0 size-full scale-110 object-cover opacity-70 blur-2xl" draggable={false} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={mediaSrc(current.url)} alt="" className="absolute inset-0 size-full object-contain" draggable={false} />
+          </div>
         ) : (
           <div className="absolute inset-0 animate-pulse bg-white/10" />
         )}

@@ -5,6 +5,7 @@ Vercel 함수는 요청당 60초 제한이 있어 이미지를 한 장씩 요청
 """
 from __future__ import annotations
 
+import json
 import secrets
 
 from fastapi import (
@@ -463,6 +464,19 @@ def _drop(db: Session, account: Account, blob_id: str, *, keep: str = "") -> Non
         db.delete(blob)
 
 
+def _story_links(raw: str) -> list[dict]:
+    try:
+        items = json.loads(raw or "[]")
+    except ValueError:
+        return []
+    out = []
+    for it in items if isinstance(items, list) else []:
+        url = str((it or {}).get("url", "")).strip()[:1000] if isinstance(it, dict) else ""
+        if url.lower().startswith(("http://", "https://")):
+            out.append({"kind": "post" if it.get("kind") == "post" else "link", "url": url})
+    return out[:10]
+
+
 MAX_LAYERS_BYTES = 1_500_000  # 편집 내용(JSON) 최대 크기
 
 
@@ -473,6 +487,7 @@ async def save_manual_edit(
     file: UploadFile = File(...),
     layers: str = Form(default=""),
     base_id: str = Form(max_length=40),
+    links: str = Form(default="[]", max_length=20000),  # 스토리 링크·게시물 스티커 [{kind, url}]
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -515,6 +530,8 @@ async def save_manual_edit(
             "status": "done",
             "edited": True,
             "edit": {"base_id": base_id, "layers": layers},
+            # 인스타 API 로는 스토리에 누를 수 있는 링크를 못 붙여, 게시 후 앱에서 붙이도록 주소를 보여 줌
+            "story_links": _story_links(links),
             # '지금 이미지에서 고치기'는 편집한 결과에서 (글자가 이미 들어가 있음)
             "visual_id": "",
             "text_baked": True,

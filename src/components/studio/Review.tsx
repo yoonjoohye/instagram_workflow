@@ -16,7 +16,7 @@ import { HashtagField } from "@/components/studio/HashtagField";
 import { CaptionField } from "@/components/studio/CaptionField";
 import { buildSoundtrack, SoundtrackCard } from "@/components/studio/SoundtrackCard";
 import { VideoEditor } from "@/components/studio/VideoEditor";
-import { Badge, Button, Card, Notice, Skeleton, Spinner, StatusDot } from "@/components/ui";
+import { Badge, Button, Card, cx, Notice, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { useI18n } from "@/i18n/client";
 import { rich } from "@/i18n/rich";
 import { api, toApiError, useApi } from "@/lib/api";
@@ -176,7 +176,10 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
         subtitle={t("studio.livePreviewHint")}
       >
         {isStory ? (
-          <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={shown} />
+          <>
+            <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={shown} />
+            <StoryLinks assets={visual} published={job.status === "published"} />
+          </>
         ) : (
           <InstagramPreview
             username={me.username}
@@ -411,6 +414,45 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
           onSaved={onChange}
         />
       )}
+    </div>
+  );
+}
+
+/** 스토리에 넣은 링크·게시물 스티커의 주소 — 인스타 API 로는 누를 수 있는 링크를 붙일 수 없어 앱에서 붙이도록 복사 버튼 제공 */
+function StoryLinks({ assets, published }: { assets: Asset[]; published: boolean }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState<string>();
+  const items = assets.flatMap((a, i) =>
+    ((a.meta?.story_links as { kind: string; url: string }[] | undefined) ?? []).map((l) => ({ ...l, n: i + 1 })),
+  );
+  if (!items.length) return null;
+  const copy = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(url);
+      setTimeout(() => setCopied(undefined), 1500);
+    } catch {
+      /* 클립보드 권한이 없으면 무시 */
+    }
+  };
+  return (
+    <div className={cx("mt-4 rounded-lg border p-3", published ? "border-accent/50 bg-accent/5" : "border-line")}>
+      <p className="text-[13px] font-semibold">🔗 {t("studio.storyLinksTitle")}</p>
+      <p className="mt-0.5 text-[12px] leading-relaxed text-fg-3">{published ? t("studio.storyLinksAfter") : t("studio.storyLinksBefore")}</p>
+      <ul className="mt-2 space-y-1.5">
+        {items.map((l, i) => (
+          <li key={i} className="flex items-center gap-2 text-[12px]">
+            <span className="tnum shrink-0 text-fg-3">{l.n}.</span>
+            <span className="shrink-0">{l.kind === "post" ? "📄" : "🔗"}</span>
+            <span className="min-w-0 flex-1 truncate text-fg-2" title={l.url}>
+              {l.url.replace(/^https?:\/\//, "")}
+            </span>
+            <button type="button" onClick={() => copy(l.url)} className="shrink-0 rounded-md px-2 py-1 font-medium text-fg-2 hover:bg-surface-2">
+              {copied === l.url ? t("studio.copied") : t("studio.copy")}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
