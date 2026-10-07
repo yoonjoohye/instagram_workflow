@@ -98,7 +98,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const refInput = useRef<HTMLInputElement>(null);
   const [template, setTemplate] = useState<TemplateKey>("auto");
   const [font, setFont] = useState("auto");
-  const fonts = useApi<{ data: { key: string; label: string; preview: string }[] }>("/cardnews/fonts");
+  const fonts = useApi<{ data: { key: string; label: string; preview: string }[] }>("/studio/fonts");
   const [step, setStep] = useState<Step | null>(null);
   const [error, setError] = useState<string>();
   const [dragging, setDragging] = useState(false);
@@ -166,7 +166,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
     setLibNotice(undefined);
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const query = await api<photoLib.PhotoQuery>("/cardnews/photo-query", { method: "POST", json: { prompt: prompt.trim(), today } });
+    const query = await api<photoLib.PhotoQuery>("/studio/photo-query", { method: "POST", json: { prompt: prompt.trim(), today } });
     const matches = await photoLib.search(query);
     const files = await Promise.all(matches.map((m) => photoLib.fileFor(m.path)));
     const found: Photo[] = files.map((file) => ({
@@ -236,12 +236,12 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         refIds.push(await uploadPhoto(refs[i].file, t));
       }
       setStep({ label: t("studio.stepResearch"), done: 0, total: 1 });
-      const research = await api<Research>("/cardnews/research", {
+      const research = await api<Research>("/studio/research", {
         method: "POST",
         json: { prompt: prompt.trim(), caption_format: effFormat, style: effStyle, language: locale },
       });
       setStep({ label: t("studio.stepPlan"), done: 0, total: 1 });
-      const plan = await api<{ job: Job; slides: { role: string }[]; warning: string }>("/cardnews/plan", {
+      const plan = await api<{ job: Job; slides: { role: string }[]; warning: string }>("/studio/plan", {
         method: "POST",
         json: {
           upload_ids: ids,
@@ -260,13 +260,13 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         const role = plan.slides[i].role;
         setStep({ label: t(role === "photo" ? "studio.stepPhoto" : "studio.stepDesigned", { n: i + 1 }), done: i, total });
         try {
-          await api(`/cardnews/${plan.job.id}/slides/${i}`, { method: "POST", json: {} });
+          await api(`/studio/${plan.job.id}/slides/${i}`, { method: "POST", json: {} });
         } catch {
-          await api(`/cardnews/${plan.job.id}/slides/${i}`, { method: "POST", json: {} }); // 한 번 재시도
+          await api(`/studio/${plan.job.id}/slides/${i}`, { method: "POST", json: {} }); // 한 번 재시도
         }
       }
       setStep({ label: t("studio.stepFinalize"), done: total, total });
-      onCreated(await api<Job>(`/cardnews/${plan.job.id}/finalize`, { method: "POST" }));
+      onCreated(await api<Job>(`/studio/${plan.job.id}/finalize`, { method: "POST" }));
     } catch (err) {
       setError(toApiError(err).message);
     } finally {

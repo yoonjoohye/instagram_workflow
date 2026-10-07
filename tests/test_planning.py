@@ -5,7 +5,7 @@ import json
 import pytest
 from PIL import Image
 
-from backend.services import cardnews as svc
+from backend.services.studio import gemini, planning
 
 
 def jpeg(color="red") -> bytes:
@@ -32,7 +32,7 @@ PLAN = {
 
 
 def test_sanitize_plan_dedupes_and_bounds_photos():
-    design = svc._sanitize_plan(PLAN, n=2)
+    design = planning.sanitize_plan(PLAN, n=2)
     slide = design["slides"][0]
     assert slide["photos"] == [0, 1]  # 중복·범위 밖(9) 제거
     assert slide["photo"] == 0  # 예전 코드 호환
@@ -42,16 +42,16 @@ def test_sanitize_plan_dedupes_and_bounds_photos():
 
 def test_sanitize_plan_reads_legacy_single_photo():
     raw = {**PLAN, "slides": [{"photo": 1, "layout": "overlay", "title": "제목"}]}
-    assert svc._sanitize_plan(raw, n=2)["slides"][0]["photos"] == [1]
+    assert planning.sanitize_plan(raw, n=2)["slides"][0]["photos"] == [1]
 
 
 def test_text_only_layout_without_text_becomes_photo():
     raw = {**PLAN, "slides": [{"photos": [0], "layout": "overlay", "title": "", "body": ""}]}
-    assert svc._sanitize_plan(raw, n=1)["slides"][0]["layout"] == "photo"
+    assert planning.sanitize_plan(raw, n=1)["slides"][0]["layout"] == "photo"
 
 
 def test_fallback_plan_merges_photos_when_one_slide_requested():
-    plan = svc.fallback_plan(3, "파리", "사진 3개를 한 장 짜리로")
+    plan = planning.fallback_plan(3, "파리", "사진 3개를 한 장 짜리로")
     assert len(plan["slides"]) == 1 and plan["slides"][0]["photos"] == [0, 1, 2]
 
 
@@ -70,8 +70,8 @@ def test_caption_modes(monkeypatch, caption_format, expect_in_prompt, expect_cap
         seen["prompt"] = parts[0]["text"]
         return gemini_json(PLAN)
 
-    monkeypatch.setattr(svc, "_gemini", fake)
-    design, engine, _ = svc.plan_cardnews([jpeg(), jpeg("blue")], prompt="파리", style="", caption_format=caption_format)
+    monkeypatch.setattr(gemini, "call", fake)
+    design, engine, _ = planning.plan_post([jpeg(), jpeg("blue")], prompt="파리", style="", caption_format=caption_format)
     assert engine == "gemini"
     assert expect_in_prompt in seen["prompt"]
     assert design["caption"] == expect_caption
@@ -84,26 +84,26 @@ def test_text_call_falls_back_and_cools_down(monkeypatch):
     def fake(model, parts, cfg=None, *, tools=None, timeout=50):
         calls.append((model, timeout))
         if len(calls) == 1:
-            raise svc.GeminiError("Gemini 연결 실패: The read operation timed out")
+            raise gemini.GeminiError("Gemini 연결 실패: The read operation timed out")
         return gemini_json({"ok": True})
 
-    monkeypatch.setattr(svc, "_gemini", fake)
-    svc._cooldown.clear()
-    svc._text_call([{"text": "x"}], {})
+    monkeypatch.setattr(gemini, "call", fake)
+    gemini._cooldown.clear()
+    gemini.text_call([{"text": "x"}], {})
     first, second = calls[0][0], calls[1][0]
     assert first != second
-    assert calls[0][1] <= svc.ATTEMPT_CAP_SEC  # 첫 시도는 오래 묶이지 않음
+    assert calls[0][1] <= gemini.ATTEMPT_CAP_SEC  # 첫 시도는 오래 묶이지 않음
     calls.clear()
-    svc._text_call([{"text": "x"}], {})
+    gemini.text_call([{"text": "x"}], {})
     assert calls[0][0] == second  # 실패한 모델은 잠시 건너뜀
-    svc._cooldown.clear()
+    gemini._cooldown.clear()
 
 
 def test_text_call_stops_on_non_transient_error(monkeypatch):
     def fake(*_, **__):
-        raise svc.GeminiError("API key not valid")
+        raise gemini.GeminiError("API key not valid")
 
-    monkeypatch.setattr(svc, "_gemini", fake)
-    svc._cooldown.clear()
-    with pytest.raises(svc.GeminiError, match="API key not valid"):
-        svc._text_call([{"text": "x"}], {})
+    monkeypatch.setattr(gemini, "call", fake)
+    gemini._cooldown.clear()
+    with pytest.raises(gemini.GeminiError, match="API key not valid"):
+        gemini.text_call([{"text": "x"}], {})

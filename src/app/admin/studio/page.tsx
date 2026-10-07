@@ -235,9 +235,10 @@ function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void
           assets={visual}
           filePrefix={`post-${job.id}`}
           onRedo={
+            // "cardnews/…" 는 이름을 바꾸기 전에 만든 작업
             (job.provider.startsWith("studio") || job.provider.startsWith("cardnews")) && !locked
               ? async (i, instruction, fromCurrent) => {
-                  await api(`/cardnews/${job.id}/slides/${i}`, {
+                  await api(`/studio/${job.id}/slides/${i}`, {
                     method: "POST",
                     json: { instruction: instruction || null, from_current: fromCurrent, strict: true },
                   });
@@ -434,9 +435,9 @@ function MusicCard({ job, locked, onChange }: { job: Job; locked: boolean; onCha
     }
   }
   const pick = (m: MusicPick | null) =>
-    run("pick", () => api<Job>(`/cardnews/${job.id}/music`, { method: "PUT", json: { selected: m } }));
+    run("pick", () => api<Job>(`/studio/${job.id}/music`, { method: "PUT", json: { selected: m } }));
   const resuggest = () =>
-    run("suggest", () => api<Job>(`/cardnews/${job.id}/music/suggest`, { method: "POST", json: { hint, language: locale } }));
+    run("suggest", () => api<Job>(`/studio/${job.id}/music/suggest`, { method: "POST", json: { hint, language: locale } }));
 
   async function copy() {
     if (!selected) return;

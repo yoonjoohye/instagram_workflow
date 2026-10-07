@@ -11,7 +11,7 @@ from starlette.requests import Request
 from .config import settings
 from .db import init_db
 from .i18n import lang_of, translate_payload
-from .routers import auth, autoreply, cardnews, insights, sentiment, webhooks, workflow
+from .routers import auth, autoreply, insights, sentiment, studio, webhooks, workflow
 from .services.meta_graph import GraphError
 
 
@@ -78,4 +78,4 @@ app.include_router(insights.router)
 app.include_router(autoreply.router)
 app.include_router(webhooks.router)
 app.include_router(sentiment.router)
-app.include_router(cardnews.router)
+app.include_router(studio.router)

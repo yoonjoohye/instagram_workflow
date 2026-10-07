@@ -2,15 +2,22 @@
 
 Vercel 함수는 요청당 60초 제한이 있어 이미지를 한 장씩 요청해 만듭니다.
 결과는 작업(GenerationJob)으로 저장되고 1장이면 IMAGE, 여러 장이면 CAROUSEL 로 게시됩니다.
-(경로 이름 /cardnews 는 내부용입니다.)
 """
 from __future__ import annotations
 
 import secrets
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -20,10 +27,10 @@ from ..deps import current_account
 from ..i18n import lang_of, norm_lang
 from ..models import Account, GenerationJob, MediaBlob
 from ..services import blobstore
-from ..services import cardnews as svc
+from ..services import studio as svc
 from .workflow import _job_dict
 
-router = APIRouter(tags=["cardnews"])
+router = APIRouter(tags=["studio"])
 
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
@@ -153,19 +160,19 @@ def _own_job(db: Session, account: Account, job_id: int) -> GenerationJob:
     return job
 
 
-@router.get("/cardnews/fonts")
+@router.get("/studio/fonts")
 def fonts(request: Request) -> dict:
     """고를 수 있는 글씨체 목록 (미리보기 이미지 주소 포함). 이름은 화면 언어로."""
     lang = lang_of(request)
     return {
         "data": [
-            {"key": k, "label": svc.font_label(k, lang), "preview": f"/api/py/cardnews/fonts/{k}.png?lang={lang}"}
+            {"key": k, "label": svc.font_label(k, lang), "preview": f"/api/py/studio/fonts/{k}.png?lang={lang}"}
             for k in svc.FONTS
         ]
     }
 
 
-@router.get("/cardnews/fonts/{key}.png")
+@router.get("/studio/fonts/{key}.png")
 def font_preview(key: str, lang: str = "ko") -> Response:
     if key not in svc.FONTS:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "없는 글씨체입니다.")
@@ -179,7 +186,7 @@ class PhotoQueryIn(BaseModel):
     today: str = Field(default="", max_length=10)  # 사용자 기기 날짜 (YYYY-MM-DD) — '어제' 같은 표현용
 
 
-@router.post("/cardnews/photo-query")
+@router.post("/studio/photo-query")
 def photo_query(body: PhotoQueryIn, account: Account = Depends(current_account)) -> dict:
     """기기 사진 자동 선택용: 주제를 영어 장면 묘사·장소·날짜로 바꿉니다 (사진 자체는 서버로 오지 않음)."""
     import datetime as _dt
@@ -196,7 +203,7 @@ def photo_query(body: PhotoQueryIn, account: Account = Depends(current_account))
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"사진 검색 조건을 만들지 못했습니다: {exc}") from exc
 
 
-@router.post("/cardnews/research")
+@router.post("/studio/research")
 def research(body: ResearchIn, request: Request, account: Account = Depends(current_account)) -> dict:
     """Gemini + Google 검색으로 주제를 조사합니다 (Vercel 시간 제한 때문에 설계와 나눠 호출)."""
     # 캡션 양식에 적은 사실(추천인 코드 등)도 확정 정보로 조사에 넘깁니다.
@@ -209,7 +216,7 @@ def research(body: ResearchIn, request: Request, account: Account = Depends(curr
     return {**result, "warning": warning}
 
 
-@router.post("/cardnews/plan", status_code=status.HTTP_201_CREATED)
+@router.post("/studio/plan", status_code=status.HTTP_201_CREATED)
 def plan(body: PlanIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
     """사진과 주제로 게시물 구성(장 수·장별 사진·레이아웃)과 캡션·해시태그를 설계합니다."""
     blobs = _blobs(db, account, body.upload_ids)
@@ -219,7 +226,7 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
     kinds = ["video" if b.kind == "video" else "photo" for b in blobs]
     ai_images = [(db.get(MediaBlob, b.cover_id).data if b.kind == "video" else b.data) for b in blobs]  # type: ignore[union-attr]
     try:
-        design, engine, warning = svc.plan_cardnews(
+        design, engine, warning = svc.plan_post(
             ai_images,
             references=[r.data for r in refs],
             prompt=body.prompt,
@@ -312,7 +319,7 @@ class MusicIn(BaseModel):
     selected: MusicPick | None = None  # None = 음악 없이
 
 
-@router.put("/cardnews/{job_id}/music")
+@router.put("/studio/{job_id}/music")
 def set_music(job_id: int, body: MusicIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
     """추천 곡 중 고르거나 직접 입력한 곡으로 바꿉니다."""
     job = _own_job(db, account, job_id)
@@ -329,7 +336,7 @@ class MusicSuggestIn(BaseModel):
     language: str | None = Field(default=None, max_length=8)
 
 
-@router.post("/cardnews/{job_id}/music/suggest")
+@router.post("/studio/{job_id}/music/suggest")
 def resuggest_music(
     job_id: int, body: MusicSuggestIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
 ) -> dict:
@@ -358,7 +365,7 @@ def resuggest_music(
     return _job_dict(job)
 
 
-@router.post("/cardnews/{job_id}/slides/{index}")
+@router.post("/studio/{job_id}/slides/{index}")
 def render_slide(
     job_id: int,
     index: int,
@@ -471,7 +478,7 @@ def _image_failure_hint(engine: str) -> str:
     return f"원인: {reason[:200]}"
 
 
-@router.post("/cardnews/{job_id}/finalize")
+@router.post("/studio/{job_id}/finalize")
 def finalize(job_id: int, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
     """모든 슬라이드가 준비되면 검수 대기 상태로 바꿉니다."""
     job = _own_job(db, account, job_id)

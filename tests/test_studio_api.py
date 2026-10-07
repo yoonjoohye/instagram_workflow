@@ -6,9 +6,9 @@ import json
 from PIL import Image
 
 from backend.models import MediaBlob
-from backend.services import cardnews as svc
+from backend.services.studio import gemini
 
-PREFIX = "/cardnews"
+PREFIX = "/studio"
 
 
 def jpeg(color="red") -> bytes:
@@ -32,11 +32,11 @@ def fake_gemini(model, parts, cfg=None, **_):
         b = io.BytesIO()
         Image.new("RGB", (400, 500), "green").save(b, "PNG")
         return {"candidates": [{"content": {"parts": [{"inlineData": {"data": base64.b64encode(b.getvalue()).decode()}}]}}]}
-    raise svc.GeminiError("quota exceeded")
+    raise gemini.GeminiError("quota exceeded")
 
 
 def test_full_flow(monkeypatch, client, login, account, db):
-    monkeypatch.setattr(svc, "_gemini", fake_gemini)
+    monkeypatch.setattr(gemini, "call", fake_gemini)
     login(account)
     ids = [client.post("/media/uploads", files={"file": (f"{c}.jpg", jpeg(c), "image/jpeg")}).json()["id"] for c in ("red", "blue")]
 
@@ -55,7 +55,7 @@ def test_full_flow(monkeypatch, client, login, account, db):
     assert r.json()["music"]["selected"]["title"] == "Paris"
 
     # 이미지 수정 실패(strict)면 원래 이미지를 바꾸지 않고 이유를 알림
-    monkeypatch.setattr(svc, "_gemini", lambda *a, **k: (_ for _ in ()).throw(svc.GeminiError("quota exceeded")))
+    monkeypatch.setattr(gemini, "call", lambda *a, **k: (_ for _ in ()).throw(gemini.GeminiError("quota exceeded")))
     r = client.post(f"{PREFIX}/{job['id']}/slides/0", json={"instruction": "밝게", "from_current": True, "strict": True})
     assert r.status_code == 502
 
@@ -67,9 +67,9 @@ def test_full_flow(monkeypatch, client, login, account, db):
 
 
 def test_plan_busy_gemini_returns_503(monkeypatch, client, login, account):
-    monkeypatch.setattr(svc, "_gemini", lambda *a, **k: (_ for _ in ()).throw(svc.GeminiError("model is experiencing high demand")))
-    svc._cooldown.clear()
+    monkeypatch.setattr(gemini, "call", lambda *a, **k: (_ for _ in ()).throw(gemini.GeminiError("model is experiencing high demand")))
+    gemini._cooldown.clear()
     login(account)
     r = client.post(f"{PREFIX}/plan", json={"upload_ids": [], "prompt": "파리 여행"})
     assert r.status_code == 503
-    svc._cooldown.clear()
+    gemini._cooldown.clear()
