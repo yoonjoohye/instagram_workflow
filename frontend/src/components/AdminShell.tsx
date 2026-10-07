@@ -91,7 +91,9 @@ function Sidebar({ session }: { session: Session }) {
   const [loggingOut, setLoggingOut] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const me = session.account;
-  const who = me ? `@${me.username}` : session.user.name || session.user.email;
+  // 왼쪽 아래·계정 메뉴에는 우리 서비스 회원 정보 (Instagram 계정은 그 아래 전환 목록에)
+  const who = session.user.name || session.user.email;
+  const sub = session.user.name ? session.user.email : "";
 
   async function logout() {
     setLoggingOut(true);
@@ -103,9 +105,6 @@ function Sidebar({ session }: { session: Session }) {
   }
 
   const isActive = (href: string) => (href === "/admin" ? pathname === href : pathname.startsWith(href));
-  const sub = me
-    ? `${t("shell.followers", { n: fmtCompact(me.followers_count) })}${me.fb_page_name ? ` · ${t("shell.page", { name: me.fb_page_name })}` : ""}`
-    : session.user.email;
 
   return (
     <>
@@ -121,7 +120,7 @@ function Sidebar({ session }: { session: Session }) {
         className="-mr-1 flex items-center gap-2 rounded-full p-1 hover:bg-surface-2"
         aria-label={t("shell.accountMenu")}
       >
-        <Avatar src={me?.profile_picture_url} name={me?.username ?? session.user.email} size={32} />
+        <Avatar name={who} size={32} />
       </button>
     </header>
 
@@ -199,10 +198,10 @@ function Sidebar({ session }: { session: Session }) {
 
       <div className="mt-auto border-t border-line p-4">
         <Link href={PROFILE} className="-m-2 flex items-center gap-3 rounded-lg p-2 hover:bg-surface-2" title={t("auth.profile")}>
-          <Avatar src={me?.profile_picture_url} name={me?.username ?? session.user.email} size={36} />
+          <Avatar name={who} size={36} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-semibold">{who}</p>
-            <p className="truncate text-[12px] text-fg-3">{sub}</p>
+            {sub && <p className="truncate text-[12px] text-fg-3">{sub}</p>}
           </div>
         </Link>
         <div className="-mx-2 mt-2">
@@ -259,10 +258,18 @@ function AccountSwitcher({ session, compact, onSwitched }: { session: Session; c
   }
 
   const row = compact ? "h-9 px-2 text-[13px]" : "h-12 px-3 text-[15px]";
+  const current = session.account;
   return (
     <div className="space-y-0.5">
-      {others.length > 0 && (
-        <p className={cx("pt-1 pb-0.5 text-fg-3", compact ? "px-2 text-[11px]" : "px-3 text-[12px]")}>{t("shell.accounts")}</p>
+      {session.accounts.length > 0 && (
+        <p className={cx("pt-1 pb-0.5 text-fg-3", compact ? "px-2 text-[11px]" : "px-3 text-[12px]")}>Instagram</p>
+      )}
+      {current && (
+        <div className={cx("flex w-full items-center gap-2.5 rounded-lg", row)} title={t("shell.followers", { n: fmtCompact(current.followers_count) })}>
+          <Avatar src={current.profile_picture_url} name={current.username} size={compact ? 22 : 28} />
+          <span className="min-w-0 flex-1 truncate font-medium">@{current.username}</span>
+          <span className="shrink-0 rounded-full bg-good/15 px-1.5 py-0.5 text-[10px] font-medium text-good">{t("auth.current")}</span>
+        </div>
       )}
       {others.map((a) => (
         <button
