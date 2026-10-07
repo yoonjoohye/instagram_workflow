@@ -173,6 +173,10 @@ CATALOG: dict[str, tuple[str, str]] = {
         "フォロワーが100人未満、または期間中のリーチや反応が少ない場合、Metaは属性データを提供しません。",
     ),
     # 회원 (routers/members.py) · 연동 (routers/auth.py) · 메일 (services/mailer.py)
+    "이름을 입력해 주세요.": ("Please enter your name.", "名前を入力してください。"),
+    "생년월일을 확인해 주세요.": ("Please check your date of birth.", "生年月日を確認してください。"),
+    "만 14세 이상만 가입할 수 있습니다.": ("You must be at least 14 years old to sign up.", "満14歳以上の方のみ登録できます。"),
+    "전화번호를 확인해 주세요.": ("Please check your phone number.", "電話番号を確認してください。"),
     "인스타그램 계정을 먼저 연동해 주세요.": ("Please link an Instagram account first.", "先に Instagram アカウントを連携してください。"),
     "이메일 주소를 확인해 주세요.": ("Please check the email address.", "メールアドレスを確認してください。"),
     "비밀번호는 영문과 숫자를 섞어 8자 이상으로 정해 주세요.": ("Use at least 8 characters with both letters and numbers.", "パスワードは英字と数字を混ぜて8文字以上にしてください。"),

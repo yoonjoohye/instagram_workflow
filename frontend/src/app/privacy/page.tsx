@@ -27,7 +27,7 @@ const ROWS = [
   ["legal.r7Type", "legal.r7Items", "legal.r7Source"],
 ] as const satisfies readonly (readonly MessageKey[])[];
 
-const PURPOSES = ["legal.p2Li1", "legal.p2Li2", "legal.p2Li3", "legal.p2Li4", "legal.p2Li5", "legal.p2Li6"] as const;
+const PURPOSES = ["legal.p2Li0", "legal.p2Li1", "legal.p2Li2", "legal.p2Li3", "legal.p2Li4", "legal.p2Li5", "legal.p2Li6"] as const;
 const RETENTION = ["legal.p4Li1", "legal.p4Li2", "legal.p4Li3", "legal.p4Li4"] as const;
 const SECURITY = ["legal.p6Li1", "legal.p6Li2", "legal.p6Li3"] as const;
 

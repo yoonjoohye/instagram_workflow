@@ -57,6 +57,35 @@ def check_password(password: str) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "비밀번호는 영문과 숫자를 섞어 8자 이상으로 정해 주세요.")
 
 
+MIN_AGE = 14  # 만 14세 미만은 보호자 동의가 필요해(개인정보보호법) 가입을 받지 않습니다.
+
+
+def check_name(name: str) -> str:
+    name = " ".join(name.split())
+    if not name:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "이름을 입력해 주세요.")
+    return name
+
+
+def check_birth(birth: dt.date) -> dt.date:
+    today = dt.date.today()
+    age = today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
+    if birth > today or age > 120:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "생년월일을 확인해 주세요.")
+    if age < MIN_AGE:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "만 14세 이상만 가입할 수 있습니다.")
+    return birth
+
+
+def check_phone(phone: str) -> str:
+    """하이픈·공백을 빼고 숫자만. 휴대폰(010…) 10~11자리, 해외 번호는 +국가번호."""
+    raw = phone.strip()
+    digits = re.sub(r"[\s\-().]", "", raw)
+    if not re.fullmatch(r"\+?\d{9,15}", digits):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "전화번호를 확인해 주세요.")
+    return digits
+
+
 def set_session(resp: Response, user: User, account_id: int | None) -> None:
     resp.set_cookie(
         SESSION_COOKIE,
@@ -138,7 +167,9 @@ class SignupIn(BaseModel):
     email: str = Field(max_length=254)
     code: str = Field(default="", max_length=6)  # SIGNUP_EMAIL_VERIFY 를 켰을 때만
     password: str = Field(max_length=128)
-    name: str = Field(default="", max_length=80)
+    name: str = Field(max_length=80)
+    birth_date: dt.date
+    phone: str = Field(max_length=30)
 
 
 class SigninIn(BaseModel):
@@ -173,6 +204,7 @@ def signup(body: SignupIn, request: Request, db: Session = Depends(get_db)) -> J
     """회원가입: 이메일 중복 확인 + 비밀번호 → 가입하고 바로 로그인.
     SIGNUP_EMAIL_VERIFY 를 켜면 /signup/code 로 받은 인증번호도 확인합니다."""
     email = norm_email(body.email)
+    name, birth, phone = check_name(body.name), check_birth(body.birth_date), check_phone(body.phone)
     check_password(body.password)
     if db.scalar(select(User.id).where(User.email == email)):
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 가입된 이메일입니다. 로그인해 주세요.")
@@ -180,7 +212,9 @@ def signup(body: SignupIn, request: Request, db: Session = Depends(get_db)) -> J
     if settings.signup_email_verify:
         _use_code(db, email, "signup", body.code)
         verified = utcnow()
-    user = User(email=email, password_hash=hash_password(body.password), name=body.name.strip(), email_verified_at=verified)
+    user = User(
+        email=email, password_hash=hash_password(body.password), name=name, birth_date=birth, phone=phone, email_verified_at=verified
+    )
     db.add(user)
     db.commit()
     claimed = claim_legacy_accounts(db, request, user)
@@ -265,7 +299,14 @@ def account_dict(a: Account) -> dict:
 def session_dict(db: Session, user: User, account: Account | None) -> dict:
     fb = db.scalar(select(FacebookLink).where(FacebookLink.user_id == user.id))
     return {
-        "user": {"id": user.id, "email": user.email, "name": user.name, "created_at": user.created_at.isoformat()},
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "birth_date": user.birth_date.isoformat() if user.birth_date else None,
+            "phone": user.phone,
+            "created_at": user.created_at.isoformat(),
+        },
         "account": account_dict(account) if account else None,
         "accounts": [{**account_dict(a), "current": account is not None and a.id == account.id} for a in user_accounts(db, user)],
         "facebook": {"name": fb.name, "pages": fb.pages or [], "linked_at": fb.created_at.isoformat()} if fb else None,
@@ -281,14 +322,22 @@ def get_session(request: Request, user: User = Depends(current_user), db: Sessio
 
 
 class ProfileIn(BaseModel):
-    name: str = Field(max_length=80)
+    name: str | None = Field(default=None, max_length=80)
+    birth_date: dt.date | None = None
+    phone: str | None = Field(default=None, max_length=30)
 
 
 @router.patch("/profile")
 def update_profile(body: ProfileIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-    user.name = body.name.strip()
+    """이름·생년월일·전화번호 수정 (보낸 것만)."""
+    if body.name is not None:
+        user.name = check_name(body.name)
+    if body.birth_date is not None:
+        user.birth_date = check_birth(body.birth_date)
+    if body.phone is not None:
+        user.phone = check_phone(body.phone)
     db.commit()
-    return {"id": user.id, "email": user.email, "name": user.name}
+    return session_dict(db, user, None)["user"]
 
 
 class PasswordIn(BaseModel):

@@ -35,20 +35,31 @@ function Msg({ ok, text }: { ok?: boolean; text?: string }) {
   return <p className={cx("text-[12px]", ok ? "text-good" : "text-bad")}>{text}</p>;
 }
 
+/** 전화번호 보기 좋게 (010-1234-5678) */
+const showPhone = (p: string) => (/^01\d{8,9}$/.test(p) ? p.replace(/^(\d{3})(\d{3,4})(\d{4})$/, "$1-$2-$3") : p);
+
 function MemberInfo() {
   const t = useT();
   const { session, refresh } = useSession();
-  const [name, setName] = useState(session.user.name);
+  const u = session.user;
+  const [name, setName] = useState(u.name);
+  const [birth, setBirth] = useState(u.birth_date ?? "");
+  const [phone, setPhone] = useState(showPhone(u.phone));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
-  useEffect(() => setName(session.user.name), [session.user.name]);
+  useEffect(() => {
+    setName(u.name);
+    setBirth(u.birth_date ?? "");
+    setPhone(showPhone(u.phone));
+  }, [u.name, u.birth_date, u.phone]);
+  const dirty = name !== u.name || birth !== (u.birth_date ?? "") || phone !== showPhone(u.phone);
 
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setMsg(undefined);
     try {
-      await api("/auth/profile", { method: "PATCH", json: { name } });
+      await api("/auth/profile", { method: "PATCH", json: { name, ...(birth ? { birth_date: birth } : {}), ...(phone ? { phone } : {}) } });
       setMsg({ ok: true, text: t("auth.saved") });
       refresh();
     } catch (err) {
@@ -58,19 +69,31 @@ function MemberInfo() {
     }
   }
 
+  const input = (label: string, el: React.ReactNode) => (
+    <label className="block">
+      <span className="mb-1.5 block text-[13px] font-medium text-fg-2">{label}</span>
+      {el}
+    </label>
+  );
+
   return (
-    <Card title={t("auth.memberInfo")} subtitle={t("auth.joined", { date: fmtDateTime(session.user.created_at) })}>
+    <Card title={t("auth.memberInfo")} subtitle={t("auth.joined", { date: fmtDateTime(u.created_at) })}>
       <form onSubmit={save} className="space-y-3">
         <div>
           <p className="mb-1.5 text-[13px] font-medium text-fg-2">{t("auth.email")}</p>
-          <p className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg-2">{session.user.email}</p>
+          <p className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg-2">{u.email}</p>
         </div>
-        <label className="block">
-          <span className="mb-1.5 block text-[13px] font-medium text-fg-2">{t("auth.name")}</span>
-          <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} className={cx(inputClass, "h-10")} autoComplete="name" />
-        </label>
+        {input(t("auth.name"), <input value={name} required maxLength={80} onChange={(e) => setName(e.target.value)} className={cx(inputClass, "h-10")} autoComplete="name" />)}
+        {input(
+          t("auth.birthDate"),
+          <input type="date" value={birth} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setBirth(e.target.value)} className={cx(inputClass, "h-10")} autoComplete="bday" />,
+        )}
+        {input(
+          t("auth.phone"),
+          <input type="tel" inputMode="tel" value={phone} maxLength={20} placeholder={t("auth.phonePh")} onChange={(e) => setPhone(e.target.value)} className={cx(inputClass, "h-10")} autoComplete="tel" />,
+        )}
         <div className="flex items-center gap-3">
-          <Button type="submit" size="sm" loading={busy} disabled={name === session.user.name}>
+          <Button type="submit" size="sm" loading={busy} disabled={!dirty}>
             {t("auth.save")}
           </Button>
           <Msg {...msg} />

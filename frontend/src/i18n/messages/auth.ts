@@ -3,7 +3,7 @@ import { defineMessages } from "../define";
 /** 회원(로그인·가입·재설정)과 프로필(연동·탈퇴) */
 export default defineMessages({
   ko: {
-    email: "이메일", password: "비밀번호", name: "이름 (선택)", code: "인증번호 6자리",
+    email: "이메일", password: "비밀번호", name: "이름", birthDate: "생년월일", phone: "전화번호", phonePh: "010-1234-5678", code: "인증번호 6자리",
     loginTitle: "로그인", loginSubtitle: "Auto Studio 계정으로 로그인하세요.", loginButton: "로그인",
     noAccount: "아직 회원이 아니신가요?", toSignup: "회원가입", forgot: "비밀번호를 잊으셨나요?",
     haveAccount: "이미 회원이신가요?", toLogin: "로그인",
@@ -37,7 +37,7 @@ export default defineMessages({
     goProfile: "프로필에서 연동하기",
   },
   en: {
-    email: "Email", password: "Password", name: "Name (optional)", code: "6-digit code",
+    email: "Email", password: "Password", name: "Name", birthDate: "Date of birth", phone: "Phone number", phonePh: "010-1234-5678", code: "6-digit code",
     loginTitle: "Log in", loginSubtitle: "Log in to your Auto Studio account.", loginButton: "Log in",
     noAccount: "New here?", toSignup: "Sign up", forgot: "Forgot your password?",
     haveAccount: "Already a member?", toLogin: "Log in",
@@ -71,7 +71,7 @@ export default defineMessages({
     goProfile: "Link it in your profile",
   },
   ja: {
-    email: "メールアドレス", password: "パスワード", name: "名前(任意)", code: "6桁の認証番号",
+    email: "メールアドレス", password: "パスワード", name: "名前", birthDate: "生年月日", phone: "電話番号", phonePh: "090-1234-5678", code: "6桁の認証番号",
     loginTitle: "ログイン", loginSubtitle: "Auto Studio アカウントでログインしてください。", loginButton: "ログイン",
     noAccount: "まだ会員ではありませんか?", toSignup: "会員登録", forgot: "パスワードをお忘れですか?",
     haveAccount: "すでに会員ですか?", toLogin: "ログイン",

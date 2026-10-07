@@ -21,7 +21,7 @@ export type Me = {
 };
 
 /** 서비스 회원 (이메일 로그인) */
-export type SessionUser = { id: number; email: string; name: string; created_at: string };
+export type SessionUser = { id: number; email: string; name: string; birth_date: string | null; phone: string; created_at: string };
 
 /** GET /auth/session — 회원 + 지금 고른 Instagram 계정(없으면 null) + 연동 상태 */
 export type Session = {

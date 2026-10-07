@@ -8,7 +8,10 @@ from backend.security import SESSION_COOKIE, encrypt, load_session, sign_session
 
 def _signup(client, email="new@test.dev", password="abcd1234"):
     """기본: 이메일 인증 없이 중복 확인만 (SIGNUP_EMAIL_VERIFY 꺼짐)."""
-    return client.post("/auth/signup", json={"email": email, "password": password, "name": "새 회원"})
+    return client.post("/auth/signup", json={"email": email, "password": password, **PROFILE})
+
+
+PROFILE = {"name": "새 회원", "birth_date": "1995-03-14", "phone": "010-1234-5678"}
 
 
 @pytest.fixture
@@ -48,6 +51,21 @@ def test_signup_login_logout(client, cleanup):
     assert r.status_code == 200 and r.json()["user"]["email"] == "new@test.dev"
 
 
+def test_signup_profile_fields(client, cleanup):
+    cleanup.append("prof2@test.dev")
+    base = {"email": "prof2@test.dev", "password": "abcd1234"}
+    assert client.post("/auth/signup", json={**base, "name": "", "birth_date": "1995-03-14", "phone": "01012345678"}).status_code == 422
+    assert client.post("/auth/signup", json={**base, "name": "김", "birth_date": "2020-01-01", "phone": "01012345678"}).status_code == 422  # 만 14세 미만
+    assert client.post("/auth/signup", json={**base, "name": "김", "birth_date": "1995-03-14", "phone": "12"}).status_code == 422
+    assert client.post("/auth/signup", json={**base, "name": "김"}).status_code == 422  # 생년월일·전화번호 필수
+    r = client.post("/auth/signup", json={**base, "name": " 김  하나 ", "birth_date": "1995-03-14", "phone": "010-1234-5678"})
+    assert r.status_code == 201, r.text
+    u = r.json()["user"]
+    assert (u["name"], u["birth_date"], u["phone"]) == ("김 하나", "1995-03-14", "01012345678")
+    u = client.patch("/auth/profile", json={"phone": "+82 10 9999 8888"}).json()
+    assert u["phone"] == "+821099998888" and u["name"] == "김 하나"
+
+
 def test_signup_check_duplicate(client, cleanup):
     cleanup.append("check@test.dev")
     assert client.post("/auth/signup/check", json={"email": "Check@Test.dev"}).json() == {"email": "check@test.dev", "available": True}
@@ -62,7 +80,7 @@ def test_signup_needs_code_when_verify_on(client, cleanup, verify_on):
     cleanup.append("verify@test.dev")
     assert _signup(client, "verify@test.dev").status_code == 400  # 번호 없이 가입 불가
     code = client.post("/auth/signup/code", json={"email": "verify@test.dev"}).json()["dev_code"]
-    r = client.post("/auth/signup", json={"email": "verify@test.dev", "code": code, "password": "abcd1234"})
+    r = client.post("/auth/signup", json={"email": "verify@test.dev", "code": code, "password": "abcd1234", **PROFILE})
     assert r.status_code == 201, r.text
 
 
@@ -72,13 +90,13 @@ def test_signup_rules(client, cleanup, db, verify_on):
     code = client.post("/auth/signup/code", json={"email": "rules@test.dev"}).json()["dev_code"]
     # 1분 안에 다시 요청 불가
     assert client.post("/auth/signup/code", json={"email": "rules@test.dev"}).status_code == 429
-    weak = client.post("/auth/signup", json={"email": "rules@test.dev", "code": code, "password": "short"})
+    weak = client.post("/auth/signup", json={"email": "rules@test.dev", "code": code, "password": "short", **PROFILE})
     assert weak.status_code == 422
     wrong = "000000" if code != "000000" else "111111"
     for _ in range(5):
-        assert client.post("/auth/signup", json={"email": "rules@test.dev", "code": wrong, "password": "abcd1234"}).status_code == 400
+        assert client.post("/auth/signup", json={"email": "rules@test.dev", "code": wrong, "password": "abcd1234", **PROFILE}).status_code == 400
     # 5번 틀리면 맞는 번호도 막힘 (새 번호를 받아야 함)
-    assert client.post("/auth/signup", json={"email": "rules@test.dev", "code": code, "password": "abcd1234"}).status_code == 429
+    assert client.post("/auth/signup", json={"email": "rules@test.dev", "code": code, "password": "abcd1234", **PROFILE}).status_code == 429
     # 번호는 해시로만 저장
     assert all(code not in c.code_hash for c in db.query(EmailCode).filter(EmailCode.email == "rules@test.dev"))
 

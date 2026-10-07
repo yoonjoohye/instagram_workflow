@@ -11,8 +11,8 @@ import { Logo } from "@/components/Logo";
 import { Button, cx, inputClass, Notice } from "@/components/ui";
 import { useT } from "@/i18n/client";
 import { rich } from "@/i18n/rich";
-import { api, toApiError, useApi } from "@/lib/api";
-import type { Health, Session } from "@/lib/types";
+import { api, toApiError } from "@/lib/api";
+import type { Session } from "@/lib/types";
 
 /** 로그인 후 돌아갈 곳 (우리 사이트 안의 주소만) */
 function useNext(fallback = "/admin") {
@@ -255,8 +255,6 @@ export function SignupForm() {
   const t = useT();
   const router = useRouter();
   const next = useNext();
-  const health = useApi<Health>("/health");
-  const [name, setName] = useState("");
   const keepNext = next !== "/admin" ? `?next=${encodeURIComponent(next)}` : "";
   const footer = (
     <div className="space-y-2">
@@ -269,39 +267,15 @@ export function SignupForm() {
       </p>
     </div>
   );
-  const done = (s: Session) => router.replace(landing(s, next));
-
-  if (!health.data) return null;
-  // 메일 도메인을 인증해 SIGNUP_EMAIL_VERIFY 를 켜면 인증번호 단계가 생김
-  if (health.data.signup_email_verify) {
-    return (
-      <CodeFlow
-        purpose="signup"
-        title={t("auth.signupTitle")}
-        subtitle={t("auth.signupSubtitle")}
-        submitLabel={t("auth.signupButton")}
-        extra={<Input label={t("auth.name")} autoComplete="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />}
-        footer={footer}
-        onSubmit={async ({ email, code, password }) => done(await api<Session>("/auth/signup", { method: "POST", json: { email, code, password, name } }))}
-      />
-    );
-  }
-  return <SimpleSignup name={name} setName={setName} footer={footer} onDone={done} />;
+  return <SimpleSignup footer={footer} onDone={(s) => router.replace(landing(s, next))} />;
 }
 
-/** 이메일 인증 없이: 이메일 중복 확인(입력하는 대로) + 비밀번호 */
-function SimpleSignup({
-  name,
-  setName,
-  footer,
-  onDone,
-}: {
-  name: string;
-  setName: (v: string) => void;
-  footer: ReactNode;
-  onDone: (s: Session) => void;
-}) {
+/** 회원가입: 이름 · 생년월일 · 전화번호 · 이메일(입력하는 대로 중복 확인) · 비밀번호 */
+function SimpleSignup({ footer, onDone }: { footer: ReactNode; onDone: (s: Session) => void }) {
   const t = useT();
+  const [name, setName] = useState("");
+  const [birth, setBirth] = useState("");
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -328,7 +302,7 @@ function SimpleSignup({
     setBusy(true);
     setError(undefined);
     try {
-      onDone(await api<Session>("/auth/signup", { method: "POST", json: { email, password, name } }));
+      onDone(await api<Session>("/auth/signup", { method: "POST", json: { email, password, name, birth_date: birth, phone } }));
     } catch (err) {
       setError(toApiError(err).message);
       setBusy(false);
@@ -339,13 +313,25 @@ function SimpleSignup({
   return (
     <AuthCard title={t("auth.signupTitle")} subtitle={t("auth.signupSubtitle")} footer={footer}>
       <form onSubmit={submit} className="space-y-3">
+        <Input label={t("auth.name")} autoComplete="name" required autoFocus maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+        <Input label={t("auth.birthDate")} type="date" autoComplete="bday" required max={new Date().toISOString().slice(0, 10)} value={birth} onChange={(e) => setBirth(e.target.value)} />
+        <Input
+          label={t("auth.phone")}
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          required
+          placeholder={t("auth.phonePh")}
+          maxLength={20}
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+        />
         <label className="block">
           <span className="mb-1.5 block text-[13px] font-medium text-fg-2">{t("auth.email")}</span>
           <input
             type="email"
             autoComplete="email"
             required
-            autoFocus
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             aria-invalid={taken?.available === false || undefined}
@@ -353,7 +339,6 @@ function SimpleSignup({
           />
           {hint && <span className={cx("mt-1 block text-[12px]", taken?.available ? "text-good" : "text-bad")}>{hint}</span>}
         </label>
-        <Input label={t("auth.name")} autoComplete="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
         <Input
           label={t("auth.password")}
           hint={t("auth.passwordHint")}
