@@ -8,3 +8,5 @@ node_modules
 .next
 __pycache__
 mobile
+backend/tests
+backend/scripts

@@ -6,11 +6,11 @@
 
 ```
 브라우저 / 휴대폰 앱(WebView)
-   │  화면: src/ (Next.js)
+   │  화면: frontend/src/ (Next.js)
    │  /api/py/*  ──(로컬: next.config 프록시 → :8000 / Vercel: vercel.json → api/index.py)──▶ backend/ (FastAPI)
    │                                                                                  ├─ routers/  요청 받기·권한·응답 모양
    │                                                                                  └─ services/ 실제 로직 (Instagram·Gemini·이미지)
-   └─ 동영상 업로드는 브라우저 → Vercel Blob 직접 (src/app/api/blob/upload 가 업로드 토큰만 발급)
+   └─ 동영상 업로드는 브라우저 → Vercel Blob 직접 (frontend/src/app/api/blob/upload 가 업로드 토큰만 발급)
 ```
 
 - **DB**: 로컬 SQLite(`local.db`), Vercel 은 Neon Postgres. 표 정의는 `backend/models.py`.
@@ -43,13 +43,13 @@
 ### 게시물 만들기 요청 흐름
 
 ```
-PostForm (src/components/studio/PostForm.tsx)
- 1. (사진 폴더·사진첩 연결 시) POST /studio/photo-query → 기기 안에서 사진 고르기 (src/lib/photoLibrary)
+PostForm (frontend/src/components/studio/PostForm.tsx)
+ 1. (사진 폴더·사진첩 연결 시) POST /studio/photo-query → 기기 안에서 사진 고르기 (frontend/src/lib/photoLibrary)
  2. POST /media/uploads (사진) · Blob 업로드 + POST /media/videos (동영상)
  3. POST /studio/research        → services/studio/research.py   (Gemini + Google 검색)
  4. POST /studio/plan            → services/studio/planning.py   (장 수·레이아웃·캡션·해시태그)
  5. POST /studio/{job}/slides/{i} (장마다) → visuals.render_visual → compose.compose
- 6. POST /studio/{job}/finalize  → 검수 화면 (src/components/studio/Review.tsx)
+ 6. POST /studio/{job}/finalize  → 검수 화면 (frontend/src/components/studio/Review.tsx)
  7. POST /workflow/publish       → services/publishing.py
 ```
 
@@ -66,11 +66,11 @@ PostForm (src/components/studio/PostForm.tsx)
 - `POST /studio/{job}/videos/{i}/edit` — 원본은 `meta.video_edit.source` 에 남겨 두고 **항상 원본에서** 다시 만듭니다 (`reset` 으로 원래대로).
 - 만든 영상은 Vercel Blob 에 올리고 `MediaBlob(kind="render")` 로 기록합니다 (Blob 이 없으면 로컬처럼 DB 에). 다시 만들거나 지울 때 함께 정리합니다.
 - Vercel 60초 안에 끝나도록 빠른 압축 설정을 쓰고, 자르기가 시간 안에 안 끝나면 다시 압축하지 않는 방식으로 대신합니다.
-- 기본 제공 곡은 `backend/assets/music/*.m4a` (직접 만든 곡이라 저작권 문제 없음). 바꾸려면 `scripts/make_music.py` 를 고쳐 다시 만듭니다.
+- 기본 제공 곡은 `backend/assets/music/*.m4a` (직접 만든 곡이라 저작권 문제 없음). 바꾸려면 `backend/scripts/make_music.py` 를 고쳐 다시 만듭니다.
 
 Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 응답이 없거나 혼잡하면 25초 안에 다음 모델로 넘어가고, 실패한 모델은 5분간 건너뜁니다.
 
-## 프론트엔드 (`src/`)
+## 프론트엔드 (`frontend/src/`)
 
 | 위치 | 내용 |
 |---|---|
@@ -88,7 +88,7 @@ Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 
 
 ## 다국어 (i18n)
 
-- **화면 문구**: `src/i18n/messages/<namespace>.ts` 에 ko·en·ja 를 같은 키로. 컴포넌트에서 `const t = useT(); t("studio.title")`.
+- **화면 문구**: `frontend/src/i18n/messages/<namespace>.ts` 에 ko·en·ja 를 같은 키로. 컴포넌트에서 `const t = useT(); t("studio.title")`.
   서버 컴포넌트는 `const { t } = await getT()`. 문구 안 `{name}` 은 변수, `<b>…</b>` 는 `rich()` 로 바꿉니다.
   키가 빠지거나 변수가 어긋나면 `npm run check:i18n` 이 실패합니다.
 - **API 메시지**: 서버 코드는 한국어로 쓰고, `backend/i18n.py` 의 `CATALOG` 에 영어·일본어를 추가하면 응답 직전에 번역됩니다.
@@ -96,7 +96,7 @@ Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 
 
 ## 휴대폰 앱 ↔ 웹 메시지
 
-앱(`mobile/App.tsx`)이 페이지보다 먼저 `window.__NATIVE_APP__` 를 심고, 웹은 `callNative(type, payload)`(`src/lib/nativeBridge.ts`)로 요청합니다.
+앱(`mobile/App.tsx`)이 페이지보다 먼저 `window.__NATIVE_APP__` 를 심고, 웹은 `callNative(type, payload)`(`frontend/src/lib/nativeBridge.ts`)로 요청합니다.
 **양쪽을 함께 고쳐야 합니다.**
 
 | type | 보내는 값 | 돌려받는 값 | 처리 |
@@ -112,8 +112,8 @@ Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 
 
 ## 테스트
 
-`npm run check` = 타입 검사 + 번역 점검 + `tests/`(pytest). 테스트는 임시 SQLite·가짜 키를 쓰고 Gemini·Instagram 호출을 모두 가짜로 바꿉니다
-(Gemini 는 `monkeypatch.setattr(gemini, "call", …)`). 새 기능을 넣으면 `tests/` 에 흐름 테스트를 하나 추가해 주세요.
+`frontend/` 에서 `npm run check` = 타입 검사 + 번역 점검 + `backend/tests/`(pytest). 테스트는 임시 SQLite·가짜 키를 쓰고 Gemini·Instagram 호출을 모두 가짜로 바꿉니다
+(Gemini 는 `monkeypatch.setattr(gemini, "call", …)`). 새 기능을 넣으면 `backend/tests/` 에 흐름 테스트를 하나 추가해 주세요.
 
 ## 예전 데이터 호환 (지우지 말 것)
 

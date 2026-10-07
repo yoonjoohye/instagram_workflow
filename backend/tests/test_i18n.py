@@ -31,7 +31,7 @@ def test_soundtrack_messages_are_translated():
     import re
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "backend"
+    root = Path(__file__).resolve().parents[1]  # backend/
     texts = []
     for f in ("routers/soundtrack.py", "services/studio/soundtrack.py"):
         texts += re.findall(r'(?:HTTPException\([^,]+,|SoundtrackError\()\s*"([^"]*[가-힣][^"]*)"', (root / f).read_text())

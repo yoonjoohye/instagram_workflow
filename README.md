@@ -8,11 +8,10 @@
 
 | 폴더 | 내용 |
 |---|---|
-| `src/` | 웹 화면 (Next.js 15 App Router, React 19, Tailwind v4) |
-| `backend/` | API (FastAPI, Vercel Python 함수 — 진입점 `api/index.py`) |
+| `frontend/` | 웹 화면 (Next.js 15 App Router, React 19, Tailwind v4) — `src/`, `public/`, 번역 키 점검 스크립트 |
+| `backend/` | API (FastAPI) — `tests/` (pytest, 외부 API 는 모두 가짜), `scripts/` (기본 음악 만들기) |
+| `api/index.py` | Vercel 이 API 를 실행하는 진입점 (backend 를 불러옴) |
 | `mobile/` | iPhone·Android 앱 (Expo SDK 57) — [mobile/README.md](mobile/README.md) |
-| `tests/` | API 테스트 (pytest, 외부 API 는 모두 가짜) |
-| `scripts/` | 점검 스크립트 (번역 키 등) |
 
 ## 주요 기능
 
@@ -31,11 +30,11 @@
 ## 로컬 실행
 
 ```bash
-npm install
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-cp .env.example .env      # APP_SECRET, INSTAGRAM_APP_ID/SECRET, GEMINI_API_KEY 등 채우기
+cp .env.example .env      # APP_SECRET, INSTAGRAM_APP_ID/SECRET, GEMINI_API_KEY 등 채우기 (웹·API 가 함께 씀)
 
-npm run dev:api           # FastAPI → http://127.0.0.1:8000
+cd frontend && npm install
+npm run dev:api           # FastAPI → http://127.0.0.1:8000 (저장소 맨 위에서 실행됨)
 npm run dev               # Next.js → http://localhost:3000 (/api/py/* 는 8000 으로 프록시)
 ```
 
@@ -46,13 +45,15 @@ npm run dev               # Next.js → http://localhost:3000 (/api/py/* 는 800
 ## 확인 (커밋 전에)
 
 ```bash
+cd frontend
 npm run check             # 타입 검사 + 번역 키 점검 + API 테스트 (pytest)
-npm run build             # 배포와 같은 빌드
+npm run build             # 웹 빌드
 ```
 
 ## 배포 (Vercel)
 
-`main` 브랜치에 push 하면 자동 배포됩니다. 저장소가 private 이면 배포가 막힐 수 있습니다(커밋 작성자 권한).
+`main` 브랜치에 push 하면 자동 배포됩니다. 한 프로젝트 안에서 웹(`frontend/`, 주소 `/`)과 API(`api/index.py`, 주소 `/api/py`)를
+따로 빌드합니다 — `vercel.json` 의 `experimentalServices`. 저장소가 private 이면 배포가 막힐 수 있습니다(커밋 작성자 권한).
 
 | 환경변수 | 용도 |
 |---|---|
@@ -75,6 +76,6 @@ Webhooks 콜백 `https://<도메인>/api/py/webhooks/instagram` (구독 필드 `
 - 비즈니스·크리에이터(프로페셔널) 계정만 연결됩니다.
 - 게시물을 본 **개별 계정 목록은 API 로 제공되지 않습니다** (집계 수치만).
 - 인스타그램 음악 라이브러리의 곡은 API 로 **붙일 수 없습니다** (게시 후 인스타 앱에서 직접 추가).
-  대신 기본 제공 곡(직접 만든 곡, `scripts/make_music.py`)이나 사용자의 음원을 **영상에 직접 넣어** 릴스·동영상 스토리로 올릴 수 있습니다.
+  대신 기본 제공 곡(직접 만든 곡, `backend/scripts/make_music.py`)이나 사용자의 음원을 **영상에 직접 넣어** 릴스·동영상 스토리로 올릴 수 있습니다.
 - 댓글 작성자에게 보내는 DM 은 댓글당 1통이고, 팔로우 여부는 상대가 먼저 DM 을 보낸 뒤에만 조회됩니다 → 안내 DM 후 답장이 오면 팔로우 여부별 문구 전송.
 - Webhook·다른 사용자 댓글은 **Meta 앱이 라이브(검수 통과)** 상태여야 들어옵니다.

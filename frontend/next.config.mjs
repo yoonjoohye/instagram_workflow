@@ -1,3 +1,10 @@
+import path from "node:path";
+import nextEnv from "@next/env";
+
+// 환경변수는 저장소 맨 위의 .env / .env.local 하나를 백엔드와 함께 씁니다 (Vercel 에서는 대시보드 값이 우선).
+// Next 가 frontend/ 의 env 를 먼저 읽어 두므로 forceReload 로 다시 읽습니다 (frontend/ 에는 .env 를 두지 않음).
+nextEnv.loadEnvConfig(path.resolve(process.cwd(), ".."), process.env.NODE_ENV !== "production", undefined, true);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: { remotePatterns: [{ protocol: "https", hostname: "**" }] },

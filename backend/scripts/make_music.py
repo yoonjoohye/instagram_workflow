@@ -1,7 +1,7 @@
 """기본 제공 음악(저작권 걱정 없는 직접 만든 곡)을 만듭니다.
 
     .venv/bin/pip install numpy   # 이 스크립트에만 필요 (서버에는 필요 없음)
-    .venv/bin/python scripts/make_music.py
+    .venv/bin/python backend/scripts/make_music.py
 
 결과: backend/assets/music/<key>.m4a (40초, AAC 128k). 곡 목록은 backend/services/studio/soundtrack.py 의 TRACKS.
 """
@@ -16,7 +16,7 @@ import numpy as np
 
 SR = 44100
 SECONDS = 40
-OUT = Path(__file__).resolve().parents[1] / "backend" / "assets" / "music"
+OUT = Path(__file__).resolve().parents[1] / "assets" / "music"
 rng = np.random.default_rng(7)
 
 NOTE = {n: i for i, n in enumerate(["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"])}

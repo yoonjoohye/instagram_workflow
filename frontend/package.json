@@ -4,12 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:api": "./.venv/bin/uvicorn backend.main:app --reload --port 8000",
+    "dev:api": "cd .. && ./.venv/bin/uvicorn backend.main:app --reload --port 8000",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "check:i18n": "tsx scripts/check-i18n.ts",
-    "test:api": "./.venv/bin/python -m pytest -q tests",
+    "test:api": "cd .. && ./.venv/bin/python -m pytest -q -c backend/pytest.ini backend/tests",
     "check": "tsc --noEmit && npm run check:i18n && npm run test:api"
   },
   "dependencies": {

@@ -6,7 +6,7 @@
 
 ffmpeg 는 imageio-ffmpeg 패키지에 들어 있는 실행 파일을 씁니다 (Vercel 에서도 그대로 동작).
 Vercel 함수는 60초 제한이 있어 인코딩은 빠른 설정(veryfast)으로 하고, 시간이 넘으면 다시 압축하지 않는 방식으로 대신합니다.
-기본 음악(backend/assets/music)은 scripts/make_music.py 로 직접 만든 곡이라 저작권 걱정이 없습니다.
+기본 음악(backend/assets/music)은 backend/scripts/make_music.py 로 직접 만든 곡이라 저작권 걱정이 없습니다.
 """
 from __future__ import annotations
 
