@@ -283,6 +283,12 @@ def test_facebook_link_adds_pages_and_unlink(client, login, account, db, monkeyp
     assert client.get("/auth/session").json()["facebook"] is None
 
 
+def test_callback_shows_facebook_error_message(client):
+    msg = "Can't load URL: The domain of this URL isn't included in the app's domains."
+    r = client.get("/auth/callback", params={"error_code": "1349048", "error_message": msg}, follow_redirects=False)
+    assert "error=Can%27t+load+URL" in r.headers["location"]
+
+
 def test_app_session_exchanges_code(client, login, account, db):
     login(account)
     user = db.get(User, db.get(Account, account.id).user_id)

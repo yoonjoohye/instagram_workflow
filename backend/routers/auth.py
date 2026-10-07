@@ -312,9 +312,14 @@ def callback(
     error: str | None = Query(default=None),
     error_description: str | None = Query(default=None),
     error_reason: str | None = Query(default=None),
+    error_code: str | None = Query(default=None),
+    error_message: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     lang = lang_of(request)
+    # Facebook 로그인은 앱 설정 문제(도메인·리디렉션 URI 미등록 등)를 error 대신 error_code·error_message 로 돌려줍니다.
+    if error_code or error_message:
+        return RedirectResponse(_profile_url(error=error_message or f"Facebook error {error_code}"))
     if error:
         if error_reason == "user_denied":
             return RedirectResponse(_profile_url(error=tr("권한 허용을 취소했습니다. 다시 연결해 주세요.", lang)))
