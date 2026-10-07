@@ -20,6 +20,7 @@ os.environ.update(
     META_APP_ID="",
     META_APP_SECRET="",
     RESEND_API_KEY="",
+    SIGNUP_EMAIL_VERIFY="0",
 )
 
 import pytest  # noqa: E402

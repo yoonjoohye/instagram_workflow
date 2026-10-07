@@ -7,10 +7,15 @@ from backend.security import SESSION_COOKIE, encrypt, load_session, sign_session
 
 
 def _signup(client, email="new@test.dev", password="abcd1234"):
-    r = client.post("/auth/signup/code", json={"email": email})
-    assert r.status_code == 200, r.text
-    code = r.json()["dev_code"]  # 메일 설정이 없는 로컬·테스트에서만
-    return client.post("/auth/signup", json={"email": email, "code": code, "password": password, "name": "새 회원"})
+    """기본: 이메일 인증 없이 중복 확인만 (SIGNUP_EMAIL_VERIFY 꺼짐)."""
+    return client.post("/auth/signup", json={"email": email, "password": password, "name": "새 회원"})
+
+
+@pytest.fixture
+def verify_on(monkeypatch):
+    from backend.routers import members
+
+    monkeypatch.setattr(members.settings, "signup_email_verify", True)
 
 
 @pytest.fixture
@@ -43,7 +48,25 @@ def test_signup_login_logout(client, cleanup):
     assert r.status_code == 200 and r.json()["user"]["email"] == "new@test.dev"
 
 
-def test_signup_rules(client, cleanup, db):
+def test_signup_check_duplicate(client, cleanup):
+    cleanup.append("check@test.dev")
+    assert client.post("/auth/signup/check", json={"email": "Check@Test.dev"}).json() == {"email": "check@test.dev", "available": True}
+    assert _signup(client, "check@test.dev").status_code == 201
+    assert client.post("/auth/signup/check", json={"email": "check@test.dev"}).json()["available"] is False
+    assert client.post("/auth/signup/check", json={"email": "nope"}).status_code == 422
+    client.cookies.clear()
+    assert _signup(client, "CHECK@test.dev").status_code == 409
+
+
+def test_signup_needs_code_when_verify_on(client, cleanup, verify_on):
+    cleanup.append("verify@test.dev")
+    assert _signup(client, "verify@test.dev").status_code == 400  # 번호 없이 가입 불가
+    code = client.post("/auth/signup/code", json={"email": "verify@test.dev"}).json()["dev_code"]
+    r = client.post("/auth/signup", json={"email": "verify@test.dev", "code": code, "password": "abcd1234"})
+    assert r.status_code == 201, r.text
+
+
+def test_signup_rules(client, cleanup, db, verify_on):
     cleanup.append("rules@test.dev")
     assert client.post("/auth/signup/code", json={"email": "not-an-email"}).status_code == 422
     code = client.post("/auth/signup/code", json={"email": "rules@test.dev"}).json()["dev_code"]

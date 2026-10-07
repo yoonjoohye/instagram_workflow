@@ -11,8 +11,8 @@ import { Logo } from "@/components/Logo";
 import { Button, cx, inputClass, Notice } from "@/components/ui";
 import { useT } from "@/i18n/client";
 import { rich } from "@/i18n/rich";
-import { api, toApiError } from "@/lib/api";
-import type { Session } from "@/lib/types";
+import { api, toApiError, useApi } from "@/lib/api";
+import type { Health, Session } from "@/lib/types";
 
 /** 로그인 후 돌아갈 곳 (우리 사이트 안의 주소만) */
 function useNext(fallback = "/admin") {
@@ -255,31 +255,122 @@ export function SignupForm() {
   const t = useT();
   const router = useRouter();
   const next = useNext();
+  const health = useApi<Health>("/health");
   const [name, setName] = useState("");
   const keepNext = next !== "/admin" ? `?next=${encodeURIComponent(next)}` : "";
+  const footer = (
+    <div className="space-y-2">
+      <p className="text-[12px]">{rich(t("auth.agree"), { privacy: (c) => <Link href="/privacy" className="underline">{c}</Link> })}</p>
+      <p>
+        {t("auth.haveAccount")}{" "}
+        <Link href={`/login${keepNext}`} className="font-medium text-fg hover:underline">
+          {t("auth.toLogin")}
+        </Link>
+      </p>
+    </div>
+  );
+  const done = (s: Session) => router.replace(landing(s, next));
+
+  if (!health.data) return null;
+  // 메일 도메인을 인증해 SIGNUP_EMAIL_VERIFY 를 켜면 인증번호 단계가 생김
+  if (health.data.signup_email_verify) {
+    return (
+      <CodeFlow
+        purpose="signup"
+        title={t("auth.signupTitle")}
+        subtitle={t("auth.signupSubtitle")}
+        submitLabel={t("auth.signupButton")}
+        extra={<Input label={t("auth.name")} autoComplete="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />}
+        footer={footer}
+        onSubmit={async ({ email, code, password }) => done(await api<Session>("/auth/signup", { method: "POST", json: { email, code, password, name } }))}
+      />
+    );
+  }
+  return <SimpleSignup name={name} setName={setName} footer={footer} onDone={done} />;
+}
+
+/** 이메일 인증 없이: 이메일 중복 확인(입력하는 대로) + 비밀번호 */
+function SimpleSignup({
+  name,
+  setName,
+  footer,
+  onDone,
+}: {
+  name: string;
+  setName: (v: string) => void;
+  footer: ReactNode;
+  onDone: (s: Session) => void;
+}) {
+  const t = useT();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [taken, setTaken] = useState<{ email: string; available: boolean } | null>(null);
+
+  // 입력이 멈추면 중복 확인 (0.4초)
+  useEffect(() => {
+    setTaken(null);
+    const value = email.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(value)) return;
+    const id = setTimeout(() => {
+      api<{ email: string; available: boolean }>("/auth/signup/check", { method: "POST", json: { email: value } })
+        .then((r) => setTaken({ email: value, available: r.available }))
+        .catch(() => {});
+    }, 400);
+    return () => clearTimeout(id);
+  }, [email]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (password !== confirm) return setError(t("auth.passwordMismatch"));
+    setBusy(true);
+    setError(undefined);
+    try {
+      onDone(await api<Session>("/auth/signup", { method: "POST", json: { email, password, name } }));
+    } catch (err) {
+      setError(toApiError(err).message);
+      setBusy(false);
+    }
+  }
+
+  const hint = taken && taken.email === email.trim() ? (taken.available ? t("auth.emailAvailable") : t("auth.emailTaken")) : undefined;
   return (
-    <CodeFlow
-      purpose="signup"
-      title={t("auth.signupTitle")}
-      subtitle={t("auth.signupSubtitle")}
-      submitLabel={t("auth.signupButton")}
-      extra={<Input label={t("auth.name")} autoComplete="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />}
-      footer={
-        <div className="space-y-2">
-          <p className="text-[12px]">{rich(t("auth.agree"), { privacy: (c) => <Link href="/privacy" className="underline">{c}</Link> })}</p>
-          <p>
-            {t("auth.haveAccount")}{" "}
-            <Link href={`/login${keepNext}`} className="font-medium text-fg hover:underline">
-              {t("auth.toLogin")}
-            </Link>
-          </p>
-        </div>
-      }
-      onSubmit={async ({ email, code, password }) => {
-        const s = await api<Session>("/auth/signup", { method: "POST", json: { email, code, password, name } });
-        router.replace(landing(s, next));
-      }}
-    />
+    <AuthCard title={t("auth.signupTitle")} subtitle={t("auth.signupSubtitle")} footer={footer}>
+      <form onSubmit={submit} className="space-y-3">
+        <label className="block">
+          <span className="mb-1.5 block text-[13px] font-medium text-fg-2">{t("auth.email")}</span>
+          <input
+            type="email"
+            autoComplete="email"
+            required
+            autoFocus
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            aria-invalid={taken?.available === false || undefined}
+            className={cx(inputClass, "h-10", taken?.available === false && "border-bad")}
+          />
+          {hint && <span className={cx("mt-1 block text-[12px]", taken?.available ? "text-good" : "text-bad")}>{hint}</span>}
+        </label>
+        <Input label={t("auth.name")} autoComplete="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+        <Input
+          label={t("auth.password")}
+          hint={t("auth.passwordHint")}
+          type="password"
+          autoComplete="new-password"
+          minLength={8}
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <Input label={t("auth.passwordConfirm")} type="password" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        {error && <Notice tone="bad">{error}</Notice>}
+        <Button type="submit" variant="primary" loading={busy} disabled={taken?.available === false} className="h-11 w-full">
+          {t("auth.signupButton")}
+        </Button>
+      </form>
+    </AuthCard>
   );
 }
 

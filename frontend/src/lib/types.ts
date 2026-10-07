@@ -41,6 +41,8 @@ export type Health = {
   redirect_uri: string;
   /** 로컬 개발 전용 로그인 사용 가능 (DEV_LOGIN=1 + localhost) */
   dev_login?: boolean;
+  /** 회원가입 때 이메일 인증번호를 받는지 (끄면 중복 확인만) */
+  signup_email_verify?: boolean;
 };
 
 export type Asset = {

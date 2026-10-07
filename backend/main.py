@@ -66,6 +66,8 @@ def health(request: Request) -> dict:
         "auth_mode": settings.auth_mode,
         # 회원에 연동할 수 있는 방식
         "can_link": {"instagram": settings.instagram_configured, "facebook": settings.facebook_configured},
+        # 회원가입 때 이메일 인증번호를 받는지 (끄면 중복 확인만)
+        "signup_email_verify": settings.signup_email_verify,
         # 게시물 구성·이미지 연출과 댓글 감정 분석에 쓰는 엔진
         "ai_engine": "gemini" if settings.gemini_api_key else "basic",
         "public_base_url": settings.public_base_url,

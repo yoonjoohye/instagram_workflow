@@ -136,7 +136,7 @@ class EmailIn(BaseModel):
 
 class SignupIn(BaseModel):
     email: str = Field(max_length=254)
-    code: str = Field(min_length=6, max_length=6)
+    code: str = Field(default="", max_length=6)  # SIGNUP_EMAIL_VERIFY 를 켰을 때만
     password: str = Field(max_length=128)
     name: str = Field(default="", max_length=80)
 
@@ -152,6 +152,13 @@ class ResetIn(BaseModel):
     password: str = Field(max_length=128)
 
 
+@router.post("/signup/check")
+def signup_check(body: EmailIn, db: Session = Depends(get_db)) -> dict:
+    """이메일 중복 확인 (가입 화면에서 입력하는 대로)."""
+    email = norm_email(body.email)
+    return {"email": email, "available": db.scalar(select(User.id).where(User.email == email)) is None}
+
+
 @router.post("/signup/code")
 def signup_code(body: EmailIn, request: Request, db: Session = Depends(get_db)) -> dict:
     """회원가입 1단계: 이메일로 6자리 인증번호를 보냅니다."""
@@ -163,13 +170,17 @@ def signup_code(body: EmailIn, request: Request, db: Session = Depends(get_db)) 
 
 @router.post("/signup")
 def signup(body: SignupIn, request: Request, db: Session = Depends(get_db)) -> JSONResponse:
-    """회원가입 2단계: 인증번호 확인 + 비밀번호 → 가입하고 바로 로그인."""
+    """회원가입: 이메일 중복 확인 + 비밀번호 → 가입하고 바로 로그인.
+    SIGNUP_EMAIL_VERIFY 를 켜면 /signup/code 로 받은 인증번호도 확인합니다."""
     email = norm_email(body.email)
     check_password(body.password)
     if db.scalar(select(User.id).where(User.email == email)):
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 가입된 이메일입니다. 로그인해 주세요.")
-    _use_code(db, email, "signup", body.code)
-    user = User(email=email, password_hash=hash_password(body.password), name=body.name.strip(), email_verified_at=utcnow())
+    verified = None
+    if settings.signup_email_verify:
+        _use_code(db, email, "signup", body.code)
+        verified = utcnow()
+    user = User(email=email, password_hash=hash_password(body.password), name=body.name.strip(), email_verified_at=verified)
     db.add(user)
     db.commit()
     claimed = claim_legacy_accounts(db, request, user)

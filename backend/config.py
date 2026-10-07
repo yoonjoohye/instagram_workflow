@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     # 보내는 사람. 도메인 인증 전에는 onboarding@resend.dev (Resend 가입 메일 주소로만 발송됨)
     mail_from: str = "Auto Studio <onboarding@resend.dev>"
+    # 회원가입 때 이메일 인증번호를 받을지. 메일 도메인을 인증하기 전에는 꺼 두고(중복 확인만), 인증하면 켭니다.
+    signup_email_verify: bool = False
 
     # 댓글 감정 분석(긍정/보통/부정). 비워두면 한국어 키워드·이모지 규칙으로 분류합니다.
     gemini_api_key: str = ""
