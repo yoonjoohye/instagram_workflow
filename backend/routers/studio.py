@@ -302,6 +302,12 @@ class ManualIn(BaseModel):
     write_caption: bool = False  # True 면 사진·주제·컨셉을 보고 캡션·해시태그를 바로 씀 (실패해도 작업은 만듦)
     template: str = Field(default="auto", max_length=40)  # 고른 컨셉 key (화면 표시용)
     language: str | None = Field(default=None, max_length=8)
+    # 사진·동영상을 넣기 전에 먼저 써 둔 캡션·해시태그·AI 설정 (새로 만들기 화면)
+    caption: str = Field(default="", max_length=2200)
+    hashtags: list[Annotated[str, Field(max_length=100)]] = Field(default_factory=list, max_length=30)
+    caption_tone: Literal["casual", "polite"] = "casual"
+    caption_length: Literal["auto", "short", "medium", "long"] = "auto"
+    caption_requests: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=10)
 
 
 def _original_asset(b: MediaBlob) -> dict:
@@ -325,9 +331,12 @@ def manual(body: ManualIn, request: Request, account: Account = Depends(current_
         status="ready",
         provider="original/manual",
         error="",
-        caption="",
-        hashtags=[],
+        caption="" if story else body.caption.strip(),
+        hashtags=[] if story else [h.lstrip("#").strip() for h in body.hashtags if h.strip()],
         plan={
+            "caption_tone": body.caption_tone,
+            "caption_length": body.caption_length,
+            "caption_requests": body.caption_requests,
             "slides": [{"role": "photo"} for _ in blobs],
             "upload_ids": body.upload_ids,
             "topic": body.prompt.strip(),
@@ -340,7 +349,7 @@ def manual(body: ManualIn, request: Request, account: Account = Depends(current_
         assets=[_original_asset(b) for b in blobs],
     )
     _sync_kind(job)
-    if body.write_caption and not story and blobs:
+    if body.write_caption and not story and blobs and not job.caption:
         try:
             written = svc.rewrite_caption(
                 topic=body.prompt.strip(), style=body.style, caption="", instruction="",
@@ -806,6 +815,63 @@ def _job_images(db: Session, account: Account, job: GenerationJob) -> list[bytes
         if blob is not None and blob.account_id == account.id and blob.data:
             images.append(blob.data)
     return images
+
+
+class CaptionDraftIn(BaseModel):
+    """작업이 아직 없을 때(새로 만들기, 사진 넣기 전) 컨셉·주제만 보고 캡션 쓰기."""
+
+    instruction: str = Field(default="", max_length=500)
+    caption: str = Field(default="", max_length=2200)
+    language: str | None = Field(default=None, max_length=8)
+    prompt: str = Field(default="", max_length=2000)  # 주제 메모
+    style: str = Field(default="", max_length=2000)
+    caption_format: str = Field(default="", max_length=2000)
+    template: str = Field(default="auto", max_length=40)
+    caption_tone: Literal["casual", "polite"] = "casual"
+    caption_length: Literal["auto", "short", "medium", "long"] = "auto"
+    caption_requests: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=10)
+
+
+def _gemini_http(exc: Exception, what: str) -> HTTPException:
+    if svc.is_busy(exc):
+        return HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})"
+        )
+    return HTTPException(status.HTTP_502_BAD_GATEWAY, f"{what}: {exc}")
+
+
+@router.post("/studio/caption/draft")
+def caption_draft(body: CaptionDraftIn, request: Request, account: Account = Depends(current_account)) -> dict:
+    """사진 없이 컨셉·주제·바란 점으로 캡션을 씁니다. 바란 점은 화면이 기록해 두었다가 작업을 만들 때 함께 넘깁니다."""
+    wish = body.instruction.strip()
+    try:
+        written = svc.rewrite_caption(
+            topic=body.prompt.strip(), style=body.style, caption=body.caption, instruction=wish,
+            caption_format=body.caption_format, language=norm_lang(body.language or lang_of(request)),
+            template=body.template, tone=body.caption_tone, length=body.caption_length, history=body.caption_requests,
+        )
+    except svc.GeminiError as exc:
+        raise _gemini_http(exc, "캡션을 다시 쓰지 못했습니다") from exc
+    requests = ([r for r in body.caption_requests if r != wish] + [wish])[-CAPTION_HISTORY:] if wish else body.caption_requests
+    return {**written, "requests": requests}
+
+
+class HashtagDraftIn(BaseModel):
+    caption: str = Field(default="", max_length=2200)
+    prompt: str = Field(default="", max_length=2000)
+    language: str | None = Field(default=None, max_length=8)
+
+
+@router.post("/studio/hashtags/draft")
+def hashtags_draft(body: HashtagDraftIn, request: Request, account: Account = Depends(current_account)) -> dict:
+    """사진 없이 캡션·주제로 해시태그를 추천합니다 (새로 만들기 화면)."""
+    try:
+        tags = svc.suggest_hashtags([], topic=body.prompt.strip(), caption=body.caption, language=norm_lang(body.language or lang_of(request)))
+    except svc.GeminiError as exc:
+        raise _gemini_http(exc, "해시태그를 만들지 못했습니다") from exc
+    if not tags:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "해시태그를 만들지 못했습니다: 결과 없음")
+    return {"hashtags": tags}
 
 
 class HashtagIn(BaseModel):

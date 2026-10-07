@@ -260,3 +260,32 @@ def test_workspace_media_add_remove_generate_and_settings(monkeypatch, client, l
     # Gemini 이미지 생성이 실패하면 빈 배경을 넣지 않고 알림
     monkeypatch.setattr(gemini, "call", lambda *a, **k: (_ for _ in ()).throw(gemini.GeminiError("quota exceeded")))
     assert client.post(f"{PREFIX}/{job['id']}/media/generate", json={}).status_code == 502
+
+
+def test_caption_and_hashtags_before_media(monkeypatch, client, login, account, db):
+    """새로 만들기: 사진을 넣기 전에도 컨셉·주제만으로 캡션·해시태그를 쓰고, 작업을 만들 때 함께 넘김."""
+    seen = {}
+
+    def fake(model, parts, cfg=None, **_):
+        seen["images"] = sum(1 for p in parts if "inlineData" in p)
+        seen["text"] = parts[-1]["text"]
+        if "해시태그 전문가" in seen["text"]:
+            return {"candidates": [{"content": {"parts": [{"text": json.dumps({"hashtags": ["성수맛집", "#소바"]})}]}}]}
+        return {"candidates": [{"content": {"parts": [{"text": json.dumps({"caption_parts": ["여기 진짜 맛있다"], "hashtags": ["소바"]})}]}}]}
+
+    monkeypatch.setattr(gemini, "call", fake)
+    login(account)
+    r = client.post("/studio/caption/draft", json={"prompt": "성수 소바집", "instruction": "짧게", "template": "food", "caption_requests": ["가게 이름 넣어줘"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["caption"] == "여기 진짜 맛있다" and r.json()["requests"] == ["가게 이름 넣어줘", "짧게"]
+    assert seen["images"] == 0 and "성수 소바집" in seen["text"] and "가게 이름 넣어줘" in seen["text"]
+    assert client.post("/studio/hashtags/draft", json={"caption": "여기 진짜 맛있다"}).json()["hashtags"] == ["성수맛집", "소바"]
+
+    up = client.post("/media/uploads", files={"file": ("a.jpg", jpeg(), "image/jpeg")}).json()["id"]
+    job = client.post("/studio/manual", json={
+        "upload_ids": [up], "caption": "여기 진짜 맛있다", "hashtags": ["#성수맛집", "소바"],
+        "caption_tone": "polite", "caption_requests": ["짧게"], "write_caption": True,
+    }).json()
+    assert job["caption"] == "여기 진짜 맛있다" and job["hashtags"] == ["성수맛집", "소바"]  # 써 둔 글은 덮어쓰지 않음
+    assert job["settings"]["caption_tone"] == "polite" and job["settings"]["caption_requests"] == ["짧게"]
+    client.delete(f"/workflow/jobs/{job['id']}")

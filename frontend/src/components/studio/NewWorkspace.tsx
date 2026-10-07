@@ -1,10 +1,14 @@
 "use client";
 
 /** 새로 만들기: 작업 공간과 같은 화면을 빈 상태로 보여 줍니다.
- *  컨셉·주제는 화면에만 두었다가, 사진·동영상을 넣거나 AI 로 이미지를 만드는 순간 작업을 만들고 그 작업 공간으로 이어집니다. */
+ *  컨셉·주제·캡션·해시태그는 화면에만 두었다가(사진 없이도 ✨ AI 로 쓸 수 있음), 사진·동영상을 넣거나
+ *  AI 로 이미지를 만드는 순간 그 내용과 함께 작업을 만들고 그 작업 공간으로 이어집니다. */
 
 import { useState } from "react";
 import { useMe } from "@/components/AdminShell";
+import { CaptionAiPanel, type CaptionPrefs, type CaptionWritten } from "@/components/studio/CaptionAiPanel";
+import { CaptionField } from "@/components/studio/CaptionField";
+import { HashtagField } from "@/components/studio/HashtagField";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { MediaStrip } from "@/components/studio/MediaStrip";
 import { PhotoLibraryPanel } from "@/components/studio/PhotoLibraryPanel";
@@ -14,10 +18,13 @@ import { Button, Card, Notice } from "@/components/ui";
 import { useI18n } from "@/i18n/client";
 import { api, toApiError } from "@/lib/api";
 import { isMedia, MAX_VIDEO_MB, tooBig, uploadMedia } from "@/lib/mediaUpload";
+import { composeCaption } from "@/lib/format";
 import * as photoLib from "@/lib/photoLibrary";
 import type { Job, JobSettings } from "@/lib/types";
 
 const MAX_MEDIA = 10; // backend/routers/studio.py 의 MAX_MEDIA 와 같게
+const CAPTION_LIMIT = 2200;
+const HASHTAG_LIMIT = 30;
 
 export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
   const { t, locale } = useI18n();
@@ -26,7 +33,11 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
   const [error, setError] = useState<string>();
   const [libNotice, setLibNotice] = useState<{ tone: "good" | "warn"; text: string }>();
   const [finding, setFinding] = useState(false);
+  const [caption, setCaption] = useState("");
+  const [hashtags, setHashtags] = useState<string[]>([]);
+  const [prefs, setPrefs] = useState<CaptionPrefs>({ caption_tone: "casual", caption_length: "auto", caption_requests: [] });
   const story = settings.post_type === "story";
+  const finalCaption = composeCaption(caption, hashtags);
 
   const saveLocal = (patch: SettingsPatch) => {
     const { prompt, ...rest } = patch;
@@ -45,8 +56,30 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
         caption_format: story ? "" : settings.caption_format,
         template: settings.template,
         language: locale,
+        // 사진을 넣기 전에 써 둔 캡션·해시태그·AI 설정도 함께
+        caption: story ? "" : caption,
+        hashtags: story ? [] : hashtags,
+        ...prefs,
       },
     });
+
+  /** 사진 없이 컨셉·주제만 보고 쓰기 (작업이 아직 없어서) */
+  const ai = {
+    write: (v: { instruction: string; caption: string; language: string }) =>
+      api<CaptionWritten>("/studio/caption/draft", {
+        method: "POST",
+        json: {
+          ...v,
+          prompt: settings.topic.trim(),
+          style: settings.style,
+          caption_format: settings.caption_format,
+          template: settings.template,
+          ...prefs,
+        },
+      }),
+    tags: async (v: { caption: string; language: string }) =>
+      (await api<{ hashtags: string[] }>("/studio/hashtags/draft", { method: "POST", json: { ...v, prompt: settings.topic.trim() } })).hashtags,
+  };
 
   async function addFiles(files: File[]) {
     setError(undefined);
@@ -94,7 +127,7 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
       {story ? (
         <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={[]} />
       ) : (
-        <InstagramPreview username={me.username} avatar={me.profile_picture_url} assets={[]} caption={settings.topic.trim()} />
+        <InstagramPreview username={me.username} avatar={me.profile_picture_url} assets={[]} caption={finalCaption} />
       )}
       {/* 작업 공간과 같은 자리에 게시 버튼 (사진을 넣으면 쓸 수 있음) */}
       <div className="mt-4 space-y-3 border-t border-line pt-4">
@@ -135,7 +168,20 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
 
         {!story && (
           <Card title={t("studio.captionTitle")}>
-            <p className="text-[13px] text-fg-3">{t("studio.captionAfterMedia")}</p>
+            <div className="space-y-4">
+              <CaptionAiPanel
+                ai={ai}
+                caption={caption}
+                onCaption={setCaption}
+                hashtags={hashtags}
+                onHashtags={setHashtags}
+                prefs={prefs}
+                onPrefs={async (patch) => setPrefs((p) => ({ ...p, ...patch }))}
+                onRequests={(requests) => setPrefs((p) => ({ ...p, caption_requests: requests }))}
+              />
+              <CaptionField value={caption} onChange={setCaption} count={finalCaption.length} max={CAPTION_LIMIT} />
+              <HashtagField value={hashtags} onChange={setHashtags} max={HASHTAG_LIMIT} />
+            </div>
           </Card>
         )}
       </div>

@@ -7,13 +7,20 @@
 import { useState } from "react";
 import { useI18n } from "@/i18n/client";
 import { cx, inputClass, Segmented, Spinner } from "@/components/ui";
-import { api, toApiError } from "@/lib/api";
+import { toApiError } from "@/lib/api";
 import type { CaptionLength, CaptionTone, JobSettings } from "@/lib/types";
 
-type CaptionPrefs = Pick<JobSettings, "caption_tone" | "caption_length" | "caption_requests">;
+export type CaptionPrefs = Pick<JobSettings, "caption_tone" | "caption_length" | "caption_requests">;
+export type CaptionWritten = { caption: string; hashtags: string[]; requests: string[] };
+
+/** 작업이 있으면 그 작업의 사진까지 보고, 새로 만드는 중이면 컨셉·주제만 보고 씁니다 (부르는 쪽이 정함). */
+export type CaptionAi = {
+  write: (v: { instruction: string; caption: string; language: string }) => Promise<CaptionWritten>;
+  tags: (v: { caption: string; language: string }) => Promise<string[]>;
+};
 
 export function CaptionAiPanel({
-  jobId,
+  ai,
   caption,
   onCaption,
   hashtags,
@@ -22,7 +29,7 @@ export function CaptionAiPanel({
   onPrefs,
   onRequests,
 }: {
-  jobId: number;
+  ai: CaptionAi;
   caption: string;
   onCaption: (caption: string) => void;
   hashtags: string[];
@@ -48,10 +55,7 @@ export function CaptionAiPanel({
     setBusy("caption");
     setError(undefined);
     try {
-      const r = await api<{ caption: string; hashtags: string[]; requests: string[] }>(`/studio/${jobId}/caption`, {
-        method: "POST",
-        json: { instruction: wish.trim(), caption, language: locale },
-      });
+      const r = await ai.write({ instruction: wish.trim(), caption, language: locale });
       setPrevCaption(caption);
       onCaption(r.caption);
       // 함께 나온 해시태그는 해시태그가 비어 있을 때만 채움
@@ -71,9 +75,9 @@ export function CaptionAiPanel({
     setBusy("tags");
     setError(undefined);
     try {
-      const r = await api<{ hashtags: string[] }>(`/studio/${jobId}/hashtags`, { method: "POST", json: { caption, language: locale } });
+      const tags = await ai.tags({ caption, language: locale });
       setPrevTags(hashtags);
-      onHashtags(r.hashtags);
+      onHashtags(tags);
     } catch (e) {
       setError(toApiError(e).message);
     } finally {

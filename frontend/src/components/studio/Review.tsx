@@ -360,7 +360,10 @@ export function Review({
             <div className="space-y-4">
               {!locked && (
                 <CaptionAiPanel
-                  jobId={job.id}
+                  ai={{
+                    write: (v) => api(`/studio/${job.id}/caption`, { method: "POST", json: v }),
+                    tags: async (v) => (await api<{ hashtags: string[] }>(`/studio/${job.id}/hashtags`, { method: "POST", json: v })).hashtags,
+                  }}
                   caption={caption}
                   onCaption={setCaption}
                   hashtags={hashtags}
