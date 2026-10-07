@@ -61,7 +61,7 @@ def test_story_plan_render_and_publish_in_parts(monkeypatch, client, login, acco
     monkeypatch.setattr(workflow.publishing, "create_container", lambda c, u, **k: f"container-{k['media_url'][-12:]}")
     monkeypatch.setattr(workflow.publishing, "wait_until_finished", lambda c, cid, **k: None)
 
-    def fake_publish(c, u, cid):
+    def fake_publish(c, u, cid, **k):
         calls["n"] += 1
         return {"media_id": f"story-{calls['n']}", "permalink": ""}
 
@@ -92,7 +92,7 @@ def test_story_photo_not_9_16_is_fitted_before_publish(monkeypatch, client, logi
     monkeypatch.setattr(workflow.publishing, "create_container", lambda c, u, **k: urls.append(k["media_url"]) or "c1")
     waited = []
     monkeypatch.setattr(workflow.publishing, "wait_until_finished", lambda c, cid, **k: waited.append(cid))
-    monkeypatch.setattr(workflow.publishing, "publish", lambda c, u, cid: {"media_id": "s1", "permalink": ""})
+    monkeypatch.setattr(workflow.publishing, "publish", lambda c, u, cid, **k: {"media_id": "s1", "permalink": ""})
 
     assert client.post("/workflow/publish", json={"job_id": job["id"]}).json()["status"] == "published"
     assert waited == ["c1"]  # 사진 스토리도 처리가 끝난 뒤 발행 (안 기다리면 400 "media is not ready")
@@ -132,3 +132,49 @@ def test_publish_retries_when_media_not_ready(monkeypatch):
     import pytest
     with pytest.raises(GraphError):
         publishing.publish(Broken(), "ig", "c1")
+
+
+def test_publish_recovers_when_error_but_actually_published(monkeypatch):
+    """Meta 가 일시 오류(code 2)를 돌려줬지만 실제로는 올라간 경우: 컨테이너 상태로 확인해 성공 처리 (다시 올리지 않음)."""
+    from backend.services import publishing
+    from backend.services.meta_graph import GraphError
+
+    posts = []
+
+    class Graph:
+        def post(self, path, data):
+            posts.append(path)
+            raise GraphError("An unexpected error has occurred. Please retry your request later.", status=500,
+                             payload={"code": 2, "is_transient": True})
+
+        def get(self, path, params):
+            if path == "c1":
+                return {"status_code": "PUBLISHED"}
+            if path == "ig/stories":
+                return {"data": [{"id": "story-9"}]}
+            return {"permalink": ""}
+
+    monkeypatch.setattr(publishing.time, "sleep", lambda s: None)
+    assert publishing.publish(Graph(), "ig", "c1", kind="STORIES")["media_id"] == "story-9"
+    assert len(posts) == 1  # 이미 올라갔으니 다시 게시하지 않음
+
+
+def test_publish_retries_transient_then_succeeds(monkeypatch):
+    from backend.services import publishing
+    from backend.services.meta_graph import GraphError
+
+    posts = []
+
+    class Graph:
+        def post(self, path, data):
+            posts.append(path)
+            if len(posts) == 1:
+                raise GraphError("An unexpected error has occurred.", status=500, payload={"code": 2})
+            return {"id": "m2"}
+
+        def get(self, path, params):
+            return {"status_code": "FINISHED"} if path == "c1" else {"permalink": "https://instagram.com/p/y"}
+
+    monkeypatch.setattr(publishing.time, "sleep", lambda s: None)
+    assert publishing.publish(Graph(), "ig", "c1", kind="STORIES")["media_id"] == "m2"
+    assert len(posts) == 2

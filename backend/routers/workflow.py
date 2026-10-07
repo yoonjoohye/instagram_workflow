@@ -286,14 +286,14 @@ def publish_job(
             # 사진도 인스타그램이 이미지를 다 가져가야 발행할 수 있습니다 (안 기다리면 400 "media is not ready")
             publishing.wait_until_finished(client, container_id, interval=publishing.POLL_INTERVAL_SEC if kind in {"REELS", "CAROUSEL"} or visual[0]["type"] == "video" else 1)
 
-            result = publishing.publish(client, account.ig_user_id, container_id)
+            result = publishing.publish(client, account.ig_user_id, container_id, kind=kind)
     except HTTPException:
         job.status = "ready"
         db.commit()
         raise
     except GraphError as exc:
         # 실패 이유를 서버 로그에도 남깁니다 (Vercel 로그에서 바로 확인)
-        log.warning("publish failed job=%s kind=%s status=%s: %s", job.id, job.media_kind, exc.status, exc)
+        log.warning("publish failed job=%s kind=%s status=%s %s: %s", job.id, job.media_kind, exc.status, publishing.describe(exc), exc)
         job.status = "failed"
         job.error = str(exc)
         db.commit()
@@ -376,7 +376,7 @@ def _publish_stories(db: Session, account: Account, job: GenerationJob, visual: 
                 container = publishing.create_container(client, account.ig_user_id, kind="STORIES", media_url=media_url)
                 # 사진 스토리도 처리가 끝나야 발행됩니다 (안 기다리면 400 "The media is not ready for publishing")
                 publishing.wait_until_finished(client, container, interval=publishing.POLL_INTERVAL_SEC if asset["type"] == "video" else 1)
-                result = publishing.publish(client, account.ig_user_id, container)
+                result = publishing.publish(client, account.ig_user_id, container, kind="STORIES")
                 done[i] = result["media_id"]
                 # 새 리스트로 넣어야 DB 가 바뀐 것으로 알아챕니다 (같은 리스트를 고치면 저장이 안 됨)
                 job.plan = {**(job.plan or {}), "story_media_ids": list(done)}
@@ -389,7 +389,7 @@ def _publish_stories(db: Session, account: Account, job: GenerationJob, visual: 
         raise
     except GraphError as exc:
         # 실패 이유를 서버 로그에도 남깁니다 (Vercel 로그에서 바로 확인)
-        log.warning("publish failed job=%s kind=%s status=%s: %s", job.id, job.media_kind, exc.status, exc)
+        log.warning("publish failed job=%s kind=%s status=%s %s: %s", job.id, job.media_kind, exc.status, publishing.describe(exc), exc)
         job.status = "failed"
         job.error = str(exc)
         db.commit()

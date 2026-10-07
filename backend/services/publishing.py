@@ -122,20 +122,60 @@ def _not_ready(exc: GraphError) -> bool:
     return p.get("code") == NOT_READY_CODE or p.get("error_subcode") == 2207027
 
 
-def publish(client: GraphClient, ig_user_id: str, container_id: str) -> dict[str, Any]:
+TRANSIENT_CODES = {1, 2}  # "An unknown error" / "An unexpected error has occurred. Please retry your request later."
+
+
+def _transient(exc: GraphError) -> bool:
+    p = exc.payload if isinstance(exc.payload, dict) else {}
+    return bool(p.get("is_transient")) or p.get("code") in TRANSIENT_CODES or exc.status >= 500
+
+
+def describe(exc: GraphError) -> str:
+    """로그용: Meta 오류 코드·세부 코드·추적 ID."""
+    p = exc.payload if isinstance(exc.payload, dict) else {}
+    return f"code={p.get('code')} subcode={p.get('error_subcode')} type={p.get('type')} fbtrace={p.get('fbtrace_id')}"
+
+
+def _published_media_id(client: GraphClient, ig_user_id: str, kind: str | None) -> str:
+    """오류가 났지만 컨테이너가 실제로 게시됐을 때, 방금 올라간 미디어 ID (가장 최근 것)."""
+    edge = "stories" if kind == "STORIES" else "media"
+    try:
+        rows = client.get(f"{ig_user_id}/{edge}", {"fields": "id,timestamp", "limit": 1}).get("data") or []
+    except GraphError:
+        return ""
+    return str(rows[0].get("id", "")) if rows else ""
+
+
+def publish(client: GraphClient, ig_user_id: str, container_id: str, *, kind: str | None = None) -> dict[str, Any]:
     """컨테이너를 실제 게시물로 발행하고 permalink 까지 조회해 돌려줍니다.
-    아직 준비 중이라고 하면(9007) 잠깐 기다렸다 다시 시도합니다."""
+    - 아직 준비 중(9007)이면 잠깐 기다렸다 다시 시도
+    - 일시 오류(code 1·2, 5xx)면: 컨테이너가 이미 게시됐는지 먼저 확인하고(오류를 주고도 올라가는 경우가 있음),
+      아니면 다시 시도. 컨테이너는 한 번만 게시되므로 다시 시도해도 두 번 올라가지 않습니다."""
+    media_id = ""
     for attempt in range(PUBLISH_RETRIES):
         try:
-            result = client.post(f"{ig_user_id}/media_publish", {"creation_id": container_id})
+            media_id = client.post(f"{ig_user_id}/media_publish", {"creation_id": container_id}).get("id") or ""
             break
         except GraphError as exc:
-            if not _not_ready(exc) or attempt == PUBLISH_RETRIES - 1:
+            last = attempt == PUBLISH_RETRIES - 1
+            if _not_ready(exc) and not last:
+                time.sleep(PUBLISH_RETRY_SEC)
+                continue
+            if not _transient(exc):
                 raise
-            time.sleep(PUBLISH_RETRY_SEC)
-    media_id = result.get("id")
+            try:
+                code = container_status(client, container_id).get("status_code")
+            except GraphError:
+                code = None
+            if code == "PUBLISHED":
+                media_id = _published_media_id(client, ig_user_id, kind)
+                if media_id:
+                    break
+            if last:
+                raise
+            time.sleep(PUBLISH_RETRY_SEC * (attempt + 1))
     if not media_id:
-        raise GraphError("발행 후 미디어 ID 를 받지 못했습니다.", payload=result)
+        raise GraphError("발행 후 미디어 ID 를 받지 못했습니다.")
 
     permalink = ""
     try:
