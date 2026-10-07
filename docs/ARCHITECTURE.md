@@ -43,9 +43,9 @@
 ### 게시물 만들기 요청 흐름
 
 ```
-만들기 시작 (frontend/src/components/studio/PostForm.tsx) — 피드/스토리 · 컨셉 · 주제 메모(선택)
+새로 만들기 (frontend/src/components/studio/NewWorkspace.tsx) — 작업 공간과 같은 화면의 빈 상태 (컨셉·주제는 화면에만)
  1. 사진·동영상 고르기 → POST /media/uploads · (동영상은 Blob 업로드 + POST /media/videos)  — frontend/src/lib/mediaUpload.ts
- 2. POST /studio/manual            → 고른 그대로 작업을 만들고 바로 작업 공간으로
+ 2. POST /studio/manual            → 사진을 넣거나 AI 이미지를 만드는 순간 작업을 만들고 그 장의 편집기를 띄움
 작업 공간 (frontend/src/components/studio/Review.tsx) — 항목마다 ✨ AI / ✏️ 직접 편집
  · 컨셉·주제 메모·피드/스토리   PATCH  /studio/{job}/settings
  · 사진 더 넣기 / 빼기          POST   /studio/{job}/media · DELETE /studio/{job}/media/{i}

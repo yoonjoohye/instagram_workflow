@@ -14,7 +14,7 @@ import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
 import { HashtagField } from "@/components/studio/HashtagField";
 import { CaptionField } from "@/components/studio/CaptionField";
-import { WorkspaceSettings } from "@/components/studio/WorkspaceSettings";
+import { DEFAULT_SETTINGS, WorkspaceSettings } from "@/components/studio/WorkspaceSettings";
 import { uploadMedia } from "@/lib/mediaUpload";
 import { VideoEditor } from "@/components/studio/VideoEditor";
 import { Badge, Button, Card, cx, Notice, Skeleton, Spinner, StatusDot } from "@/components/ui";
@@ -272,7 +272,12 @@ export function Review({
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       {/* ── 왼쪽: 편집 ── */}
       <div className="min-w-0 space-y-6">
-        <WorkspaceSettings job={job} locked={locked} onChange={onChange} />
+        <WorkspaceSettings
+          settings={job.settings ?? DEFAULT_SETTINGS}
+          locked={locked}
+          resetKey={job.id}
+          onSave={async (patch) => onChange(await api<Job>(`/studio/${job.id}/settings`, { method: "PATCH", json: patch }))}
+        />
         <Card
           title={t("studio.mediaTitle")}
           subtitle={`${t("studio.jobMeta", { date: fmtDateTime(job.created_at), provider: job.provider })}`}

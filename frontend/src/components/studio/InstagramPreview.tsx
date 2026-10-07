@@ -59,7 +59,16 @@ export function InstagramPreview({
           className="flex aspect-[4/5] snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {assets.length === 0 ? (
-            <div className="flex w-full shrink-0 items-center justify-center text-[13px] text-white/60">—</div>
+            // 아직 사진이 없을 때: 올라갈 자리를 기본 모양으로
+            <div className="flex w-full shrink-0 flex-col items-center justify-center gap-2 bg-gradient-to-br from-surface-2 to-line text-fg-3">
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+                <rect x="3" y="3" width="18" height="18" rx="3" />
+                <circle cx="8.5" cy="8.5" r="1.8" />
+                <path d="m21 15-5-5L5 21" />
+              </svg>
+              <span className="text-[12px]">{t("studio.previewEmptyMedia")}</span>
+              <span className="tnum text-[11px] opacity-70">4:5 · 1080 × 1350</span>
+            </div>
           ) : (
             assets.map((a, i) => (
               <div key={`${a.url}-${i}`} className="relative h-full w-full shrink-0 snap-center">
@@ -136,6 +145,14 @@ export function InstagramPreview({
         <p className={cx("break-words whitespace-pre-wrap", !expanded && "line-clamp-2")}>
           <span className="font-semibold">{username}</span> <CaptionText text={caption} />
         </p>
+        {!caption.trim() && (
+          // 캡션이 아직 없을 때 들어갈 자리
+          <div className="mt-1.5 space-y-1.5" aria-hidden>
+            <div className="h-2.5 w-11/12 rounded-full bg-line" />
+            <div className="h-2.5 w-2/3 rounded-full bg-line" />
+            <div className="h-2.5 w-1/3 rounded-full bg-[#0095f6]/20" />
+          </div>
+        )}
         {!expanded && caption.length > 80 && (
           <button type="button" onClick={() => setExpanded(true)} className="text-fg-3">
             {t("studio.igMore")}

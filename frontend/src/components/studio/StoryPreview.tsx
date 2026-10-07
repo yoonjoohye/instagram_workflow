@@ -38,13 +38,22 @@ export function StoryPreview({ username, avatar, assets }: { username: string; a
             <img src={mediaSrc(current.url)} alt="" className="absolute inset-0 size-full object-contain" draggable={false} />
           </div>
         ) : (
-          <div className="absolute inset-0 animate-pulse bg-white/10" />
+          // 아직 사진이 없을 때: 세로 9:16 자리를 기본 모양으로
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-[#2a2a35] via-[#1d1d26] to-[#14141a] text-white/55">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+              <rect x="6" y="2" width="12" height="20" rx="2.5" />
+              <circle cx="12" cy="10" r="2" />
+              <path d="m6 17 4-4 3 3 2-2 3 3" />
+            </svg>
+            <span className="text-[12px]">{t("studio.previewEmptyMedia")}</span>
+            <span className="tnum text-[11px] opacity-70">9:16 · 1080 × 1920</span>
+          </div>
         )}
 
         {/* 위: 진행 막대 + 프로필 (실제 화면에서 가려지는 영역) */}
         <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/50 to-transparent px-2.5 pt-2 pb-6">
           <div className="flex gap-1" aria-hidden>
-            {assets.map((_, i) => (
+            {(assets.length ? assets : [null]).map((_, i) => (
               <span key={i} className="h-[2px] flex-1 overflow-hidden rounded-full bg-white/35">
                 <span className={cx("block h-full bg-white", i <= index ? "w-full" : "w-0")} />
               </span>
@@ -83,7 +92,7 @@ export function StoryPreview({ username, avatar, assets }: { username: string; a
         )}
       </div>
       <p className="tnum mt-2 text-center text-[12px] text-fg-3">
-        {index + 1} / {assets.length}
+        {Math.min(index + 1, Math.max(assets.length, 1))} / {Math.max(assets.length, 1)}
       </p>
     </div>
   );

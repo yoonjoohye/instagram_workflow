@@ -2,15 +2,12 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { DraftPreview } from "@/components/studio/DraftPreview";
-import { PostForm, type Draft } from "@/components/studio/PostForm";
+import { NewWorkspace } from "@/components/studio/NewWorkspace";
 import { useT } from "@/i18n/client";
-import { Button, Notice, PageHeader, Skeleton } from "@/components/ui";
+import { Notice, PageHeader, Skeleton } from "@/components/ui";
 import { api, toApiError } from "@/lib/api";
 import type { Job } from "@/lib/types";
 import { Review } from "@/components/studio/Review";
-
-// 게시물당 해시태그 최대 개수
 
 export default function StudioPage() {
   return (
@@ -29,9 +26,6 @@ function Studio() {
   const [job, setJob] = useState<Job | null>(null);
   const [loadingJob, setLoadingJob] = useState(Boolean(jobId));
   const [jobError, setJobError] = useState<string>();
-  // 만들기 전: 고른 사진·주제를 오른쪽에 바로 보여 줌
-  const [draft, setDraft] = useState<Draft>({ media: [], prompt: "", postType: "feed" });
-  const hasDraft = draft.media.length > 0 || draft.prompt.trim().length > 0;
 
   useEffect(() => {
     if (!jobId) {
@@ -47,11 +41,11 @@ function Studio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
-  // 사진·동영상을 고르고 시작했다면 작업 공간이 열리자마자 첫 장 편집기를 띄움
+  // 사진·동영상을 넣어 작업을 만들었다면 작업 공간이 열리자마자 그 장의 편집기를 띄움
   const [autoEdit, setAutoEdit] = useState<number | null>(null);
-  const onCreated = (j: Job) => {
+  const onCreated = (j: Job, editIndex: number | null) => {
     setJob(j);
-    setAutoEdit(j.assets.length ? 0 : null);
+    setAutoEdit(editIndex);
     router.replace(`/admin/studio?job=${j.id}`, { scroll: false });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -75,10 +69,8 @@ function Studio() {
           {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} autoEdit={autoEdit} onAutoEditDone={() => setAutoEdit(null)} />}
         </div>
       ) : (
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-          <PostForm onCreated={onCreated} onDraft={setDraft} />
-          <div className="min-w-0">{hasDraft ? <DraftPreview draft={draft} /> : <Review job={null} onChange={setJob} />}</div>
-        </div>
+        // 새로 만들기도 작업 공간과 같은 화면 (빈 상태)
+        <NewWorkspace onCreated={onCreated} />
       )}
     </>
   );
