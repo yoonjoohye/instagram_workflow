@@ -1,0 +1,298 @@
+"use client";
+
+/** 검수 화면의 이미지·동영상 목록: 장마다 다운로드, 프롬프트로 수정(지금 이미지에서 / 처음부터), 배경음악 */
+
+import { useState } from "react";
+import { IconMusic } from "@/components/icons";
+import { useT } from "@/i18n/client";
+import type { MessageKey, T } from "@/i18n/core";
+import { Button, cx, inputClass, Spinner } from "@/components/ui";
+import { toApiError } from "@/lib/api";
+import { callNative, isNativeApp } from "@/lib/nativeBridge";
+import { mediaSrc } from "@/lib/format";
+import type { Asset } from "@/lib/types";
+
+export type RedoFn = (index: number, instruction: string, fromCurrent: boolean) => Promise<void>;
+
+export async function fetchFile(url: string, name: string, t: T): Promise<File> {
+  const res = await fetch(mediaSrc(url));
+  if (!res.ok) throw new Error(t("studio.fetchImageFailed", { status: res.status }));
+  const blob = await res.blob();
+  return new File([blob], name, { type: blob.type || "image/jpeg" });
+}
+
+/** 휴대폰에서는 공유 시트(‘이미지 저장’ → 사진 앱)로, 컴퓨터에서는 파일로 저장합니다. */
+export async function saveFiles(files: File[]) {
+  const touch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  if (touch && navigator.canShare?.({ files })) {
+    try {
+      await navigator.share({ files });
+      return;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return; // 사용자가 닫음
+      // 공유가 막히면 아래 파일 저장으로
+    }
+  }
+  for (const file of files) {
+    const href = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+    if (files.length > 1) await new Promise((r) => setTimeout(r, 300)); // 브라우저가 연속 다운로드를 막지 않게
+  }
+}
+
+/** 앱 안에서는 사진첩에 바로 저장 (WebView 는 파일 다운로드를 못 함) */
+export async function saveInApp(urls: string[], t: T) {
+  const abs = urls.map((u) => new URL(mediaSrc(u), window.location.href).href);
+  await callNative("save", { urls: abs, message: t("studio.savedToPhotos") }, 300_000);
+}
+
+export async function downloadImage(url: string, name: string, t: T) {
+  if (isNativeApp()) return saveInApp([url], t);
+  await saveFiles([await fetchFile(url, name, t)]);
+}
+
+export function MediaStrip({ assets, onRedo, filePrefix = "post" }: { assets: Asset[]; onRedo?: RedoFn; filePrefix?: string }) {
+  const t = useT();
+  const [error, setError] = useState<string>();
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  if (!assets.length) return <p className="py-8 text-center text-sm text-fg-3">{t("studio.noMedia")}</p>;
+  const single = assets.length === 1;
+  const fileName = (a: Asset, i: number) => `${filePrefix}-${i + 1}.${a.type === "video" ? "mp4" : "jpg"}`;
+  const ready = assets.filter((a) => a.url);
+
+  const downloadAll = async () => {
+    setDownloadingAll(true);
+    setError(undefined);
+    try {
+      if (isNativeApp()) {
+        await saveInApp(ready.map((a) => a.url), t);
+        return;
+      }
+      const files = await Promise.all(
+        assets.map((a, i) => (a.url ? fetchFile(a.url, fileName(a, i), t) : null)),
+      );
+      await saveFiles(files.filter((f): f is File => f !== null));
+    } catch (e) {
+      setError(toApiError(e).message);
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
+  return (
+    <>
+      {error && <p className="mb-2 text-[12px] text-bad">{error}</p>}
+      {!single && ready.length > 1 && (
+        <div className="mb-2 flex justify-end">
+          <Button variant="ghost" size="sm" onClick={downloadAll} disabled={downloadingAll}>
+            {downloadingAll ? <Spinner className="size-3" /> : "↓"} {t("studio.downloadAll", { n: ready.length })}
+          </Button>
+        </div>
+      )}
+      <div className={cx("flex items-start gap-3", !single && "snap-x overflow-x-auto pb-2")}>
+        {assets.map((a, i) => (
+          <MediaItem
+            key={`${a.url}-${i}`}
+            asset={a}
+            index={i}
+            total={assets.length}
+            single={single}
+            fileName={fileName(a, i)}
+            onRedo={onRedo}
+            onError={setError}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+export function MediaItem({
+  asset: a,
+  index: i,
+  total,
+  single,
+  fileName,
+  onRedo,
+  onError,
+}: {
+  asset: Asset;
+  index: number;
+  total: number;
+  single: boolean;
+  fileName: string;
+  onRedo?: RedoFn;
+  onError: (message?: string) => void;
+}) {
+  const t = useT();
+  const canEditCurrent = a.type === "image" && Boolean(a.url);
+  const lastPrompt = typeof a.meta?.prompt === "string" ? a.meta.prompt : "";
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [fromCurrent, setFromCurrent] = useState(canEditCurrent);
+  const [busy, setBusy] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [editError, setEditError] = useState<string>();
+  const failed = typeof a.meta?.engine === "string" && a.meta.engine.startsWith("basic");
+
+  const apply = async () => {
+    if (!onRedo) return;
+    setBusy(true);
+    setEditError(undefined);
+    try {
+      await onRedo(i, text.trim(), fromCurrent && canEditCurrent);
+      setText("");
+      setOpen(false);
+    } catch (e) {
+      setEditError(toApiError(e).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const download = async () => {
+    setDownloading(true);
+    onError(undefined);
+    try {
+      await downloadImage(a.url, fileName, t);
+    } catch (e) {
+      onError(toApiError(e).message);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <figure
+      className={cx(
+        "shrink-0 snap-start overflow-hidden rounded-lg border border-line bg-surface-2",
+        single ? "mx-auto w-full max-w-sm" : "w-64",
+      )}
+    >
+      <div className="relative">
+        {a.type === "video" ? (
+          <video src={mediaSrc(a.url)} poster={mediaSrc(a.thumbnail_url) || undefined} controls playsInline className="block max-h-[520px] w-full object-contain" />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={mediaSrc(a.url)} alt={t("studio.imageAlt", { n: i + 1 })} className="block max-h-[520px] w-full object-contain" />
+        )}
+        {!single && (
+          <figcaption className="tnum absolute top-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">
+            {i + 1}/{total}
+            {typeof a.meta?.role === "string" && ` · ${ROLE_LABEL[a.meta.role] ? t(ROLE_LABEL[a.meta.role]) : ""}`}
+          </figcaption>
+        )}
+        {busy && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-[12px] text-white">
+            <Spinner className="mr-1.5 size-4" /> {t("studio.generating")}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1 border-t border-line bg-surface-1 px-2 py-1.5">
+        <button
+          type="button"
+          onClick={download}
+          disabled={!a.url || downloading}
+          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-fg-2 hover:bg-surface-2 disabled:opacity-50"
+        >
+          {downloading ? <Spinner className="size-3" /> : "↓"} {t("studio.download")}
+        </button>
+        {onRedo && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            disabled={busy}
+            aria-expanded={open}
+            className={cx(
+              "ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium hover:bg-surface-2 disabled:opacity-50",
+              open ? "text-accent" : "text-fg-2",
+            )}
+          >
+            ✎ {t("studio.editImage")}
+          </button>
+        )}
+      </div>
+      {failed && !busy && (
+        <p className="border-t border-line bg-surface-1 px-2 py-1 text-[11px] text-warn">{t("studio.fallbackImage")}</p>
+      )}
+
+      {onRedo && open && (
+        <div className="space-y-2 border-t border-line bg-surface-1 p-2">
+          {lastPrompt && <p className="line-clamp-2 text-[11px] text-fg-3">{t("studio.lastRequest", { prompt: lastPrompt })}</p>}
+          <textarea
+            rows={3}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            maxLength={1000}
+            placeholder={
+              fromCurrent && canEditCurrent
+                ? t("studio.editPlaceholderCurrent")
+                : t("studio.editPlaceholderRedo")
+            }
+            className={cx(inputClass, "resize-y text-[12px]")}
+            disabled={busy}
+          />
+          <div className="flex rounded-md border border-line p-0.5 text-[11px]" role="radiogroup" aria-label={t("studio.editMode")}>
+            {[
+              { v: true, label: t("studio.modeCurrent"), disabled: !canEditCurrent },
+              { v: false, label: t("studio.modeRedo"), disabled: false },
+            ].map((o) => (
+              <button
+                key={o.label}
+                type="button"
+                role="radio"
+                aria-checked={fromCurrent === o.v}
+                disabled={o.disabled || busy}
+                onClick={() => setFromCurrent(o.v)}
+                className={cx(
+                  "flex-1 rounded px-1.5 py-1 font-medium disabled:opacity-40",
+                  fromCurrent === o.v ? "bg-accent text-on-accent" : "text-fg-2 hover:bg-surface-2",
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {editError && (
+            <p role="alert" className="rounded-md bg-bad/10 px-2 py-1.5 text-[11px] leading-relaxed text-bad">
+              {editError}
+            </p>
+          )}
+          <Button size="sm" className="w-full" onClick={apply} disabled={busy || (fromCurrent && canEditCurrent && !text.trim())}>
+            {busy ? <Spinner className="size-3" /> : "↻"} {fromCurrent && canEditCurrent ? t("studio.applyEdit") : t("studio.redo")}
+          </Button>
+        </div>
+      )}
+    </figure>
+  );
+}
+
+export const ROLE_LABEL: Record<string, MessageKey> = {
+  designed: "studio.roleDesigned",
+  photo: "studio.rolePhoto",
+  video: "studio.videoBadge",
+  overlay: "studio.roleOverlay",
+  panel: "studio.rolePanel",
+  center: "studio.roleCenter",
+};
+
+export function AudioTrack({ asset }: { asset: Asset }) {
+  const t = useT();
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-surface-2 p-3">
+      <p className="flex items-center gap-1.5 text-[13px] font-medium">
+        <IconMusic /> {t("studio.bgm")}
+      </p>
+      {asset.meta?.prompt && <p className="mt-0.5 text-[12px] text-fg-3">{asset.meta.prompt}</p>}
+      <audio src={asset.url} controls className="mt-2 w-full" preload="none" />
+      {asset.meta?.note && <p className="mt-2 text-[12px] leading-relaxed text-fg-3">{asset.meta.note}</p>}
+    </div>
+  );
+}

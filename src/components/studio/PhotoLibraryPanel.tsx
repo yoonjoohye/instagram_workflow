@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/i18n/client";
 import * as lib from "@/lib/photoLibrary";
-import { Button, cx } from "./ui";
+import { Button, cx } from "@/components/ui";
 
 /** 사진 폴더 연결 상태·색인 진행·'주제로 사진 찾기' 버튼. 색인은 연결돼 있으면 들어올 때마다 새 사진만 이어서 합니다. */
 export function PhotoLibraryPanel({
