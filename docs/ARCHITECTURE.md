@@ -30,6 +30,7 @@
 | `i18n.py` | 서버 메시지(한국어) → 요청 언어 번역표 |
 | `routers/auth.py` | Instagram 로그인·콜백, 여러 계정 연결·전환, **앱 로그인 코드 교환**, 로컬 테스트 로그인, 데이터 삭제 콜백 |
 | `routers/studio.py` | 게시물 만들기: 업로드, 조사, 구성, 장별 이미지, 음악, 마무리 |
+| `routers/soundtrack.py` | **음악 넣기**(사진 → 릴스·동영상 스토리)·**동영상 편집**(자르기·소리·음악·대표 화면), 기본 제공 곡, 내 음원 등록 |
 | `routers/workflow.py` | 만든 게시물 목록·수정·삭제, **Instagram 게시** |
 | `routers/insights.py` | 대시보드·게시물 성과, 매일 cron |
 | `routers/autoreply.py` · `webhooks.py` | 댓글 자동 응답 규칙 / Meta Webhook 수신 |
@@ -57,6 +58,16 @@ PostForm (src/components/studio/PostForm.tsx)
 `status: "publishing"` 으로 돌려주며, 화면(`Review.tsx`)이 같은 요청을 다시 보내 이어서 올립니다.
 스토리는 24시간 뒤 사라지므로 '인스타에서 삭제됨' 동기화에서 제외합니다.
 
+**음악 넣기·동영상 편집**은 `services/studio/soundtrack.py` 가 ffmpeg(`imageio-ffmpeg` 패키지에 들어 있는 실행 파일)로 합니다.
+
+- `PUT /studio/{job}/soundtrack` — 사진을 차례로 보여 주는 영상에 음악을 입힙니다. 피드는 릴스 한 개, 스토리는 장마다 영상.
+  결과는 `plan["soundtrack"]` 에 두고 사진 자체(`assets`)는 그대로라서 `DELETE` 로 빼면 다시 사진으로 올라갑니다.
+  만든 뒤 사진이 바뀌면 `stale` 이 되고, 화면이 게시 직전에 같은 설정으로 다시 만듭니다. 게시(`workflow.publish_job`)는 이 영상으로 바꿔 올립니다.
+- `POST /studio/{job}/videos/{i}/edit` — 원본은 `meta.video_edit.source` 에 남겨 두고 **항상 원본에서** 다시 만듭니다 (`reset` 으로 원래대로).
+- 만든 영상은 Vercel Blob 에 올리고 `MediaBlob(kind="render")` 로 기록합니다 (Blob 이 없으면 로컬처럼 DB 에). 다시 만들거나 지울 때 함께 정리합니다.
+- Vercel 60초 안에 끝나도록 빠른 압축 설정을 쓰고, 자르기가 시간 안에 안 끝나면 다시 압축하지 않는 방식으로 대신합니다.
+- 기본 제공 곡은 `backend/assets/music/*.m4a` (직접 만든 곡이라 저작권 문제 없음). 바꾸려면 `scripts/make_music.py` 를 고쳐 다시 만듭니다.
+
 Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 응답이 없거나 혼잡하면 25초 안에 다음 모델로 넘어가고, 실패한 모델은 5분간 건너뜁니다.
 
 ## 프론트엔드 (`src/`)
@@ -64,7 +75,8 @@ Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 
 | 위치 | 내용 |
 |---|---|
 | `app/` | 페이지 (`/`, `/admin/*`, `/privacy`, `/data-deletion`), SEO 파일(`robots.ts`, `sitemap.ts`, `opengraph-image.tsx`, `llms.txt`) |
-| `components/studio/` | 만들기 폼·템플릿·사진 폴더 패널·검수·이미지 목록·음악·인스타 미리보기 |
+| `components/studio/` | 만들기 폼·템플릿·사진 폴더 패널·작업 공간(`Review.tsx`)·이미지 목록·음악 넣기(`SoundtrackCard`, `MusicPicker`)·동영상 편집(`VideoEditor`)·인스타 미리보기 |
+| `components/editor/` | 이미지 편집기 (fabric.js — 글자·스티커·그리기·보정·자르기) |
 | `components/posts/` | 게시물 성과의 상세·자동 응답 대화상자·표 부품 |
 | `components/` | 공통 UI(`ui.tsx`), 차트, 레이아웃(`AdminShell.tsx`), 언어 선택 |
 | `lib/api.ts` | `/api/py` 호출 + `useApi` 훅 |

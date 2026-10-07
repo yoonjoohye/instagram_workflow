@@ -35,6 +35,19 @@ def _story_progress(job: GenerationJob) -> dict | None:
     return {"done": sum(1 for i in ids if i), "total": total}
 
 
+def assets_fingerprint(job: GenerationJob) -> str:
+    """사진이 바뀌었는지 알아보는 값 — 음악 넣은 영상을 만든 뒤 사진을 고치면 영상을 다시 만들어야 합니다."""
+    return "|".join(a.get("url", "") for a in job.assets or [])
+
+
+def _soundtrack(job: GenerationJob) -> dict | None:
+    """사진에 음악을 넣어 만든 영상 (routers/soundtrack.py). stale = 그 뒤에 사진이 바뀜."""
+    data = (job.plan or {}).get("soundtrack") if isinstance(job.plan, dict) else None
+    if not data:
+        return None
+    return {**{k: v for k, v in data.items() if k != "fingerprint"}, "stale": data.get("fingerprint") != assets_fingerprint(job)}
+
+
 def _job_dict(job: GenerationJob) -> dict:
     return {
         "id": job.id,
@@ -59,6 +72,8 @@ def _job_dict(job: GenerationJob) -> dict:
         "story_progress": _story_progress(job),
         # 인스타 음악 추천·선택 (사진 게시물은 게시 후 인스타 앱에서 추가)
         "music": (job.plan or {}).get("music") if isinstance(job.plan, dict) else None,
+        # 사진에 음악을 넣어 만든 영상 — 있으면 피드는 릴스로, 스토리는 동영상 스토리로 올라갑니다.
+        "soundtrack": _soundtrack(job),
     }
 
 
@@ -116,6 +131,11 @@ def patch_job(
     return _job_dict(job)
 
 
+def _video_source(asset: dict) -> str:
+    """올린 원본 동영상 주소 (편집했다면 편집 전 원본)."""
+    return (((asset.get("meta") or {}).get("video_edit") or {}).get("source") or {}).get("url") or asset.get("url", "")
+
+
 @router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 def delete_job(
     job_id: int,
@@ -123,10 +143,12 @@ def delete_job(
     db: Session = Depends(get_db),
 ) -> Response:
     job = _get_job(db, account, job_id)
+    from .soundtrack import discard_renders  # 순환 import 를 피해 여기서
+
     # 올린 동영상은 Blob 에 있어 따로 지웁니다 (다른 작업이 같은 영상을 쓰지 않을 때만).
-    video_urls = [a.get("url", "") for a in (job.assets or []) if a.get("type") == "video"]
+    video_urls = [_video_source(a) for a in (job.assets or []) if a.get("type") == "video"]
     in_use = {
-        a.get("url")
+        _video_source(a)
         for other in db.scalars(select(GenerationJob).where(GenerationJob.account_id == account.id, GenerationJob.id != job.id))
         for a in (other.assets or [])
         if a.get("type") == "video"
@@ -135,10 +157,19 @@ def delete_job(
     for blob in db.scalars(select(MediaBlob).where(MediaBlob.account_id == account.id, MediaBlob.kind == "video")):
         if blob.url in video_urls and blob.url not in in_use:
             db.delete(blob)
-    # 이 작업이 만든 이미지(완성본·글 얹기 전 이미지)도 함께 지웁니다. 사용자가 올린 원본 사진은 남깁니다.
+    # 편집·음악 넣기로 만든 영상
+    renders = [a.get("url", "") for a in (job.assets or []) if (a.get("meta") or {}).get("video_edit")]
+    renders += [o.get("url", "") for o in ((job.plan or {}).get("soundtrack") or {}).get("outputs") or []]
+    discard_renders(db, account, renders)
+    # 이 작업이 만든 이미지(완성본·글 얹기 전 이미지·고른 대표 화면)도 함께 지웁니다. 사용자가 올린 원본 사진은 남깁니다.
     for asset in job.assets or []:
         meta = asset.get("meta") or {}
-        ids = [(asset.get("url") or "").rsplit("/media/", 1)[-1].removesuffix(".jpg"), meta.get("visual_id"), (meta.get("edit") or {}).get("base_id")]
+        ids = [
+            (asset.get("url") or "").rsplit("/media/", 1)[-1].removesuffix(".jpg"),
+            meta.get("visual_id"),
+            (meta.get("edit") or {}).get("base_id"),
+            (meta.get("video_edit") or {}).get("cover_id"),
+        ]
         for blob_id in filter(None, ids):
             blob = db.get(MediaBlob, blob_id)
             if blob is not None and blob.account_id == account.id and blob.kind in ("slide", "visual"):
@@ -175,7 +206,18 @@ def publish_job(
     if not visual:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "발행할 미디어가 없습니다.")
 
-    if job.media_kind == "STORIES":
+    kind = job.media_kind
+    if (track := _soundtrack(job)) is not None:
+        if track["stale"]:
+            raise HTTPException(status.HTTP_409_CONFLICT, "사진이 바뀌었습니다. 음악 넣은 영상을 다시 만들어 주세요.")
+        # 음악 넣은 영상으로 바꿔 올립니다 (스토리는 장마다, 피드는 릴스 한 개)
+        for out in track.get("outputs") or []:
+            i = out["index"] if kind == "STORIES" else 0
+            visual[i] = {"type": "video", "url": _current_media_url(out["url"]), "thumbnail_url": _current_media_url(out["thumbnail_url"])}
+        if kind != "STORIES":
+            visual, kind = visual[:1], "REELS"
+
+    if kind == "STORIES":
         return _publish_stories(db, account, job, visual)
 
     caption = compose_caption(job.caption, job.hashtags or [])
@@ -206,7 +248,7 @@ def publish_job(
 
             if container_id:
                 pass
-            elif job.media_kind == "CAROUSEL":
+            elif kind == "CAROUSEL":
                 children = []
                 video_children = []
                 for asset in visual[:10]:
@@ -235,18 +277,18 @@ def publish_job(
                 container_id = publishing.create_container(
                     client,
                     account.ig_user_id,
-                    kind=job.media_kind,  # type: ignore[arg-type]
+                    kind=kind,  # type: ignore[arg-type]
                     media_url=asset["url"],
                     caption=caption,
                     cover_url=asset.get("thumbnail_url") or None,
-                    share_to_feed=body.share_to_feed if job.media_kind == "REELS" else None,
+                    share_to_feed=body.share_to_feed if kind == "REELS" else None,
                 )
 
             job.ig_container_id = container_id
             job.plan = {**(job.plan or {}), "container_fingerprint": fingerprint}
             db.commit()
 
-            if job.media_kind in {"REELS", "CAROUSEL"} or visual[0]["type"] == "video":
+            if kind in {"REELS", "CAROUSEL"} or visual[0]["type"] == "video":
                 publishing.wait_until_finished(client, container_id)
 
             result = publishing.publish(client, account.ig_user_id, container_id)
@@ -261,6 +303,7 @@ def publish_job(
         raise HTTPException(exc.status, str(exc)) from exc
 
     job.ig_media_id = result["media_id"]
+    job.media_kind = kind  # 음악을 넣었다면 릴스로 올라감
     job.permalink = result.get("permalink", "")
     job.published_at = dt.datetime.now(dt.timezone.utc)
     job.status = "published"

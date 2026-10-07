@@ -11,6 +11,7 @@ import { Avatar, cx } from "@/components/ui";
 export function StoryPreview({ username, avatar, assets }: { username: string; avatar?: string; assets: Asset[] }) {
   const t = useT();
   const [index, setIndex] = useState(0);
+  const [sound, setSound] = useState(false); // 브라우저는 소리 없는 자동 재생만 허용 → 눌러서 켬
   const current = assets[Math.min(index, assets.length - 1)];
   const go = (d: number) => setIndex((i) => Math.max(0, Math.min(assets.length - 1, i + d)));
 
@@ -23,7 +24,7 @@ export function StoryPreview({ username, avatar, assets }: { username: string; a
             src={mediaSrc(current.url)}
             poster={mediaSrc(current.thumbnail_url) || undefined}
             autoPlay
-            muted
+            muted={!sound}
             playsInline
             loop
             className="absolute inset-0 size-full object-cover"
@@ -48,6 +49,16 @@ export function StoryPreview({ username, avatar, assets }: { username: string; a
             <Avatar src={avatar} name={username} size={26} />
             <span className="text-[12px] font-semibold">{username}</span>
             <span className="text-[12px] text-white/70">{t("format.justNow")}</span>
+            {current?.type === "video" && (
+              <button
+                type="button"
+                onClick={() => setSound((v) => !v)}
+                aria-label={sound ? t("media.previewMute") : t("media.previewSound")}
+                className="relative z-10 ml-auto rounded-full bg-black/40 px-2 py-0.5 text-[13px]"
+              >
+                {sound ? "🔊" : "🔇"}
+              </button>
+            )}
           </div>
         </div>
 

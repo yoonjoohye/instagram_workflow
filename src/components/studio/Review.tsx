@@ -13,13 +13,15 @@ import { AudioTrack, MediaStrip } from "@/components/studio/MediaStrip";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { MusicCard } from "@/components/studio/MusicCard";
 import { StoryPreview } from "@/components/studio/StoryPreview";
+import { buildSoundtrack, SoundtrackCard } from "@/components/studio/SoundtrackCard";
+import { VideoEditor } from "@/components/studio/VideoEditor";
 import { Badge, Button, Card, cx, Field, inputClass, Notice, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { useI18n } from "@/i18n/client";
 import { rich } from "@/i18n/rich";
 import { api, toApiError, useApi } from "@/lib/api";
 import { composeCaption, fmtDateTime, KIND_LABEL, parseHashtags, STATUS_LABEL } from "@/lib/format";
 import { statusTone } from "@/lib/status";
-import type { AutoReplyInput, AutoReplyRule, Job, Quota } from "@/lib/types";
+import type { Asset, AutoReplyInput, AutoReplyRule, Job, Quota } from "@/lib/types";
 
 // 편집기(fabric.js)는 열 때만 내려받습니다.
 const ImageEditor = dynamic(() => import("@/components/editor/ImageEditor").then((m) => m.ImageEditor), { ssr: false });
@@ -39,6 +41,8 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+  const [editingVideo, setEditingVideo] = useState<number | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
   const [rewriteHint, setRewriteHint] = useState("");
   const [rewriting, setRewriting] = useState(false);
   // 댓글 자동 응답은 게시 흐름의 일부로 함께 저장합니다 (스토리는 댓글이 없어 제외).
@@ -82,6 +86,17 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
   const original = job.provider.startsWith("original");
   const dirty = caption !== job.caption || hashtags.join(" ") !== (job.hashtags ?? []).join(" ");
   const visual = job.assets.filter((a) => a.type !== "audio");
+  // 음악을 넣어 만든 영상이 있으면 미리보기도 그 영상으로 (피드는 릴스 한 개, 스토리는 장마다)
+  const track = job.soundtrack && !job.soundtrack.stale ? job.soundtrack : null;
+  const shown: Asset[] = !track
+    ? visual
+    : isStory
+      ? visual.map((a, i) => {
+          const out = track.outputs.find((o) => o.index === i);
+          return out ? { type: "video", url: out.url, thumbnail_url: out.thumbnail_url, meta: {} } : a;
+        })
+      : track.outputs.slice(0, 1).map((o) => ({ type: "video", url: o.url, thumbnail_url: o.thumbnail_url, meta: {} }));
+  const publishKind = track && !isStory ? "REELS" : job.media_kind;
   const audio = job.assets.filter((a) => a.type === "audio");
   const overCaption = finalCaption.length > CAPTION_LIMIT;
   const overTags = hashtags.length > HASHTAG_LIMIT;
@@ -115,12 +130,18 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
 
   async function publish() {
     const arLine = arForm && autoReplyOn(arForm) ? t("studio.publishConfirmAutoReply", { summary: autoReplySummary(arForm, t) }) : "";
-    if (!window.confirm(t("studio.publishConfirm", { username: me.username, kind: KIND_LABEL[job!.media_kind], autoReply: arLine }))) return;
+    if (!window.confirm(t("studio.publishConfirm", { username: me.username, kind: KIND_LABEL[publishKind], autoReply: arLine }))) return;
     // 게시 전에 캡션과 자동 응답을 먼저 저장해, 게시되는 순간부터 자동 응답이 동작하게 합니다.
     if ((dirty || arDirty) && !(await save())) return;
     setPublishing(true);
     setError(undefined);
     try {
+      // 음악 넣은 영상을 만든 뒤 사진이 바뀌었다면 같은 설정으로 다시 만들고 올립니다.
+      if (job!.soundtrack?.stale) {
+        setRebuilding(true);
+        onChange(await buildSoundtrack(job!.id, job!.soundtrack, job!.soundtrack.seconds));
+        setRebuilding(false);
+      }
       let published = await api<Job>("/workflow/publish", { method: "POST", json: { job_id: job!.id, share_to_feed: shareToFeed } });
       onChange(published);
       // 스토리는 한 번에 다 못 올리면(서버 시간 제한) 이어서 요청합니다.
@@ -134,6 +155,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
       reload().catch(() => {});
     } finally {
       setPublishing(false);
+      setRebuilding(false);
       quota.reload();
     }
   }
@@ -172,9 +194,15 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
         subtitle={t("studio.livePreviewHint")}
       >
         {isStory ? (
-          <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={visual} />
+          <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={shown} />
         ) : (
-          <InstagramPreview username={me.username} avatar={me.profile_picture_url} assets={visual} caption={finalCaption} music={job.music?.selected} />
+          <InstagramPreview
+            username={me.username}
+            avatar={me.profile_picture_url}
+            assets={shown}
+            caption={finalCaption}
+            music={track ? { title: track.name, artist: "" } : job.music?.selected}
+          />
         )}
 
         {job.status === "published" && (
@@ -203,7 +231,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
                   : quota.loading && <Spinner />}
               {(dirty || arDirty) && <span className="ml-2 font-medium text-warn">· {t("studio.unsaved")}</span>}
             </div>
-            {job.media_kind === "REELS" && (
+            {publishKind === "REELS" && (
               <label className="flex items-center gap-2 text-[13px] text-fg-2">
                 <input type="checkbox" checked={shareToFeed} onChange={(e) => setShareToFeed(e.target.checked)} className="accent-[var(--accent)]" />
                 {t("studio.shareToFeed")}
@@ -230,7 +258,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
                       : t("studio.publish")}
               </Button>
             </div>
-            {publishing && <p className="text-[12px] text-fg-3">{t("studio.videoWait")}</p>}
+            {publishing && <p className="text-[12px] text-fg-3">{rebuilding ? t("media.rebuilding") : t("studio.videoWait")}</p>}
           </div>
         )}
         {locked && arDirty && (
@@ -268,6 +296,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
             filePrefix={`post-${job.id}`}
             canRedoFromScratch={!original}
             onManualEdit={!locked ? (i) => setEditing(i) : undefined}
+            onVideoEdit={!locked ? (i) => setEditingVideo(i) : undefined}
             onRedo={
               !locked
                 ? async (i, instruction, fromCurrent) => {
@@ -315,6 +344,8 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
 
         {/* 휴대폰·태블릿: 미리보기를 편집 사이에 (넓은 화면은 오른쪽에 고정) */}
         <div className="lg:hidden">{preview}</div>
+
+        {(!locked || job.soundtrack) && <SoundtrackCard job={job} locked={locked} onChange={onChange} />}
 
         {job.music && <MusicCard job={job} locked={locked} onChange={onChange} />}
 
@@ -405,6 +436,15 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
           }}
           onClose={() => setEditing(null)}
           onSaved={reload}
+        />
+      )}
+      {editingVideo !== null && visual[editingVideo]?.type === "video" && (
+        <VideoEditor
+          jobId={job.id}
+          index={job.assets.indexOf(visual[editingVideo])}
+          asset={visual[editingVideo]}
+          onClose={() => setEditingVideo(null)}
+          onSaved={onChange}
         />
       )}
     </div>

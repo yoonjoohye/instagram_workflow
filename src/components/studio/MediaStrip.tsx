@@ -61,6 +61,7 @@ export function MediaStrip({
   assets,
   onRedo,
   onManualEdit,
+  onVideoEdit,
   canRedoFromScratch = true,
   filePrefix = "post",
 }: {
@@ -68,6 +69,8 @@ export function MediaStrip({
   onRedo?: RedoFn;
   /** 이미지 편집기 열기 (글자·스티커·그리기·보정·자르기) */
   onManualEdit?: (index: number) => void;
+  /** 동영상 편집 열기 (자르기·소리·음악·대표 화면) */
+  onVideoEdit?: (index: number) => void;
   /** 원본 그대로 게시하는 작업은 '처음부터 다시'가 없음 */
   canRedoFromScratch?: boolean;
   filePrefix?: string;
@@ -120,6 +123,7 @@ export function MediaStrip({
             fileName={fileName(a, i)}
             onRedo={onRedo}
             onManualEdit={onManualEdit}
+            onVideoEdit={onVideoEdit}
             canRedoFromScratch={canRedoFromScratch}
             onError={setError}
           />
@@ -137,6 +141,7 @@ export function MediaItem({
   fileName,
   onRedo,
   onManualEdit,
+  onVideoEdit,
   canRedoFromScratch = true,
   onError,
 }: {
@@ -147,6 +152,7 @@ export function MediaItem({
   fileName: string;
   onRedo?: RedoFn;
   onManualEdit?: (index: number) => void;
+  onVideoEdit?: (index: number) => void;
   canRedoFromScratch?: boolean;
   onError: (message?: string) => void;
 }) {
@@ -208,6 +214,9 @@ export function MediaItem({
             {typeof a.meta?.role === "string" && ` · ${ROLE_LABEL[a.meta.role] ? t(ROLE_LABEL[a.meta.role]) : ""}`}
           </figcaption>
         )}
+        {Boolean(a.meta?.video_edit) && (
+          <span className="absolute top-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">✂️ {t("media.edited")}</span>
+        )}
         {busy && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-[12px] text-white">
             <Spinner className="mr-1.5 size-4" /> {t("studio.generating")}
@@ -232,6 +241,15 @@ export function MediaItem({
             className="ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-fg-2 hover:bg-surface-2 disabled:opacity-50"
           >
             ✏️ {t("studio.manualEdit")}
+          </button>
+        )}
+        {onVideoEdit && a.type === "video" && (
+          <button
+            type="button"
+            onClick={() => onVideoEdit(i)}
+            className="ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-fg-2 hover:bg-surface-2"
+          >
+            ✂️ {t("media.editVideo")}
           </button>
         )}
         {onRedo && a.type === "image" && (
