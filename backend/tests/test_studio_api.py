@@ -192,3 +192,27 @@ def test_manual_edit_keeps_story_links(client, login, account, db):
     assert r.json()["asset"]["meta"]["story_links"] == [
         {"kind": "link", "url": "https://shop.example.com"}, {"kind": "post", "url": "https://instagram.com/p/x"},
     ]
+
+
+def test_manual_post_writes_caption_from_photos_topic_and_concept(monkeypatch, client, login, account, db):
+    seen = {}
+
+    def fake(model, parts, cfg=None, **_):
+        seen["images"] = sum(1 for p in parts if "inlineData" in p)
+        seen["text"] = parts[-1]["text"]
+        return {"candidates": [{"content": {"parts": [{"text": json.dumps({"caption_parts": ["노을 지는 분수 앞에서 🌇"], "hashtags": ["에든버러"]})}]}}]}
+
+    monkeypatch.setattr(gemini, "call", fake)
+    login(account)
+    up = client.post("/media/uploads", files={"file": ("a.jpg", jpeg("red"), "image/jpeg")}).json()["id"]
+    job = client.post("/studio/manual", json={
+        "upload_ids": [up], "prompt": "에든버러 여행", "style": "필름 감성", "caption_format": "", "write_caption": True,
+    }).json()
+    assert job["caption"] == "노을 지는 분수 앞에서 🌇" and job["hashtags"] == ["에든버러"]
+    assert seen["images"] == 1 and "에든버러 여행" in seen["text"] and "필름 감성" in seen["text"]
+
+    # Gemini 가 실패해도 작업은 만들고 안내만
+    client.cookies.set("lang", "ko")
+    monkeypatch.setattr(gemini, "call", lambda *a, **k: (_ for _ in ()).throw(gemini.GeminiError("quota exceeded")))
+    job = client.post("/studio/manual", json={"upload_ids": [up], "write_caption": True}).json()
+    assert job["caption"] == "" and "자동으로 쓰지 못했습니다" in job["error"]

@@ -1,7 +1,9 @@
 "use client";
 
 import { upload as blobUpload } from "@vercel/blob/client";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+import { useMe } from "@/components/AdminShell";
 import { useI18n } from "@/i18n/client";
 import type { MessageKey } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
@@ -14,6 +16,9 @@ import { groupOf, TEMPLATE_GROUPS, TEMPLATE_ICON, type TemplateGroup, type Templ
 import { captureCover, uploadImageBlob, uploadPhoto } from "@/lib/uploads";
 import { moveItem, useDragSort } from "@/lib/useDragSort";
 
+// 편집기(fabric.js)는 열 때만 내려받습니다.
+const ImageEditor = dynamic(() => import("@/components/editor/ImageEditor").then((m) => m.ImageEditor), { ssr: false });
+
 const MAX_PHOTOS = 8;
 
 // 올릴 수 있는 사진·동영상 수 (게시물은 최대 10장까지 Gemini가 구성)
@@ -24,7 +29,16 @@ const MAX_REFS = 3;
 
 type Research = { notes: string; sources: { title: string; uri: string }[]; warning: string };
 
-type Photo = { key: string; file: File; preview: string; kind: "image" | "video"; auto?: boolean };
+type Photo = {
+  key: string;
+  file: File;
+  preview: string;
+  kind: "image" | "video";
+  auto?: boolean;
+  /** 꾸몄다면 편집 전 원본과 꾸민 내용 — 다시 열면 이어서 고칠 수 있게 (올릴 때는 꾸민 결과 file 을 씀) */
+  original?: { file: File; preview: string };
+  layers?: string;
+};
 
 // auto = 폴더에서 자동으로 고름
 type Step = { label: string; done: number; total: number };
@@ -57,8 +71,27 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
   const [libNotice, setLibNotice] = useState<{ tone: "good" | "warn"; text: string }>();
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = step !== null;
+  const { me } = useMe();
+  const [editing, setEditing] = useState<number | null>(null);
 
-  useEffect(() => () => photos.forEach((p) => URL.revokeObjectURL(p.preview)), []); // eslint-disable-line react-hooks/exhaustive-deps
+  /** 편집기에서 꾸민 결과로 바꿉니다 (원본은 남겨 다시 열 때 씀). */
+  const saveEdit = (i: number, image: Blob, layers: string) =>
+    setPhotos((prev) =>
+      prev.map((p, j) => {
+        if (j !== i) return p;
+        if (p.original) URL.revokeObjectURL(p.preview); // 이전에 꾸민 결과
+        const name = p.file.name.replace(/\.[^.]+$/, "") + "-edited.jpg";
+        return {
+          ...p,
+          original: p.original ?? { file: p.file, preview: p.preview },
+          file: new File([image], name, { type: "image/jpeg" }),
+          preview: URL.createObjectURL(image),
+          layers,
+        };
+      }),
+    );
+
+  useEffect(() => () => photos.forEach((p) => [p.preview, p.original?.preview].forEach((u) => u && URL.revokeObjectURL(u))), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function addFiles(list: FileList | File[]) {
     const all = Array.from(list).filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
@@ -94,6 +127,7 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
   const remove = (i: number) =>
     setPhotos((prev) => {
       URL.revokeObjectURL(prev[i].preview);
+      if (prev[i].original) URL.revokeObjectURL(prev[i].original!.preview);
       return prev.filter((_, k) => k !== i);
     });
 
@@ -182,8 +216,22 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
     setError(undefined);
     try {
       const ids = await uploadAll(photos);
-      setStep({ label: t("studio.stepFinalize"), done: 1, total: 1 });
-      onCreated(await api<Job>("/studio/manual", { method: "POST", json: { upload_ids: ids, post_type: postType, prompt: prompt.trim() } }));
+      // 사진·주제 메모·컨셉을 보고 게시글도 바로 써 둡니다 (스토리는 캡션이 없어 생략)
+      setStep({ label: postType === "story" ? t("studio.stepFinalize") : t("studio.stepWriteCaption"), done: 1, total: 1 });
+      onCreated(
+        await api<Job>("/studio/manual", {
+          method: "POST",
+          json: {
+            upload_ids: ids,
+            post_type: postType,
+            prompt: prompt.trim(),
+            style: effStyle,
+            caption_format: postType === "story" ? "" : effFormat,
+            write_caption: postType !== "story",
+            language: locale,
+          },
+        }),
+      );
     } catch (err) {
       setError(toApiError(err).message);
     } finally {
@@ -414,7 +462,18 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
                     {i + 1}
                     {p.kind === "video" && ` · ▶ ${t("studio.videoBadge")}`}
                     {p.auto && ` · ${t("studio.libAutoBadge")}`}
+                    {p.layers && ` · ✏️`}
                   </span>
+                  {!busy && p.kind === "image" && (
+                    <button
+                      type="button"
+                      onClick={() => setEditing(i)}
+                      aria-label={t("studio.decoratePhoto", { n: i + 1 })}
+                      className="absolute top-1 right-1 flex h-7 items-center gap-0.5 rounded-md bg-black/60 px-1.5 text-[12px] font-medium text-white hover:bg-black/80"
+                    >
+                      ✏️ <span className="hidden sm:inline">{t("studio.decorate")}</span>
+                    </button>
+                  )}
                   {!busy && (
                     <span className="absolute inset-x-0 bottom-0 flex justify-between bg-black/55 px-0.5 py-0.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
                       <button type="button" onClick={() => move(i, -1)} className="flex h-7 min-w-7 items-center justify-center px-1.5 text-[13px] text-white" aria-label={t("studio.moveEarlier")}>
@@ -616,6 +675,24 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
           </div>
         )}
       </form>
+      {editing !== null && photos[editing]?.kind === "image" && (
+        <ImageEditor
+          index={editing}
+          local={{
+            src: photos[editing].original?.preview ?? photos[editing].preview,
+            layers: photos[editing].layers,
+            onSave: (image, layers) => saveEdit(editing, image, layers),
+          }}
+          preview={{
+            kind: postType === "story" ? "story" : "feed",
+            assets: photos.map((p) => ({ type: p.kind, url: p.preview, thumbnail_url: "", meta: {} })),
+            username: me.username,
+            avatar: me.profile_picture_url,
+            caption: prompt.trim(),
+          }}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </Card>
   );
 }

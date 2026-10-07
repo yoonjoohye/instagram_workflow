@@ -52,6 +52,7 @@ CATALOG: dict[str, tuple[str, str]] = {
     "음악을 넣을 사진이 없습니다.": ("There are no photos to add music to.", "音楽を入れる写真がありません。"),
     "동영상이 섞인 게시물은 동영상마다 '영상 편집'에서 음악을 넣어 주세요.": ("For posts with videos, add music to each video with 'Edit video'.", "動画を含む投稿は、動画ごとに「動画を編集」で音楽を入れてください。"),
     "해시태그를 만들지 못했습니다: {e}": ("Couldn't make hashtags: {e}", "ハッシュタグを作成できませんでした: {e}"),
+    "캡션을 자동으로 쓰지 못했습니다. '✨ 자동 작성'을 다시 눌러 주세요. ({e})": ("Couldn't write the caption automatically. Tap '✨ Auto-write' to try again. ({e})", "キャプションを自動で書けませんでした。「✨ 自動作成」をもう一度押してください。({e})"),
     "순서가 올바르지 않습니다.": ("Invalid order.", "順番が正しくありません。"),
     "음악을 골라 주세요.": ("Please pick some music.", "音楽を選んでください。"),
     "사진을 찾을 수 없습니다.": ("Couldn't find the photo.", "写真が見つかりません。"),

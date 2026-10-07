@@ -296,7 +296,11 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
 class ManualIn(BaseModel):
     upload_ids: list[str] = Field(min_length=1, max_length=10)
     post_type: Literal["feed", "story"] = "feed"
-    prompt: str = Field(default="", max_length=2000)  # 적어 둔 주제가 있으면 캡션 다시 쓰기에 참고
+    prompt: str = Field(default="", max_length=2000)  # 주제 메모 — 캡션을 쓸 때 참고
+    style: str = Field(default="", max_length=2000)  # 고른 컨셉의 연출 방향
+    caption_format: str = Field(default="", max_length=2000)  # 고른 컨셉의 캡션 양식
+    write_caption: bool = False  # True 면 사진·주제·컨셉을 보고 캡션·해시태그를 바로 씀 (실패해도 작업은 만듦)
+    language: str | None = Field(default=None, max_length=8)
 
 
 def _original_asset(b: MediaBlob) -> dict:
@@ -308,7 +312,7 @@ def _original_asset(b: MediaBlob) -> dict:
 
 
 @router.post("/studio/manual", status_code=status.HTTP_201_CREATED)
-def manual(body: ManualIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+def manual(body: ManualIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
     """AI 없이 고른 사진·동영상 그대로 작업 공간을 엽니다 (직접 편집·음악·캡션은 거기서)."""
     story = body.post_type == "story"
     blobs = _blobs(db, account, body.upload_ids)[: svc.MAX_STORIES if story else 10]
@@ -327,11 +331,23 @@ def manual(body: ManualIn, account: Account = Depends(current_account), db: Sess
             "slides": [{"role": "photo"} for _ in blobs],
             "upload_ids": body.upload_ids,
             "topic": body.prompt.strip(),
+            "style": body.style,
+            "caption_format": body.caption_format,
             "original": True,
             "post_type": body.post_type,
         },
         assets=[_original_asset(b) for b in blobs],
     )
+    if body.write_caption and not story:
+        try:
+            written = svc.rewrite_caption(
+                topic=body.prompt.strip(), style=body.style, caption="", instruction="",
+                caption_format=body.caption_format, language=norm_lang(body.language or lang_of(request)),
+                images=_job_images(db, account, job),
+            )
+            job.caption, job.hashtags = written["caption"], written["hashtags"]
+        except svc.GeminiError as exc:
+            job.error = f"캡션을 자동으로 쓰지 못했습니다. '✨ 자동 작성'을 다시 눌러 주세요. ({exc})"
     db.add(job)
     db.commit()
     db.refresh(job)

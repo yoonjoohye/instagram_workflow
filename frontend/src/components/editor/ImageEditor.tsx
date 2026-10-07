@@ -71,20 +71,29 @@ function loadFont(key: string): Promise<void> {
 const blobIdOf = (url: string) => url.split("/media/").pop()!.replace(/\.jpg$/, "");
 const SPECIAL = new Set(["base", "vignette"]);
 
+/** 아직 올리지 않은 사진(만들기 화면)을 꾸밀 때: 서버 대신 화면으로 결과를 돌려줍니다. */
+export type LocalSource = {
+  src: string; // 편집 전 원본 (브라우저 안 주소)
+  layers?: string; // 이전에 꾸민 내용 — 다시 열면 그대로 고칠 수 있게
+  onSave: (image: Blob, layers: string) => void;
+};
+
 export function ImageEditor({
   jobId,
   index,
   asset,
+  local,
   preview,
   onClose,
   onSaved,
 }: {
-  jobId: number;
+  jobId?: number;
   index: number;
-  asset: Asset;
+  asset?: Asset;
+  local?: LocalSource;
   preview?: EditorPreview;
   onClose: () => void;
-  onSaved: () => Promise<void> | void;
+  onSaved?: () => Promise<void> | void;
 }) {
   const t = useT();
   const fonts = useApi<{ data: FontItem[] }>("/studio/fonts");
@@ -120,8 +129,10 @@ export function ImageEditor({
   const adjustRef = useRef(adjust);
   const cropRef = useRef(crop);
 
-  const meta = (asset.meta ?? {}) as { edit?: { base_id: string; layers: string } };
-  const baseId = meta.edit?.base_id || blobIdOf(asset.url);
+  const meta = (local ? { edit: local.layers ? { base_id: "", layers: local.layers } : undefined } : asset?.meta ?? {}) as {
+    edit?: { base_id: string; layers: string };
+  };
+  const baseId = meta.edit?.base_id || (asset ? blobIdOf(asset.url) : "");
   const find = (name: string) => canvas.current?.getObjects().find((o) => (o as Named).name === name);
   const base = () => find("base") as F.FabricImage | undefined;
 
@@ -216,7 +227,7 @@ export function ImageEditor({
           setAdjustState(adjustRef.current);
           setCropState(cropRef.current);
         } else {
-          const img = await f.FabricImage.fromURL(mediaSrc(`/api/py/media/${baseId}.jpg`), { crossOrigin: "anonymous" });
+          const img = await f.FabricImage.fromURL(local ? local.src : mediaSrc(`/api/py/media/${baseId}.jpg`), { crossOrigin: "anonymous" });
           const long = Math.max(img.width, img.height);
           const scale = long > 1920 ? 1920 / long : 1;
           size.current = { w: Math.round(img.width * scale), h: Math.round(img.height * scale) };
@@ -625,6 +636,11 @@ export function ImageEditor({
         adjust: adjustRef.current,
         crop: cropRef.current,
       };
+      if (local) {
+        local.onSave(image, JSON.stringify(layers));
+        onClose();
+        return;
+      }
       const body = new FormData();
       body.append("file", image, "edited.jpg");
       body.append("layers", JSON.stringify(layers));
@@ -633,7 +649,7 @@ export function ImageEditor({
       const res = await fetch(`/api/py/studio/${jobId}/slides/${index}/edit`, { method: "POST", body, credentials: "include" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.detail || res.status);
-      await onSaved();
+      await onSaved?.();
       onClose();
     } catch (e) {
       setError(t("editor.saveFailed", { e: e instanceof Error ? e.message : String(e) }));
