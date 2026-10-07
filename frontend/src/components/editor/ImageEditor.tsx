@@ -12,16 +12,17 @@
  */
 import type * as F from "fabric";
 import { filmFilters } from "./filmFilters";
+import { composite, removeBackground } from "@/lib/cutout";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
 import { Button, cx, Spinner } from "@/components/ui";
 import { useT } from "@/i18n/client";
-import { useApi } from "@/lib/api";
+import { api, toApiError, useApi } from "@/lib/api";
 import { mediaSrc } from "@/lib/format";
 import type { Asset } from "@/lib/types";
 
-type Tab = "text" | "sticker" | "draw" | "adjust" | "crop";
+type Tab = "text" | "sticker" | "draw" | "adjust" | "bg" | "crop";
 type Brush = "pen" | "marker" | "neon" | "eraser";
 type Layers = { v: 1; w: number; h: number; canvas: object; adjust?: Adjust; crop?: Crop };
 type Adjust = {
@@ -49,7 +50,11 @@ type Adjust = {
 };
 type Crop = { zoom: number; turns: number; straighten: number; flip: boolean };
 type FontItem = { key: string; label: string; preview: string };
-type Named = F.FabricObject & { name?: string; isEditing?: boolean };
+type Named = F.FabricObject & { name?: string; isEditing?: boolean; orig?: string };
+type Sticker = { id: string; url: string; width: number; height: number };
+// 편집 기록·저장에 함께 남길 우리 속성 (orig: 배경을 바꾸기 전 원본 사진 주소)
+const KEEP = ["name", "selectable", "evented", "link", "orig"];
+const BG_COLORS = ["#ffffff", "#000000", "#f4ece1", "#ffd6e0", "#cfe8ff", "#d8f3dc", "#fff1b8", "#e9d5ff"];
 
 export type EditorPreview = { kind: "feed" | "story"; assets: Asset[]; username: string; avatar?: string; caption: string };
 
@@ -179,6 +184,13 @@ export function ImageEditor({
   const [showPreview, setShowPreview] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
+  // AI 배경 지우기·내 스티커
+  const [aiBusy, setAiBusy] = useState<{ label: string; progress?: number } | null>(null);
+  const [cutBg, setCutBg] = useState(true);
+  const [hasCutout, setHasCutout] = useState(false);
+  const cutout = useRef<{ png: Blob; original: Blob } | null>(null);
+  const stickerFile = useRef<HTMLInputElement>(null);
+  const stickers = useApi<{ data: Sticker[] }>("/studio/stickers");
   const isStory = preview?.kind === "story";
   const myPosts = useApi<{ data: { id: number; status: string; permalink: string; media_kind: string; assets: Asset[] }[] }>(
     isStory ? "/workflow/jobs?limit=30" : null,
@@ -215,7 +227,7 @@ export function ImageEditor({
     const c = canvas.current;
     const h = history.current;
     if (!c || h.restoring) return;
-    const json = JSON.stringify({ canvas: c.toObject(["name", "selectable", "evented", "link"]), adjust: adjustRef.current, crop: cropRef.current });
+    const json = JSON.stringify({ canvas: c.toObject(KEEP), adjust: adjustRef.current, crop: cropRef.current });
     if (h.stack[h.at] === json) return;
     h.stack = h.stack.slice(0, h.at + 1).concat(json).slice(-40);
     h.at = h.stack.length - 1;
@@ -365,11 +377,25 @@ export function ImageEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, brush, ready]);
 
-  // Delete 키로 지우기 (글자 편집 중이 아닐 때)
+  // 단축키: Ctrl/⌘+Z 되돌리기, Ctrl/⌘+Shift+Z·Ctrl+Y 다시 하기, Delete 로 지우기
+  // (입력칸에 쓰는 중이거나 글자를 고치는 중이면 브라우저 기본 동작 그대로)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const obj = canvas.current?.getActiveObject() as Named | undefined;
-      if ((e.key === "Delete" || e.key === "Backspace") && obj && !obj.isEditing && !SPECIAL.has(obj.name ?? "")) {
+      const el = e.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) && el.getAttribute("type") !== "range";
+      if (typing || obj?.isEditing) return;
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (mod && (key === "z" || key === "y")) {
+        e.preventDefault();
+        const h = history.current;
+        const redo = key === "y" || e.shiftKey;
+        if (redo && h.at < h.stack.length - 1) restore(h.at + 1);
+        else if (!redo && h.at > 0) restore(h.at - 1);
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && obj && !SPECIAL.has(obj.name ?? "")) {
         e.preventDefault();
         removeSelected();
       }
@@ -563,6 +589,137 @@ export function ImageEditor({
     snapshot();
   }
 
+  // ── AI 배경 지우기(누끼) · 내 스티커 ─────────────────────────────────
+  async function cut(blob: Blob): Promise<Blob> {
+    setAiBusy({ label: t("editor.cutting") });
+    try {
+      return await removeBackground(blob, (p) => setAiBusy({ label: t("editor.modelDownloading"), progress: Math.round(p) }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  /** 사진(base)을 다른 이미지로 바꿈 — 자르기·보정·글자는 그대로 */
+  async function setBase(url: string) {
+    const img = base();
+    if (!img) return;
+    await img.setSrc(mediaSrc(url), { crossOrigin: "anonymous" });
+    applyAdjust(adjustRef.current, true);
+  }
+
+  async function uploadJpeg(blob: Blob): Promise<string> {
+    const body = new FormData();
+    body.append("file", blob, "background.jpg");
+    const res = await fetch("/api/py/media/uploads", { method: "POST", body, credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || res.status);
+    return data.url as string;
+  }
+
+  /** 사진의 배경을 지우고(처음 한 번) 흰 배경으로. 이후엔 배경색·흐린 원본으로 바꿀 수 있음 */
+  async function removePhotoBackground() {
+    const img = base() as Named | undefined;
+    if (!img) return;
+    setError(undefined);
+    try {
+      const orig = img.orig || (img as F.FabricImage).getSrc();
+      const original = await (await fetch(mediaSrc(orig), { credentials: "include" })).blob();
+      const png = await cut(original);
+      cutout.current = { png, original };
+      img.orig = orig;
+      setHasCutout(true);
+      await changeBackground({ color: "#ffffff" });
+    } catch (e) {
+      setError(t("editor.cutFailed", { e: toApiError(e).message }));
+    }
+  }
+
+  async function changeBackground(bg: { color: string } | { blur: true }) {
+    const c = cutout.current;
+    if (!c) return;
+    setAiBusy({ label: t("editor.applying") });
+    try {
+      const out = await composite(c.png, "color" in bg ? bg : { blurOf: c.original });
+      await setBase(await uploadJpeg(out));
+    } catch (e) {
+      setError(t("editor.cutFailed", { e: toApiError(e).message }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function restoreOriginalPhoto() {
+    const img = base() as Named | undefined;
+    if (!img?.orig) return;
+    setAiBusy({ label: t("editor.applying") });
+    try {
+      await setBase(img.orig);
+      img.orig = undefined;
+      cutout.current = null;
+      setHasCutout(false);
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function placeSticker(st: Sticker) {
+    const f = fab.current!;
+    const img = await f.FabricImage.fromURL(mediaSrc(st.url), { crossOrigin: "anonymous" });
+    img.scale((size.current.w * 0.4) / Math.max(img.width, img.height));
+    img.set(center());
+    add(img);
+  }
+
+  async function saveSticker(blob: Blob): Promise<Sticker> {
+    const body = new FormData();
+    body.append("file", blob, "sticker.png");
+    const res = await fetch("/api/py/studio/stickers", { method: "POST", body, credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || res.status);
+    stickers.reload();
+    return data as Sticker;
+  }
+
+  /** 사진으로 스티커 만들기 (배경 지우기 선택) → 저장하고 바로 붙임 */
+  async function stickerFromFile(file: File) {
+    setError(undefined);
+    try {
+      const png = cutBg ? await cut(file) : file;
+      setAiBusy({ label: t("editor.applying") });
+      await placeSticker(await saveSticker(png));
+    } catch (e) {
+      setError(t("editor.stickerFailed", { e: toApiError(e).message }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  /** 고른 글자·그림·스티커를 내 스티커로 저장 (다른 사진에서도 다시 쓰기) */
+  async function saveSelectionAsSticker() {
+    const o = canvas.current?.getActiveObject() as Named | undefined;
+    if (!o || SPECIAL.has(o.name ?? "")) return;
+    setError(undefined);
+    setAiBusy({ label: t("editor.applying") });
+    try {
+      const blob = await (await fetch(o.toDataURL({ format: "png", multiplier: 2 }))).blob();
+      await saveSticker(blob);
+    } catch (e) {
+      setError(t("editor.stickerFailed", { e: toApiError(e).message }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function deleteSticker(id: string) {
+    if (!window.confirm(t("editor.stickerDeleteConfirm"))) return;
+    try {
+      await api(`/studio/stickers/${id}`, { method: "DELETE" });
+      stickers.reload();
+    } catch (e) {
+      setError(toApiError(e).message);
+    }
+  }
+
   // ── 보정: 사진(base)에만 필터, 비네트는 위에 덮는 막 ─────────────────
   function applyAdjust(next: Adjust, commit = false) {
     adjustRef.current = next;
@@ -668,7 +825,7 @@ export function ImageEditor({
         v: 1,
         w: size.current.w,
         h: size.current.h,
-        canvas: c.toObject(["name", "selectable", "evented", "link"]),
+        canvas: c.toObject(KEEP),
         adjust: adjustRef.current,
         crop: cropRef.current,
       };
@@ -711,6 +868,7 @@ export function ImageEditor({
     { key: "sticker", label: t("editor.tabSticker"), icon: "☺" },
     { key: "draw", label: t("editor.tabDraw"), icon: "✎" },
     { key: "adjust", label: t("editor.tabAdjust"), icon: "◐" },
+    { key: "bg", label: t("editor.tabBackground"), icon: "✂" },
     { key: "crop", label: t("editor.tabCrop"), icon: "⤢" },
   ];
   const previewAssets = preview?.assets.map((a, i) => (i === index && previewUrl ? { ...a, url: previewUrl, type: "image" as const } : a)) ?? [];
@@ -759,6 +917,19 @@ export function ImageEditor({
                 <Spinner className="size-6" />
               </div>
             )}
+            {aiBusy && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/55">
+                <div className="w-64 rounded-xl bg-[#1c1c1f] p-4 text-center text-[13px]">
+                  <Spinner className="mx-auto size-5" />
+                  <p className="mt-2">{aiBusy.label}</p>
+                  {aiBusy.progress !== undefined && (
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                      <div className="h-full bg-[#8b5cf6] transition-[width]" style={{ width: `${aiBusy.progress}%` }} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {selected && !SPECIAL.has(selected.name ?? "") && (
               <div className="absolute top-3 right-3 flex gap-1">
                 <button type="button" onClick={bringFront} className="rounded-full bg-black/60 px-3 py-1.5 text-[12px]">
@@ -785,11 +956,11 @@ export function ImageEditor({
             <div className="min-h-[104px] text-[13px]">
               {tab === "text" && (
                 <div className="space-y-2.5">
-                  <div className="flex items-center gap-2">
-                    <button type="button" onClick={addText} className="shrink-0 rounded-lg bg-white px-3 py-1.5 text-[13px] font-semibold text-black">
+                  <div>
+                    <button type="button" onClick={addText} className="rounded-lg bg-white px-3 py-1.5 text-[13px] font-semibold text-black">
                       + {t("editor.addText")}
                     </button>
-                    <span className="text-[11px] text-white/50">{t("editor.textHint")}</span>
+                    <p className="mt-1.5 text-[11px] text-white/50">{t("editor.textHint")}</p>
                   </div>
                   {textSel && (
                     <>
@@ -830,6 +1001,55 @@ export function ImageEditor({
 
               {tab === "sticker" && (
                 <div className="space-y-2.5">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="mr-1 text-[12px] font-semibold text-white/80">⭐ {t("editor.myStickers")}</span>
+                      <Chip onClick={() => stickerFile.current?.click()}>+ {t("editor.stickerFromPhoto")}</Chip>
+                      <label className="flex items-center gap-1 text-[11px] text-white/70">
+                        <input type="checkbox" checked={cutBg} onChange={(e) => setCutBg(e.target.checked)} className="accent-[#8b5cf6]" />
+                        {t("editor.removeBgToo")}
+                      </label>
+                      {selected && !SPECIAL.has(selected.name ?? "") && <Chip onClick={saveSelectionAsSticker}>{t("editor.saveSelection")}</Chip>}
+                      <input
+                        ref={stickerFile}
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (file) stickerFromFile(file);
+                        }}
+                      />
+                    </div>
+                    {(stickers.data?.data.length ?? 0) > 0 ? (
+                      <Row>
+                        {stickers.data!.data.map((st) => (
+                          <div key={st.id} className="group relative shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => placeSticker(st)}
+                              aria-label={t("editor.addSticker")}
+                              className="flex size-12 items-center justify-center rounded-md bg-[repeating-conic-gradient(#ffffff14_0_25%,transparent_0_50%)] bg-[length:10px_10px] ring-1 ring-white/15 hover:ring-[#8b5cf6]"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={mediaSrc(st.url)} alt="" className="max-h-10 max-w-10 object-contain" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteSticker(st.id)}
+                              aria-label={t("editor.deleteSticker")}
+                              className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-black/80 text-[9px] text-white/80 ring-1 ring-white/30 hover:bg-[#ff3b5c]"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </Row>
+                    ) : (
+                      <p className="text-[11px] text-white/45">{t("editor.myStickersEmpty")}</p>
+                    )}
+                  </div>
                   {isStory && (
                     <div className="space-y-2 rounded-lg border border-white/10 p-2">
                       <p className="text-[12px] font-semibold text-white/80">🔗 {t("editor.storyLinks")}</p>
@@ -902,9 +1122,6 @@ export function ImageEditor({
                         {t(k === "eraser" ? "editor.eraser" : (`editor.brush${k[0].toUpperCase()}${k.slice(1)}` as "editor.brushPen"))}
                       </Chip>
                     ))}
-                    <Chip onClick={() => addShape("rect")}>{t("editor.shapeRect")}</Chip>
-                    <Chip onClick={() => addShape("circle")}>{t("editor.shapeCircle")}</Chip>
-                    <Chip onClick={() => addShape("line")}>{t("editor.shapeLine")}</Chip>
                   </Row>
                   {brush.kind === "eraser" ? (
                     <p className="text-[11px] text-white/50">{t("editor.eraserHint")}</p>
@@ -961,6 +1178,44 @@ export function ImageEditor({
                       </section>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {tab === "bg" && (
+                <div className="space-y-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={removePhotoBackground}
+                      disabled={!!aiBusy}
+                      className="rounded-lg bg-white px-3 py-1.5 text-[13px] font-semibold text-black disabled:opacity-50"
+                    >
+                      ✂ {t("editor.removeBg")}
+                    </button>
+                    {(hasCutout || (base() as Named | undefined)?.orig) && <Chip onClick={restoreOriginalPhoto}>{t("editor.restorePhoto")}</Chip>}
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-white/50">{t("editor.removeBgHint")}</p>
+                  {hasCutout && (
+                    <div className="space-y-1.5">
+                      <p className="text-[12px] text-white/70">{t("editor.newBackground")}</p>
+                      <Row>
+                        {BG_COLORS.map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            aria-label={c}
+                            onClick={() => changeBackground({ color: c })}
+                            className="size-7 shrink-0 rounded-full border border-white/30"
+                            style={{ background: c }}
+                          />
+                        ))}
+                        <label className="relative size-7 shrink-0 cursor-pointer overflow-hidden rounded-full border border-white/30 bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)]" title={t("editor.customColor")}>
+                          <input type="color" className="absolute inset-0 opacity-0" onChange={(e) => changeBackground({ color: e.target.value })} />
+                        </label>
+                        <Chip onClick={() => changeBackground({ blur: true })}>{t("editor.blurredOriginal")}</Chip>
+                      </Row>
+                    </div>
+                  )}
                 </div>
               )}
 

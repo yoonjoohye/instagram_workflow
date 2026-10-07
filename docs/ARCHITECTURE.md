@@ -32,6 +32,7 @@
 | `routers/auth.py` | 회원에 **Instagram(여러 개)·Facebook(하나) 연동** OAuth·콜백, 계정 전환·연동 해제, 앱 연동 티켓·코드 교환, 로컬 테스트 로그인, Meta 데이터 삭제 콜백 |
 | `routers/studio.py` | 게시물 만들기: 업로드, 조사, 구성, 장별 이미지, AI 없이 직접 만들기, 순서 바꾸기, 캡션 다시 쓰기·해시태그 추천, 마무리 |
 | `routers/video.py` | **동영상 편집** (자르기·소리 끄기·대표 화면) |
+| `routers/stickers.py` | **내 스티커** (투명 PNG 저장·목록·삭제, `/api/py/media/<id>.png`) |
 | `routers/workflow.py` | 만든 게시물 목록·수정·삭제, **Instagram 게시** |
 | `routers/insights.py` | 대시보드·게시물 성과, 매일 cron |
 | `routers/autoreply.py` · `webhooks.py` | 댓글 자동 응답 규칙 / Meta Webhook 수신 |
@@ -115,6 +116,12 @@ Gemini 호출은 전부 `services/studio/gemini.py` 를 거칩니다. 모델이 
 그 브라우저엔 회원 세션이 없으므로 화면이 먼저 받은 5분짜리 연동 티켓(`/auth/link-ticket`)을 주소에 붙입니다
 → 콜백이 2분짜리 코드를 앱 주소로 돌려줌 → 앱 화면이 `/auth/app-session?code=` 로 세션을 받습니다.
 돌려줄 수 있는 주소는 `instaautostudio://` 와 같은 와이파이의 Expo Go(`exp://<사설 IP>`)뿐입니다.
+
+## 사진 편집기의 브라우저 AI·필터
+
+- `frontend/src/components/editor/filmFilters.ts` — fabric 필터 3개(WebGL 셰이더 + 픽셀 계산 두 벌): 필름 톤(노출·어두운 영역·검정·곡선), 그레인, 글로우
+- `frontend/src/lib/cutout/` — 배경 지우기(누끼). 워커에서 transformers.js 로 `onnx-community/ormbg-ONNX`(Apache-2.0, 양자화 약 44MB)를 CPU(wasm)로 돌림.
+  사진은 기기 밖으로 나가지 않고, 배경을 바꾼 결과만 업로드합니다. (BiRefNet 은 wasm 메모리 부족, WebGPU 는 기기 한도로 실패하는 기기가 많아 제외. RMBG·ISNet 은 라이선스 때문에 제외)
 
 ## 테스트
 

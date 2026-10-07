@@ -100,6 +100,7 @@ def register_video(body: VideoIn, account: Account = Depends(current_account), d
     return {"id": blob.id, "url": body.url, "thumbnail_url": _media_url(body.cover_id)}
 
 
+@router.get("/media/{blob_id}.png")  # 스티커(투명 PNG) — 저장된 형식(content_type) 그대로 내려줌
 @router.get("/media/{blob_id}.jpg")
 def serve_media(blob_id: str, db: Session = Depends(get_db)) -> Response:
     """공개 이미지 주소 — Instagram 게시 API 가 여기서 사진을 가져갑니다."""
@@ -629,7 +630,7 @@ def render_slide(
 
 
 def _blob_id(url: str) -> str:
-    return (url or "").rsplit("/media/", 1)[-1].removesuffix(".jpg")
+    return (url or "").rsplit("/media/", 1)[-1].removesuffix(".jpg").removesuffix(".png")
 
 
 def _drop(db: Session, account: Account, blob_id: str, *, keep: str = "") -> None:
