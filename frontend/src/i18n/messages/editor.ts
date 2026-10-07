@@ -5,6 +5,10 @@ export default defineMessages({
   ko: {
     storyLinks: "링크·게시물 스티커", linkLabelPh: "보여 줄 글자 (선택)", addLink: "링크 넣기", myPosts: "내 게시물", addPost: "이 게시물 스티커 넣기", postView: "게시물 보기",
     linkNote: "인스타그램은 다른 서비스에서 누를 수 있는 링크 스티커를 붙이지 못하게 해요. 여기서는 모양을 넣어 두고, 게시 후 인스타 앱에서 링크 스티커를 한 번 더 붙여 주세요 (주소는 게시 화면에서 복사할 수 있어요).",
+    exposure: "노출", shadows: "어두운 영역", blacks: "검정 계열", lift: "암부 들어올림", curve: "S자 곡선",
+    grain: "그레인", grainSize: "그레인 크기", grainRough: "거칠기", glow: "글로우", glowRadius: "번짐 크기",
+    glowMode: "글로우 방식", glowScreen: "스크린 (화사하게)", glowSoftLight: "소프트 라이트 (몽환적)",
+    groupBasic: "기본", groupCurve: "곡선", groupEffects: "효과",
     warmth: "따뜻함", fade: "페이드", vignette: "비네트", sharpen: "선명하게", straighten: "수평 맞추기",
     brushPen: "펜", brushMarker: "형광펜", brushNeon: "네온", eraser: "지우개", eraserHint: "지울 그림·글자·스티커를 문지르면 지워져요.",
     shapeRect: "사각형", shapeLine: "선", fill: "채우기", customColor: "다른 색",
@@ -26,6 +30,10 @@ export default defineMessages({
   en: {
     storyLinks: "Link & post stickers", linkLabelPh: "Text to show (optional)", addLink: "Add link", myPosts: "My posts", addPost: "Add a sticker for this post", postView: "View post",
     linkNote: "Instagram doesn't let other services attach tappable link stickers. Add the look here, then add a real link sticker in the Instagram app after publishing (you can copy the address on the publish screen).",
+    exposure: "Exposure", shadows: "Shadows", blacks: "Blacks", lift: "Lift blacks", curve: "S-curve",
+    grain: "Grain", grainSize: "Grain size", grainRough: "Roughness", glow: "Glow", glowRadius: "Glow spread",
+    glowMode: "Glow blend", glowScreen: "Screen (bright)", glowSoftLight: "Soft light (dreamy)",
+    groupBasic: "Basic", groupCurve: "Curve", groupEffects: "Effects",
     warmth: "Warmth", fade: "Fade", vignette: "Vignette", sharpen: "Sharpen", straighten: "Straighten",
     brushPen: "Pen", brushMarker: "Marker", brushNeon: "Neon", eraser: "Eraser", eraserHint: "Rub over drawings, text or stickers to erase them.",
     shapeRect: "Rectangle", shapeLine: "Line", fill: "Fill", customColor: "Other color",
@@ -47,6 +55,10 @@ export default defineMessages({
   ja: {
     storyLinks: "リンク・投稿スタンプ", linkLabelPh: "表示する文字(任意)", addLink: "リンクを追加", myPosts: "自分の投稿", addPost: "この投稿のスタンプを追加", postView: "投稿を見る",
     linkNote: "Instagramでは、他のサービスからタップできるリンクスタンプを付けられません。ここで見た目を入れておき、投稿後にInstagramアプリでリンクスタンプを付け直してください(アドレスは投稿画面でコピーできます)。",
+    exposure: "露光量", shadows: "シャドウ", blacks: "黒レベル", lift: "黒を持ち上げる", curve: "S字カーブ",
+    grain: "粒子", grainSize: "粒子のサイズ", grainRough: "粗さ", glow: "グロー", glowRadius: "にじみの大きさ",
+    glowMode: "グローの合成", glowScreen: "スクリーン(明るく)", glowSoftLight: "ソフトライト(幻想的)",
+    groupBasic: "基本", groupCurve: "カーブ", groupEffects: "効果",
     warmth: "暖かさ", fade: "フェード", vignette: "ビネット", sharpen: "シャープ", straighten: "傾き補正",
     brushPen: "ペン", brushMarker: "マーカー", brushNeon: "ネオン", eraser: "消しゴム", eraserHint: "消したい絵・文字・スタンプをこすると消えます。",
     shapeRect: "四角", shapeLine: "線", fill: "塗りつぶし", customColor: "ほかの色",

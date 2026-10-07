@@ -11,6 +11,7 @@
  *  - 오른쪽(넓은 화면)·미리보기 버튼(휴대폰)에 올라갈 모습을 편집할 때마다 보여 줍니다.
  */
 import type * as F from "fabric";
+import { filmFilters } from "./filmFilters";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
@@ -23,7 +24,29 @@ import type { Asset } from "@/lib/types";
 type Tab = "text" | "sticker" | "draw" | "adjust" | "crop";
 type Brush = "pen" | "marker" | "neon" | "eraser";
 type Layers = { v: 1; w: number; h: number; canvas: object; adjust?: Adjust; crop?: Crop };
-type Adjust = { preset: string; brightness: number; contrast: number; warmth: number; saturation: number; fade: number; vignette: number; sharpen: number };
+type Adjust = {
+  preset: string;
+  brightness: number;
+  contrast: number;
+  warmth: number;
+  saturation: number;
+  fade: number;
+  vignette: number;
+  sharpen: number;
+  // 필름 보정 (Camera Raw 의 기본·곡선·효과)
+  exposure: number;
+  shadows: number;
+  blacks: number;
+  lift: number;
+  curve: number;
+  grain: number;
+  grainSize: number;
+  grainRough: number;
+  // 뽀얀 글로우: 흐린 사본을 스크린/소프트 라이트로 겹침
+  glow: number;
+  glowRadius: number;
+  glowSoft: number; // 0 = 스크린, 1 = 소프트 라이트
+};
 type Crop = { zoom: number; turns: number; straighten: number; flip: boolean };
 type FontItem = { key: string; label: string; preview: string };
 type Named = F.FabricObject & { name?: string; isEditing?: boolean };
@@ -37,14 +60,19 @@ const SHAPES = {
   arrow: "M2 12h16M12 5l7 7-7 7",
   star: "M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z",
 } as const;
-const NO_ADJUST: Adjust = { preset: "none", brightness: 0, contrast: 0, warmth: 0, saturation: 0, fade: 0, vignette: 0, sharpen: 0 };
+const NO_ADJUST: Adjust = {
+  preset: "none", brightness: 0, contrast: 0, warmth: 0, saturation: 0, fade: 0, vignette: 0, sharpen: 0,
+  exposure: 0, shadows: 0, blacks: 0, lift: 0, curve: 0, grain: 0, grainSize: 0.25, grainRough: 0.3,
+  glow: 0, glowRadius: 0.5, glowSoft: 0,
+};
 const NO_CROP: Crop = { zoom: 1, turns: 0, straighten: 0, flip: false };
 // 필터: 보정 값 묶음 (사용자가 슬라이더로 더 조정 가능)
 const PRESETS: Record<string, Partial<Adjust> & { mono?: boolean; sepia?: boolean }> = {
   none: {},
   clear: { brightness: 0.06, contrast: 0.12, saturation: 0.25 },
-  film: { contrast: -0.08, warmth: 0.25, fade: 0.35, saturation: -0.1 },
-  dreamy: { brightness: 0.1, contrast: -0.15, saturation: -0.15, warmth: 0.1, fade: 0.25 },
+  // 필름 카메라 감성: 노출 +0.5, 대비 -15, 어두운 영역 +40, 검정 +15, 암부 들어올린 완만한 S자 곡선, 그레인 25
+  film: { exposure: 0.5, contrast: -0.15, shadows: 0.4, blacks: 0.15, lift: 0.3, curve: 0.3, grain: 0.25, warmth: 0.08 },
+  dreamy: { brightness: 0.06, contrast: -0.1, saturation: -0.15, warmth: 0.1, fade: 0.2, glow: 0.4 },
   fade: { fade: 0.55, saturation: -0.2 },
   warm: { warmth: 0.45, saturation: 0.08 },
   cool: { warmth: -0.45 },
@@ -53,6 +81,45 @@ const PRESETS: Record<string, Partial<Adjust> & { mono?: boolean; sepia?: boolea
   mono: { mono: true },
   drama: { mono: true, contrast: 0.35 },
 };
+// 보정 슬라이더: [항목, 최소, 최대, 보이는 값]
+type SliderKey = Exclude<keyof Adjust, "preset" | "glowSoft">;
+const pct = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`;
+const ev = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
+const ADJUST_GROUPS: { title: "editor.groupBasic" | "editor.groupCurve" | "editor.groupEffects"; sliders: [SliderKey, number, number, (v: number) => string][] }[] = [
+  {
+    title: "editor.groupBasic",
+    sliders: [
+      ["exposure", -1, 1, ev],
+      ["brightness", -0.5, 0.5, pct],
+      ["contrast", -0.5, 0.5, pct],
+      ["shadows", -1, 1, pct],
+      ["blacks", -1, 1, pct],
+      ["warmth", -1, 1, pct],
+      ["saturation", -1, 1, pct],
+      ["sharpen", 0, 0.6, pct],
+    ],
+  },
+  {
+    title: "editor.groupCurve",
+    sliders: [
+      ["lift", 0, 1, pct],
+      ["curve", 0, 1, pct],
+    ],
+  },
+  {
+    title: "editor.groupEffects",
+    sliders: [
+      ["fade", 0, 1, pct],
+      ["vignette", 0, 1, pct],
+      ["grain", 0, 1, pct],
+      ["grainSize", 0, 1, pct],
+      ["grainRough", 0, 1, pct],
+      ["glow", 0, 1, pct],
+      ["glowRadius", 0, 1, pct],
+    ],
+  },
+];
+
 const faceName = (key: string) => `ffont-${key}`;
 // 글씨체에 없는 이모지는 기기의 이모지 글꼴로 그립니다 (없으면 빈칸·네모로 보임)
 const fontFamily = (key: string) => `"${faceName(key)}", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
@@ -165,6 +232,7 @@ export function ImageEditor({
       h.restoring = true;
       const state = JSON.parse(h.stack[to]);
       await c.loadFromJSON(state.canvas);
+      state.adjust = { ...NO_ADJUST, ...state.adjust };
       adjustRef.current = state.adjust;
       cropRef.current = state.crop;
       setAdjustState(state.adjust);
@@ -211,7 +279,7 @@ export function ImageEditor({
           const families = new Set<string>(JSON.stringify(saved.canvas).match(/ffont-[a-z_]+/g) ?? []);
           await Promise.all([...families].map((ff) => loadFont(ff.replace("ffont-", ""))));
           await c.loadFromJSON(saved.canvas);
-          adjustRef.current = saved.adjust ?? NO_ADJUST;
+          adjustRef.current = { ...NO_ADJUST, ...saved.adjust }; // 예전에 저장한 편집엔 새 보정 항목이 없음
           cropRef.current = saved.crop ?? NO_CROP;
           setAdjustState(adjustRef.current);
           setCropState(cropRef.current);
@@ -514,8 +582,16 @@ export function ImageEditor({
     if (v("saturation")) list.push(new f.filters.Saturation({ saturation: v("saturation") }));
     const w = v("warmth");
     if (w) list.push(new f.filters.BlendColor({ color: w > 0 ? "#ff9a3c" : "#3c9aff", mode: "tint", alpha: Math.min(0.35, Math.abs(w) * 0.35) }));
+    // 필름 톤: 노출 · 어두운 영역 · 검정 계열 · 곡선(암부 들어올림 · S자)
+    const film = filmFilters(f);
+    const tone = { exposure: v("exposure"), shadows: v("shadows"), blacks: v("blacks"), lift: v("lift"), curve: v("curve") };
+    if (Object.values(tone).some(Boolean)) list.push(new film.FilmTone(tone));
     const sh = v("sharpen");
     if (sh > 0) list.push(new f.filters.Convolute({ matrix: [0, -sh, 0, -sh, 1 + 4 * sh, -sh, 0, -sh, 0] }));
+    // 글로우 (흐린 사본을 겹쳐 하이라이트가 번지게) → 그 위에 그레인
+    if (v("glow") > 0) list.push(new film.FilmGlow({ amount: v("glow"), radius: v("glowRadius"), mode: v("glowSoft") >= 0.5 ? "soft" : "screen" }));
+    // 그레인은 맨 마지막 (선명도·글로우에 깎이지 않게)
+    if (v("grain") > 0) list.push(new film.FilmGrain({ amount: v("grain"), size: v("grainSize"), roughness: v("grainRough") }));
     img.filters = list;
     img.applyFilters();
 
@@ -851,28 +927,38 @@ export function ImageEditor({
                     ))}
                     <Chip onClick={() => applyAdjust(NO_ADJUST, true)}>{t("editor.reset")}</Chip>
                   </Row>
-                  <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
-                    {(
-                      [
-                        ["brightness", -0.5, 0.5],
-                        ["contrast", -0.5, 0.5],
-                        ["warmth", -1, 1],
-                        ["saturation", -1, 1],
-                        ["fade", 0, 1],
-                        ["vignette", 0, 1],
-                        ["sharpen", 0, 0.6],
-                      ] as const
-                    ).map(([k, min, max]) => (
-                      <Slider
-                        key={k}
-                        label={t(`editor.${k}`)}
-                        min={min}
-                        max={max}
-                        step={0.02}
-                        value={adjust[k]}
-                        onChange={(v) => applyAdjust({ ...adjust, [k]: v })}
-                        onCommit={snapshot}
-                      />
+                  {/* 기본 · 곡선 · 효과 (Camera Raw 패널 순서) — 많아서 패널 안에서 스크롤 */}
+                  <div className="max-h-[30vh] space-y-3 overflow-y-auto pr-1 lg:max-h-[26vh]">
+                    {ADJUST_GROUPS.map((g) => (
+                      <section key={g.title}>
+                        <p className="mb-1 text-[11px] font-semibold tracking-wide text-white/45">{t(g.title)}</p>
+                        <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                          {g.sliders.map(([k, min, max, show]) => (
+                            <Slider
+                              key={k}
+                              label={t(`editor.${k}`)}
+                              min={min}
+                              max={max}
+                              step={0.01}
+                              value={adjust[k]}
+                              display={show(adjust[k])}
+                              onChange={(v) => applyAdjust({ ...adjust, [k]: v })}
+                              onCommit={snapshot}
+                            />
+                          ))}
+                        </div>
+                        {g.title === "editor.groupEffects" && adjust.glow + Number(PRESETS[adjust.preset]?.glow ?? 0) > 0 && (
+                          <div className="mt-1.5 flex items-center gap-3 text-[12px] text-white/70">
+                            <span className="w-20 shrink-0">{t("editor.glowMode")}</span>
+                            <Chip on={adjust.glowSoft < 0.5} onClick={() => applyAdjust({ ...adjust, glowSoft: 0 }, true)}>
+                              {t("editor.glowScreen")}
+                            </Chip>
+                            <Chip on={adjust.glowSoft >= 0.5} onClick={() => applyAdjust({ ...adjust, glowSoft: 1 }, true)}>
+                              {t("editor.glowSoftLight")}
+                            </Chip>
+                          </div>
+                        )}
+                      </section>
                     ))}
                   </div>
                 </div>
@@ -965,6 +1051,7 @@ function Slider({
   min,
   max,
   step,
+  display,
 }: {
   label: string;
   value: number;
@@ -973,10 +1060,12 @@ function Slider({
   min: number;
   max: number;
   step: number;
+  /** 오른쪽에 보이는 값 (예: +0.50, -15) */
+  display?: string;
 }) {
   return (
     <label className="flex items-center gap-3 text-[12px] text-white/70">
-      <span className="w-16 shrink-0">{label}</span>
+      <span className="w-20 shrink-0">{label}</span>
       <input
         type="range"
         min={min}
@@ -986,8 +1075,9 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
         onPointerUp={onCommit}
         onKeyUp={onCommit}
-        className="flex-1 accent-white"
+        className="min-w-0 flex-1 accent-white"
       />
+      {display !== undefined && <span className="tnum w-9 shrink-0 text-right text-[11px] text-white/55">{display}</span>}
     </label>
   );
 }
