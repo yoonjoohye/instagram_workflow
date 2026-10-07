@@ -5,7 +5,7 @@ import json
 
 from PIL import Image
 
-from backend.models import MediaBlob
+from backend.models import GenerationJob, MediaBlob
 from backend.services.studio import gemini
 
 PREFIX = "/studio"
@@ -216,3 +216,35 @@ def test_manual_post_writes_caption_from_photos_topic_and_concept(monkeypatch, c
     monkeypatch.setattr(gemini, "call", lambda *a, **k: (_ for _ in ()).throw(gemini.GeminiError("quota exceeded")))
     job = client.post("/studio/manual", json={"upload_ids": [up], "write_caption": True}).json()
     assert job["caption"] == "" and "자동으로 쓰지 못했습니다" in job["error"]
+
+
+def test_workspace_media_add_remove_generate_and_settings(monkeypatch, client, login, account, db):
+    """사진을 고르면 바로 작업 공간 → 사진 더 넣기·빼기, AI 로 새 이미지, 컨셉·주제·피드/스토리 바꾸기, 사진별 AI 수정."""
+    login(account)
+    up = lambda c: client.post("/media/uploads", files={"file": (f"{c}.jpg", jpeg(c), "image/jpeg")}).json()["id"]
+    job = client.post("/studio/manual", json={"upload_ids": [up("red")]}).json()
+    assert job["media_kind"] == "IMAGE"
+
+    job = client.post(f"{PREFIX}/{job['id']}/media", json={"upload_ids": [up("blue")]}).json()
+    assert job["media_kind"] == "CAROUSEL" and len(job["assets"]) == 2
+
+    monkeypatch.setattr(gemini, "call", fake_gemini)  # 이미지 생성은 초록 이미지
+    r = client.post(f"{PREFIX}/{job['id']}/media/generate", json={"instruction": "에펠탑 일러스트"})
+    assert r.status_code == 200, r.text
+    assert len(r.json()["assets"]) == 3 and r.json()["assets"][2]["meta"]["generated"]
+
+    # 직접 만든 작업의 사진도 '지금 이미지에서 고치기' 가 됨 (예전엔 layout 이 없어 서버 오류)
+    r = client.post(f"{PREFIX}/{job['id']}/slides/0", json={"instruction": "밝게", "from_current": True})
+    assert r.status_code == 200, r.text
+
+    job = client.delete(f"{PREFIX}/{job['id']}/media/1").json()
+    assert len(job["assets"]) == 2 and job["media_kind"] == "CAROUSEL"
+
+    job = client.patch(f"{PREFIX}/{job['id']}/settings", json={"post_type": "story", "prompt": "파리 여행", "template": "travel"}).json()
+    assert job["media_kind"] == "STORIES"
+    plan = db.get(GenerationJob, job["id"]).plan
+    assert plan["topic"] == "파리 여행" and plan["template"] == "travel"
+
+    # Gemini 이미지 생성이 실패하면 빈 배경을 넣지 않고 알림
+    monkeypatch.setattr(gemini, "call", lambda *a, **k: (_ for _ in ()).throw(gemini.GeminiError("quota exceeded")))
+    assert client.post(f"{PREFIX}/{job['id']}/media/generate", json={}).status_code == 502

@@ -324,4 +324,5 @@ def slide_list(plan: dict[str, Any]) -> list[dict[str, Any]]:
             + [{"role": "center", **plan["conclusion"]}]
         )
         return legacy
-    return [{"role": s["layout"], **s} for s in plan["slides"]]
+    # 직접 만든 작업(사진 그대로)은 layout 없이 role 만 있음
+    return [{"role": s.get("layout") or s.get("role") or "photo", **s} for s in plan["slides"]]

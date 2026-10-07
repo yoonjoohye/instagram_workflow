@@ -51,6 +51,17 @@ def _soundtrack(job: GenerationJob) -> dict | None:
     return {**{k: v for k, v in data.items() if k != "fingerprint"}, "stale": data.get("fingerprint") != assets_fingerprint(job)}
 
 
+def _settings(job: GenerationJob) -> dict:
+    plan = job.plan if isinstance(job.plan, dict) else {}
+    return {
+        "post_type": plan.get("post_type", "feed"),
+        "topic": plan.get("topic", ""),
+        "template": plan.get("template", "auto"),
+        "style": plan.get("style", ""),
+        "caption_format": plan.get("caption_format", ""),
+    }
+
+
 def _job_dict(job: GenerationJob) -> dict:
     return {
         "id": job.id,
@@ -75,6 +86,8 @@ def _job_dict(job: GenerationJob) -> dict:
         "story_progress": _story_progress(job),
         # 사진에 음악을 넣어 만든 영상 — 있으면 피드는 릴스로, 스토리는 동영상 스토리로 올라갑니다.
         "soundtrack": _soundtrack(job),
+        # 작업 공간의 컨셉·주제 메모 (AI 버튼들이 참고)
+        "settings": _settings(job),
     }
 
 

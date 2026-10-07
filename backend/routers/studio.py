@@ -294,12 +294,13 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
 
 
 class ManualIn(BaseModel):
-    upload_ids: list[str] = Field(min_length=1, max_length=10)
+    upload_ids: list[str] = Field(default_factory=list, max_length=10)  # 비우면 빈 작업 (AI 로 이미지를 만들어 채움)
     post_type: Literal["feed", "story"] = "feed"
     prompt: str = Field(default="", max_length=2000)  # 주제 메모 — 캡션을 쓸 때 참고
     style: str = Field(default="", max_length=2000)  # 고른 컨셉의 연출 방향
     caption_format: str = Field(default="", max_length=2000)  # 고른 컨셉의 캡션 양식
     write_caption: bool = False  # True 면 사진·주제·컨셉을 보고 캡션·해시태그를 바로 씀 (실패해도 작업은 만듦)
+    template: str = Field(default="auto", max_length=40)  # 고른 컨셉 key (화면 표시용)
     language: str | None = Field(default=None, max_length=8)
 
 
@@ -315,12 +316,11 @@ def _original_asset(b: MediaBlob) -> dict:
 def manual(body: ManualIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
     """AI 없이 고른 사진·동영상 그대로 작업 공간을 엽니다 (직접 편집·음악·캡션은 거기서)."""
     story = body.post_type == "story"
-    blobs = _blobs(db, account, body.upload_ids)[: svc.MAX_STORIES if story else 10]
-    kind = "STORIES" if story else "CAROUSEL" if len(blobs) > 1 else ("REELS" if blobs[0].kind == "video" else "IMAGE")
+    blobs = _blobs(db, account, body.upload_ids)[:MAX_MEDIA]
     job = GenerationJob(
         account_id=account.id,
         prompt=body.prompt.strip() or "직접 만들기",
-        media_kind=kind,
+        media_kind="STORIES" if story else "IMAGE",
         tone="",
         status="ready",
         provider="original/manual",
@@ -333,12 +333,14 @@ def manual(body: ManualIn, request: Request, account: Account = Depends(current_
             "topic": body.prompt.strip(),
             "style": body.style,
             "caption_format": body.caption_format,
+            "template": body.template,
             "original": True,
             "post_type": body.post_type,
         },
         assets=[_original_asset(b) for b in blobs],
     )
-    if body.write_caption and not story:
+    _sync_kind(job)
+    if body.write_caption and not story and blobs:
         try:
             written = svc.rewrite_caption(
                 topic=body.prompt.strip(), style=body.style, caption="", instruction="",
@@ -349,6 +351,158 @@ def manual(body: ManualIn, request: Request, account: Account = Depends(current_
         except svc.GeminiError as exc:
             job.error = f"캡션을 자동으로 쓰지 못했습니다. '✨ 자동 작성'을 다시 눌러 주세요. ({exc})"
     db.add(job)
+    db.commit()
+    db.refresh(job)
+    return _job_dict(job)
+
+
+MAX_MEDIA = 10  # 캐러셀 최대 장수 (스토리도 같은 한도)
+
+
+def _sync_kind(job: GenerationJob) -> None:
+    """사진·동영상 수와 피드/스토리에 맞춰 게시 형태를 정합니다."""
+    assets = [a for a in job.assets or [] if a.get("type") in ("image", "video")]
+    if (job.plan or {}).get("post_type") == "story":
+        job.media_kind = "STORIES"
+    elif len(assets) > 1:
+        job.media_kind = "CAROUSEL"
+    else:
+        job.media_kind = "REELS" if assets and assets[0]["type"] == "video" else "IMAGE"
+
+
+def _draft(db: Session, account: Account, job_id: int) -> GenerationJob:
+    job = db.get(GenerationJob, job_id)
+    if not job or job.account_id != account.id or not isinstance(job.plan, dict):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
+    if job.status in ("published", "publishing"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "이미 게시된 작업입니다.")
+    return job
+
+
+class SettingsIn(BaseModel):
+    post_type: Literal["feed", "story"] | None = None
+    prompt: str | None = Field(default=None, max_length=2000)  # 주제 메모
+    style: str | None = Field(default=None, max_length=2000)
+    caption_format: str | None = Field(default=None, max_length=2000)
+    template: str | None = Field(default=None, max_length=40)
+
+
+@router.patch("/studio/{job_id}/settings")
+def update_settings(job_id: int, body: SettingsIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """작업 공간에서 컨셉·주제 메모·피드/스토리를 바꿉니다 (AI 버튼들이 참고)."""
+    job = _draft(db, account, job_id)
+    plan = dict(job.plan)
+    if body.prompt is not None:
+        plan["topic"] = body.prompt.strip()
+        job.prompt = body.prompt.strip() or job.prompt
+    for key in ("style", "caption_format", "template"):
+        if getattr(body, key) is not None:
+            plan[key] = getattr(body, key)
+    if body.post_type is not None and body.post_type != plan.get("post_type", "feed"):
+        plan["post_type"] = body.post_type
+        # 피드 릴스 ↔ 스토리 영상은 모양이 달라 음악 넣은 영상은 다시 만들어야 함
+        if plan.get("soundtrack"):
+            from .soundtrack import discard_renders
+
+            discard_renders(db, account, [o.get("url", "") for o in plan["soundtrack"].get("outputs") or []])
+            plan.pop("soundtrack")
+    job.plan = plan
+    _sync_kind(job)
+    flag_modified(job, "plan")
+    db.commit()
+    db.refresh(job)
+    return _job_dict(job)
+
+
+class MediaAddIn(BaseModel):
+    upload_ids: list[str] = Field(min_length=1, max_length=MAX_MEDIA)
+
+
+@router.post("/studio/{job_id}/media")
+def add_media(job_id: int, body: MediaAddIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """사진·동영상을 더 넣습니다 (올린 그대로)."""
+    job = _draft(db, account, job_id)
+    assets = list(job.assets or [])
+    if len(assets) + len(body.upload_ids) > MAX_MEDIA:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"사진·동영상은 최대 {MAX_MEDIA}개까지 넣을 수 있습니다.")
+    blobs = _blobs(db, account, body.upload_ids)
+    plan = dict(job.plan)
+    job.assets = assets + [_original_asset(b) for b in blobs]
+    plan["slides"] = list(plan.get("slides") or []) + [{"role": "photo"} for _ in blobs]
+    plan["upload_ids"] = list(plan.get("upload_ids") or []) + body.upload_ids
+    plan.setdefault("original", True)
+    job.plan = plan
+    _sync_kind(job)
+    flag_modified(job, "assets")
+    flag_modified(job, "plan")
+    db.commit()
+    db.refresh(job)
+    return _job_dict(job)
+
+
+@router.delete("/studio/{job_id}/media/{index}")
+def remove_media(job_id: int, index: int, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """한 장 빼기. 이 작업이 만든 이미지·영상만 지우고, 올린 원본은 남깁니다."""
+    job = _draft(db, account, job_id)
+    assets = list(job.assets or [])
+    if not 0 <= index < len(assets):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "이미지 번호가 올바르지 않습니다.")
+    gone = assets.pop(index)
+    meta = gone.get("meta") or {}
+    for blob_id in (_blob_id(gone.get("url", "")), meta.get("visual_id"), (meta.get("edit") or {}).get("base_id"),
+                    (meta.get("video_edit") or {}).get("cover_id")):
+        if blob_id and (b := db.get(MediaBlob, blob_id)) is not None and b.account_id == account.id and b.kind in ("slide", "visual"):
+            db.delete(b)
+    if meta.get("video_edit"):
+        from .soundtrack import discard_renders
+
+        discard_renders(db, account, [gone.get("url", "")])
+    plan = dict(job.plan)
+    slides = list(plan.get("slides") or [])
+    if index < len(slides):
+        slides.pop(index)
+    plan["slides"] = slides
+    job.plan = plan
+    job.assets = assets
+    _sync_kind(job)
+    flag_modified(job, "assets")
+    flag_modified(job, "plan")
+    db.commit()
+    db.refresh(job)
+    return _job_dict(job)
+
+
+class GenerateIn(BaseModel):
+    instruction: str = Field(default="", max_length=1000)  # 어떤 이미지를 원하는지 (비우면 주제·컨셉으로)
+
+
+@router.post("/studio/{job_id}/media/generate")
+def generate_media(job_id: int, body: GenerateIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """주제 메모·컨셉·요청으로 새 이미지를 AI 로 만들어 한 장 추가합니다."""
+    job = _draft(db, account, job_id)
+    if len(job.assets or []) >= MAX_MEDIA:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"사진·동영상은 최대 {MAX_MEDIA}개까지 넣을 수 있습니다.")
+    plan = dict(job.plan)
+    story = plan.get("post_type") == "story"
+    slide = {"role": "designed", "layout": "designed", "title": "", "body": "", "cta": "", "image_text": "", "visual": body.instruction.strip()}
+    image, engine = svc.render_visual(
+        [], slide, topic=plan.get("topic") or "", style=plan.get("style", ""), instruction=body.instruction.strip(), story=story,
+    )
+    if engine.startswith("basic"):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "이미지를 만들지 못했습니다. " + _image_failure_hint(engine))
+    card = svc.to_jpeg(svc.cover_fit(image, svc.STORY_SIZE if story else svc.SIZE), 92)
+    blob = _save_blob(db, account, card, *svc.image_size(card), kind="slide")
+    asset = {
+        "type": "image", "url": _media_url(blob.id), "thumbnail_url": _media_url(blob.id),
+        "meta": {"role": "designed", "status": "done", "engine": engine, "generated": True, "prompt": body.instruction.strip(), "text_baked": True},
+    }
+    job.assets = list(job.assets or []) + [asset]
+    plan["slides"] = list(plan.get("slides") or []) + [{"role": "photo"}]
+    plan.setdefault("original", True)
+    job.plan = plan
+    _sync_kind(job)
+    flag_modified(job, "assets")
+    flag_modified(job, "plan")
     db.commit()
     db.refresh(job)
     return _job_dict(job)

@@ -14,6 +14,8 @@ import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
 import { HashtagField } from "@/components/studio/HashtagField";
 import { CaptionField } from "@/components/studio/CaptionField";
+import { WorkspaceSettings } from "@/components/studio/WorkspaceSettings";
+import { uploadMedia } from "@/lib/mediaUpload";
 import { buildSoundtrack, SoundtrackCard } from "@/components/studio/SoundtrackCard";
 import { VideoEditor } from "@/components/studio/VideoEditor";
 import { Badge, Button, Card, cx, Notice, Skeleton, Spinner, StatusDot } from "@/components/ui";
@@ -266,6 +268,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       {/* ── 왼쪽: 편집 ── */}
       <div className="min-w-0 space-y-6">
+        <WorkspaceSettings job={job} locked={locked} onChange={onChange} />
         <Card
           title={t("studio.mediaTitle")}
           subtitle={`${t("studio.jobMeta", { date: fmtDateTime(job.created_at), provider: job.provider })}`}
@@ -282,6 +285,20 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
             canRedoFromScratch={!original}
             onManualEdit={!locked ? (i) => setEditing(i) : undefined}
             onVideoEdit={!locked ? (i) => setEditingVideo(i) : undefined}
+            onAdd={
+              !locked
+                ? async (files) => {
+                    const ids = await uploadMedia(files, t, () => {});
+                    onChange(await api<Job>(`/studio/${job.id}/media`, { method: "POST", json: { upload_ids: ids } }));
+                  }
+                : undefined
+            }
+            onGenerate={
+              !locked
+                ? async (instruction) => onChange(await api<Job>(`/studio/${job.id}/media/generate`, { method: "POST", json: { instruction } }))
+                : undefined
+            }
+            onRemove={!locked ? async (i) => onChange(await api<Job>(`/studio/${job.id}/media/${i}`, { method: "DELETE" })) : undefined}
             onReorder={
               !locked && visual.length === job.assets.length
                 ? async (from, to) => {

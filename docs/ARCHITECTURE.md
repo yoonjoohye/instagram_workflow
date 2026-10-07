@@ -43,15 +43,21 @@
 ### 게시물 만들기 요청 흐름
 
 ```
-PostForm (frontend/src/components/studio/PostForm.tsx)
- 1. (사진 폴더·사진첩 연결 시) POST /studio/photo-query → 기기 안에서 사진 고르기 (frontend/src/lib/photoLibrary)
- 2. POST /media/uploads (사진) · Blob 업로드 + POST /media/videos (동영상)
- 3. POST /studio/research        → services/studio/research.py   (Gemini + Google 검색)
- 4. POST /studio/plan            → services/studio/planning.py   (장 수·레이아웃·캡션·해시태그)
- 5. POST /studio/{job}/slides/{i} (장마다) → visuals.render_visual → compose.compose
- 6. POST /studio/{job}/finalize  → 검수 화면 (frontend/src/components/studio/Review.tsx)
- 7. POST /workflow/publish       → services/publishing.py
+만들기 시작 (frontend/src/components/studio/PostForm.tsx) — 피드/스토리 · 컨셉 · 주제 메모(선택)
+ 1. 사진·동영상 고르기 → POST /media/uploads · (동영상은 Blob 업로드 + POST /media/videos)  — frontend/src/lib/mediaUpload.ts
+ 2. POST /studio/manual            → 고른 그대로 작업을 만들고 바로 작업 공간으로
+작업 공간 (frontend/src/components/studio/Review.tsx) — 항목마다 ✨ AI / ✏️ 직접 편집
+ · 컨셉·주제 메모·피드/스토리   PATCH  /studio/{job}/settings
+ · 사진 더 넣기 / 빼기          POST   /studio/{job}/media · DELETE /studio/{job}/media/{i}
+ · ✨ AI로 새 이미지            POST   /studio/{job}/media/generate   → visuals.render_visual
+ · ✨ 사진 AI 수정              POST   /studio/{job}/slides/{i} (from_current) → visuals.edit_visual
+ · ✏️ 사진 직접 편집            POST   /studio/{job}/slides/{i}/edit (편집기 결과)
+ · ✂️ 동영상 편집 · 음악 넣기    routers/soundtrack.py
+ · 게시글 ✨ 자동 작성 · 해시태그 ✨ 자동 생성   POST /studio/{job}/caption · /studio/{job}/hashtags (사진·주제 메모·컨셉을 보고 작문)
+ · 게시                          POST   /workflow/publish
 ```
+
+예전 'AI 가 한 번에 구성' 흐름(`/studio/research` → `/studio/plan` → 장마다 `/slides/{i}` → `/finalize`)의 API 는 남아 있지만 화면에서는 쓰지 않습니다.
 
 **스토리**(`post_type: "story"`)는 같은 흐름에서 장마다 세로 9:16(1080×1920)으로 만들고(`limits.STORY_SIZE`, 위·아래 가려지는 영역에는 글을 두지 않음),
 캡션·해시태그 없이 장마다 **따로** 올립니다. 여러 개를 60초 안에 다 못 올리면 `plan["story_media_ids"]` 에 올린 것을 기록하고
