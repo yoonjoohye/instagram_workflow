@@ -372,6 +372,40 @@ export function ImageEditor({
     add(p);
   }
 
+  /** 고른 도형·그림(글자 제외)의 색을 바꿉니다. 아무것도 안 골랐으면 다음에 추가할 도형·펜 색만 바뀜. */
+  function recolor(color: string) {
+    setBrush((b) => ({ ...b, color }));
+    const c = canvas.current;
+    if (!c) return;
+    const objs = c.getActiveObjects().filter((o) => !SPECIAL.has((o as Named).name ?? "") && !isText(o));
+    if (!objs.length) return;
+    for (const o of objs) {
+      const stroke = typeof o.stroke === "string" ? o.stroke : "";
+      if (stroke === "#ffffff" && o.shadow) {
+        o.shadow.color = color; // 네온 펜: 하얀 심 + 색 번짐
+      } else if (stroke) {
+        o.set("stroke", stroke.startsWith("rgba") ? hexAlpha(color, 0.45) : color); // 형광펜은 반투명 유지
+      }
+      if (typeof o.fill === "string" && o.fill) o.set("fill", color);
+    }
+    c.requestRenderAll();
+    snapshot();
+    force((n) => n + 1);
+  }
+
+  /** 채우기 켜기/끄기 — 고른 동그라미·사각형에도 바로 적용 */
+  function toggleFill() {
+    const next = !fillShapes;
+    setFillShapes(next);
+    const c = canvas.current;
+    if (!c) return;
+    const objs = c.getActiveObjects().filter((o) => o.type === "circle" || (o.type === "rect" && (o as Named).name !== "vignette" && o.stroke));
+    if (!objs.length) return;
+    for (const o of objs) o.set("fill", next ? (typeof o.stroke === "string" ? o.stroke : brush.color) : "");
+    c.requestRenderAll();
+    snapshot();
+  }
+
   function removeSelected() {
     const c = canvas.current!;
     for (const o of c.getActiveObjects()) if (!SPECIAL.has((o as Named).name ?? "")) c.remove(o);
@@ -417,7 +451,8 @@ export function ImageEditor({
     if (next.vignette > 0) {
       if (!vig) {
         const { w: W, h: H } = size.current;
-        vig = new f.Rect({ left: 0, top: 0, width: W, height: H, selectable: false, evented: false }) as Named;
+        // fabric 7 은 기본 기준점이 가운데라 left/top 0 이면 사진의 1/4 만 덮음 → 왼쪽 위 기준으로
+        vig = new f.Rect({ left: 0, top: 0, originX: "left", originY: "top", width: W, height: H, selectable: false, evented: false }) as Named;
         vig.set(
           "fill",
           new f.Gradient({
@@ -435,7 +470,8 @@ export function ImageEditor({
         c.moveObjectTo(vig, 1);
         history.current.restoring = false;
       }
-      vig.set({ opacity: next.vignette });
+      // 예전에 저장한 편집(가운데 기준으로 잘못 놓인 막)도 바로잡습니다.
+      vig.set({ opacity: next.vignette, left: 0, top: 0, originX: "left", originY: "top" });
     } else if (vig) {
       history.current.restoring = true;
       c.remove(vig);
@@ -510,6 +546,15 @@ export function ImageEditor({
   // ── 화면 ───────────────────────────────────────────────────
   const h = history.current;
   const textSel = isText(selected) ? selected : null;
+  // 고른 도형·그림의 지금 색 (색 고르기 칸에 표시)
+  const shapeSel = selected && !textSel && !SPECIAL.has(selected.name ?? "") ? selected : null;
+  const paintColor = (() => {
+    const v = shapeSel && ((typeof shapeSel.fill === "string" && shapeSel.fill) || (typeof shapeSel.stroke === "string" && shapeSel.stroke));
+    if (!v) return brush.color;
+    if (v === "#ffffff" && shapeSel?.shadow) return String(shapeSel.shadow.color);
+    const m = v.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    return m ? "#" + [m[1], m[2], m[3]].map((x) => Number(x).toString(16).padStart(2, "0")).join("") : v;
+  })();
   const TABS: { key: Tab; label: string; icon: string }[] = [
     { key: "text", label: t("editor.tabText"), icon: "Aa" },
     { key: "sticker", label: t("editor.tabSticker"), icon: "☺" },
@@ -647,11 +692,11 @@ export function ImageEditor({
                         {t(`editor.shape${k[0].toUpperCase()}${k.slice(1)}` as "editor.shapeHeart")}
                       </Chip>
                     ))}
-                    <Chip on={fillShapes} onClick={() => setFillShapes((v) => !v)}>
+                    <Chip on={fillShapes} onClick={toggleFill}>
                       {t("editor.fill")}
                     </Chip>
                   </Row>
-                  <Swatches value={brush.color} onPick={(c) => setBrush({ ...brush, color: c })} customLabel={t("editor.customColor")} small />
+                  <Swatches value={paintColor} onPick={recolor} customLabel={t("editor.customColor")} small />
                 </div>
               )}
 
@@ -671,7 +716,7 @@ export function ImageEditor({
                     <p className="text-[11px] text-white/50">{t("editor.eraserHint")}</p>
                   ) : (
                     <>
-                      <Swatches value={brush.color} onPick={(c) => setBrush({ ...brush, color: c })} customLabel={t("editor.customColor")} />
+                      <Swatches value={paintColor} onPick={recolor} customLabel={t("editor.customColor")} />
                       <Slider label={t("editor.brushSize")} min={2} max={40} step={1} value={brush.width} onChange={(v) => setBrush({ ...brush, width: v })} />
                     </>
                   )}
