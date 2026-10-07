@@ -253,22 +253,7 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
     if original:
         items = blobs[: svc.MAX_STORIES if story else 10]  # 캐러셀은 최대 10장
         media_kind = "STORIES" if story else "CAROUSEL" if len(items) > 1 else ("REELS" if items[0].kind == "video" else "IMAGE")
-        assets = [
-            {
-                "type": "video",
-                "url": b.url,
-                "thumbnail_url": _media_url(b.cover_id),
-                "meta": {"role": "video", "status": "done", "engine": "original"},
-            }
-            if b.kind == "video"
-            else {
-                "type": "image",
-                "url": _media_url(b.id),
-                "thumbnail_url": _media_url(b.id),
-                "meta": {"role": "photo", "status": "done", "engine": "original"},
-            }
-            for b in items
-        ]
+        assets = [_original_asset(b) for b in items]
     else:
         media_kind = "STORIES" if story else "CAROUSEL" if len(slides) > 1 else "IMAGE"
         assets = [
@@ -308,6 +293,52 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
     db.refresh(job)
     # 원본 게시는 만들 이미지가 없으므로 slides 를 비워 보냅니다 (바로 finalize).
     return {"job": _job_dict(job), "slides": [] if original else slides, "engine": engine, "warning": warning}
+
+
+class ManualIn(BaseModel):
+    upload_ids: list[str] = Field(min_length=1, max_length=10)
+    post_type: Literal["feed", "story"] = "feed"
+    prompt: str = Field(default="", max_length=2000)  # 적어 둔 주제가 있으면 캡션 다시 쓰기에 참고
+
+
+def _original_asset(b: MediaBlob) -> dict:
+    if b.kind == "video":
+        return {"type": "video", "url": b.url, "thumbnail_url": _media_url(b.cover_id),
+                "meta": {"role": "video", "status": "done", "engine": "original"}}
+    return {"type": "image", "url": _media_url(b.id), "thumbnail_url": _media_url(b.id),
+            "meta": {"role": "photo", "status": "done", "engine": "original"}}
+
+
+@router.post("/studio/manual", status_code=status.HTTP_201_CREATED)
+def manual(body: ManualIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """AI 없이 고른 사진·동영상 그대로 작업 공간을 엽니다 (직접 편집·음악·캡션은 거기서)."""
+    story = body.post_type == "story"
+    blobs = _blobs(db, account, body.upload_ids)[: svc.MAX_STORIES if story else 10]
+    kind = "STORIES" if story else "CAROUSEL" if len(blobs) > 1 else ("REELS" if blobs[0].kind == "video" else "IMAGE")
+    job = GenerationJob(
+        account_id=account.id,
+        prompt=body.prompt.strip() or "직접 만들기",
+        media_kind=kind,
+        tone="",
+        status="ready",
+        provider="original/manual",
+        error="",
+        caption="",
+        hashtags=[],
+        plan={
+            "slides": [{"role": "photo"} for _ in blobs],
+            "upload_ids": body.upload_ids,
+            "topic": body.prompt.strip(),
+            "original": True,
+            "post_type": body.post_type,
+            "music": {"suggestions": [], "selected": None},
+        },
+        assets=[_original_asset(b) for b in blobs],
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return _job_dict(job)
 
 
 class MusicPick(BaseModel):

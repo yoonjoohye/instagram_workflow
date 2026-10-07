@@ -150,6 +150,35 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
     return video.id;
   }
 
+  async function uploadAll(items: Photo[]): Promise<string[]> {
+    const ids: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "video") {
+        ids.push(await uploadVideo(item.file, i, items.length));
+        continue;
+      }
+      setStep({ label: t("studio.stepUploadPhotos"), done: i, total: items.length });
+      ids.push(await uploadPhoto(item.file, t));
+    }
+    return ids;
+  }
+
+  /** AI 없이: 고른 사진·동영상 그대로 작업 공간을 열어 직접 꾸밉니다 (Gemini 를 쓰지 않음). */
+  async function startManual() {
+    if (!photos.length) return setError(t("studio.manualNeedsMedia"));
+    setError(undefined);
+    try {
+      const ids = await uploadAll(photos);
+      setStep({ label: t("studio.stepFinalize"), done: 1, total: 1 });
+      onCreated(await api<Job>("/studio/manual", { method: "POST", json: { upload_ids: ids, post_type: postType, prompt: prompt.trim() } }));
+    } catch (err) {
+      setError(toApiError(err).message);
+    } finally {
+      setStep(null);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (prompt.trim().length < 2) return setError(t("studio.topicRequired"));
@@ -161,16 +190,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
         setStep({ label: t("studio.stepFindPhotos"), done: 0, total: 1 });
         items = await findFromLibrary();
       }
-      const ids: string[] = [];
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.kind === "video") {
-          ids.push(await uploadVideo(item.file, i, items.length));
-          continue;
-        }
-        setStep({ label: t("studio.stepUploadPhotos"), done: i, total: items.length });
-        ids.push(await uploadPhoto(item.file, t));
-      }
+      const ids = await uploadAll(items);
       const refIds: string[] = [];
       for (let i = 0; i < refs.length; i++) {
         setStep({ label: t("studio.stepUploadRefs"), done: i, total: refs.length });
@@ -520,9 +540,15 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             <p className="text-[12px] text-fg-3">{t("studio.waitNote")}</p>
           </div>
         ) : (
-          <Button type="submit" variant="primary" className="w-full" disabled={prompt.trim().length < 2}>
-            <IconSpark width={16} height={16} /> {t("studio.submit")}
-          </Button>
+          <div className="space-y-2">
+            <Button type="submit" variant="primary" className="w-full" disabled={prompt.trim().length < 2}>
+              <IconSpark width={16} height={16} /> {t("studio.submit")}
+            </Button>
+            <Button type="button" className="w-full" onClick={startManual} disabled={!photos.length}>
+              ✏️ {t("studio.manualStart")}
+            </Button>
+            <p className="text-center text-[12px] text-fg-3">{photos.length ? t("studio.manualHint") : t("studio.manualNeedsMedia")}</p>
+          </div>
         )}
       </form>
     </Card>

@@ -166,3 +166,19 @@ def test_frame_fit_keeps_whole_photo_on_other_ratio():
     assert out.size == (90, 160)
     assert out.getpixel((45, 80))[0] > 200  # 가운데는 사진 그대로
     assert Path(st.track_path("calm-piano")).exists()
+
+
+def test_manual_post_without_ai(monkeypatch, client, login, account, db):
+    """AI 없이 고른 사진 그대로 작업 공간 열기 → 음악 넣기까지 (Gemini 를 부르지 않음)."""
+    from backend.services.studio import gemini
+
+    monkeypatch.setattr(gemini, "call", lambda *a, **k: (_ for _ in ()).throw(AssertionError("Gemini 호출 안 됨")))
+    login(account)
+    ids = [client.post("/media/uploads", files={"file": (f"{c}.jpg", jpeg(c), "image/jpeg")}).json()["id"] for c in ("red", "blue")]
+    r = client.post("/studio/manual", json={"upload_ids": ids})
+    assert r.status_code == 201, r.text
+    job = r.json()
+    assert job["media_kind"] == "CAROUSEL" and job["status"] == "ready" and len(job["assets"]) == 2
+    assert client.put(f"/studio/{job['id']}/soundtrack", json={"track": "sunny-pop"}).status_code == 200
+    story = client.post("/studio/manual", json={"upload_ids": ids, "post_type": "story"}).json()
+    assert story["media_kind"] == "STORIES"
