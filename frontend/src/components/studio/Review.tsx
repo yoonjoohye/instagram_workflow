@@ -13,6 +13,7 @@ import { AudioTrack, MediaStrip } from "@/components/studio/MediaStrip";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
 import { HashtagField } from "@/components/studio/HashtagField";
+import { CaptionAiPanel } from "@/components/studio/CaptionAiPanel";
 import { CaptionField } from "@/components/studio/CaptionField";
 import { DEFAULT_SETTINGS, WorkspaceSettings } from "@/components/studio/WorkspaceSettings";
 import { uploadMedia } from "@/lib/mediaUpload";
@@ -357,19 +358,20 @@ export function Review({
         ) : (
           <Card title={t("studio.captionTitle")}>
             <div className="space-y-4">
-              <CaptionField
-                jobId={job.id}
-                value={caption}
-                onChange={setCaption}
-                onHashtags={(tags) => !hashtags.length && setHashtags(tags)}
-                count={finalCaption.length}
-                max={CAPTION_LIMIT}
-                disabled={locked}
-                prefs={job.settings ?? DEFAULT_SETTINGS}
-                onPrefs={async (patch) => onChange(await api<Job>(`/studio/${job.id}/settings`, { method: "PATCH", json: patch }))}
-                onRequests={(requests) => onChange({ ...job, settings: { ...(job.settings ?? DEFAULT_SETTINGS), caption_requests: requests } })}
-              />
-              <HashtagField jobId={job.id} value={hashtags} onChange={setHashtags} caption={caption} max={HASHTAG_LIMIT} disabled={locked} />
+              {!locked && (
+                <CaptionAiPanel
+                  jobId={job.id}
+                  caption={caption}
+                  onCaption={setCaption}
+                  hashtags={hashtags}
+                  onHashtags={setHashtags}
+                  prefs={job.settings ?? DEFAULT_SETTINGS}
+                  onPrefs={async (patch) => onChange(await api<Job>(`/studio/${job.id}/settings`, { method: "PATCH", json: patch }))}
+                  onRequests={(requests) => onChange({ ...job, settings: { ...(job.settings ?? DEFAULT_SETTINGS), caption_requests: requests } })}
+                />
+              )}
+              <CaptionField value={caption} onChange={setCaption} count={finalCaption.length} max={CAPTION_LIMIT} disabled={locked} />
+              <HashtagField value={hashtags} onChange={setHashtags} max={HASHTAG_LIMIT} disabled={locked} />
 
               {supportsAutoReply &&
                 (arForm ? (
