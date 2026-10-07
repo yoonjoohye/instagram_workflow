@@ -6,12 +6,16 @@ for publishing"), 사진·동영상 모두 FINISHED 를 확인한 뒤 발행합�
 """
 from __future__ import annotations
 
+import datetime as dt
+import logging
 import time
 from typing import Any, Literal
 
 from .meta_graph import GraphClient, GraphError
 
 MediaKind = Literal["IMAGE", "REELS", "STORIES", "CAROUSEL"]
+
+log = logging.getLogger("iaw.publish")
 
 # 영상 컨테이너는 트랜스코딩이 끝나야 발행할 수 있습니다.
 POLL_INTERVAL_SEC = 3
@@ -136,14 +140,33 @@ def describe(exc: GraphError) -> str:
     return f"code={p.get('code')} subcode={p.get('error_subcode')} type={p.get('type')} fbtrace={p.get('fbtrace_id')}"
 
 
-def _published_media_id(client: GraphClient, ig_user_id: str, kind: str | None) -> str:
-    """오류가 났지만 컨테이너가 실제로 게시됐을 때, 방금 올라간 미디어 ID (가장 최근 것)."""
+CONSUMED_SUBCODE = 2207006  # "The media with {id} cannot be found" — 이미 게시돼 컨테이너가 사라짐
+RECENT = dt.timedelta(minutes=5)
+
+
+def _consumed(exc: GraphError) -> bool:
+    p = exc.payload if isinstance(exc.payload, dict) else {}
+    return p.get("error_subcode") == CONSUMED_SUBCODE
+
+
+def _published_media_id(client: GraphClient, ig_user_id: str, kind: str | None, *, since: dt.datetime | None = None) -> str:
+    """오류가 났지만 컨테이너가 실제로 게시됐을 때, 방금 올라간 미디어 ID (가장 최근 것).
+    since 를 주면 그 뒤에 올라온 것만 (다른 게시물을 잘못 잡지 않게)."""
     edge = "stories" if kind == "STORIES" else "media"
     try:
         rows = client.get(f"{ig_user_id}/{edge}", {"fields": "id,timestamp", "limit": 1}).get("data") or []
     except GraphError:
         return ""
-    return str(rows[0].get("id", "")) if rows else ""
+    if not rows:
+        return ""
+    if since is not None:
+        try:
+            posted = dt.datetime.fromisoformat(str(rows[0].get("timestamp", "")).replace("+0000", "+00:00"))
+        except ValueError:
+            return ""
+        if posted < since:
+            return ""
+    return str(rows[0].get("id", ""))
 
 
 def publish(client: GraphClient, ig_user_id: str, container_id: str, *, kind: str | None = None) -> dict[str, Any]:
@@ -152,12 +175,21 @@ def publish(client: GraphClient, ig_user_id: str, container_id: str, *, kind: st
     - 일시 오류(code 1·2, 5xx)면: 컨테이너가 이미 게시됐는지 먼저 확인하고(오류를 주고도 올라가는 경우가 있음),
       아니면 다시 시도. 컨테이너는 한 번만 게시되므로 다시 시도해도 두 번 올라가지 않습니다."""
     media_id = ""
+    started = dt.datetime.now(dt.timezone.utc) - RECENT
+    retried = False
     for attempt in range(PUBLISH_RETRIES):
         try:
             media_id = client.post(f"{ig_user_id}/media_publish", {"creation_id": container_id}).get("id") or ""
             break
         except GraphError as exc:
+            log.warning("media_publish attempt %s container=%s %s: %s", attempt + 1, container_id, describe(exc), exc)
             last = attempt == PUBLISH_RETRIES - 1
+            # 앞선 시도가 오류를 주고도 실제로 게시해 컨테이너가 사라진 경우 → 방금 올라간 것을 찾아 성공 처리
+            if retried and _consumed(exc):
+                media_id = _published_media_id(client, ig_user_id, kind, since=started)
+                if media_id:
+                    break
+                raise
             if _not_ready(exc) and not last:
                 time.sleep(PUBLISH_RETRY_SEC)
                 continue
@@ -173,6 +205,7 @@ def publish(client: GraphClient, ig_user_id: str, container_id: str, *, kind: st
                     break
             if last:
                 raise
+            retried = True
             time.sleep(PUBLISH_RETRY_SEC * (attempt + 1))
     if not media_id:
         raise GraphError("발행 후 미디어 ID 를 받지 못했습니다.")

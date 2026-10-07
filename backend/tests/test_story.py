@@ -178,3 +178,57 @@ def test_publish_retries_transient_then_succeeds(monkeypatch):
     monkeypatch.setattr(publishing.time, "sleep", lambda s: None)
     assert publishing.publish(Graph(), "ig", "c1", kind="STORIES")["media_id"] == "m2"
     assert len(posts) == 2
+
+
+def test_publish_transient_then_consumed_means_published(monkeypatch):
+    """1차: 일시 오류(실제로는 게시됨), 상태 확인은 아직 FINISHED → 2차: '찾을 수 없음'(이미 게시돼 사라짐)
+    → 방금 올라간 스토리를 찾아 성공 처리."""
+    import datetime as dt
+
+    from backend.services import publishing
+    from backend.services.meta_graph import GraphError
+
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
+    posts = []
+
+    class Graph:
+        def post(self, path, data):
+            posts.append(path)
+            if len(posts) == 1:
+                raise GraphError("An unexpected error has occurred.", status=500, payload={"code": 2})
+            raise GraphError("The media with 1 cannot be found.", status=400, payload={"code": 24, "error_subcode": 2207006})
+
+        def get(self, path, params):
+            if path == "c1":
+                return {"status_code": "FINISHED"}  # Meta 반영이 늦음
+            if path == "ig/stories":
+                return {"data": [{"id": "story-new", "timestamp": now}]}
+            return {"permalink": ""}
+
+    monkeypatch.setattr(publishing.time, "sleep", lambda s: None)
+    assert publishing.publish(Graph(), "ig", "c1", kind="STORIES")["media_id"] == "story-new"
+    assert len(posts) == 2
+
+
+def test_consumed_without_recent_story_still_fails(monkeypatch):
+    from backend.services import publishing
+    from backend.services.meta_graph import GraphError
+
+    class Graph:
+        calls = 0
+
+        def post(self, path, data):
+            Graph.calls += 1
+            if Graph.calls == 1:
+                raise GraphError("unexpected", status=500, payload={"code": 2})
+            raise GraphError("cannot be found", status=400, payload={"code": 24, "error_subcode": 2207006})
+
+        def get(self, path, params):
+            if path == "c1":
+                return {"status_code": "FINISHED"}
+            return {"data": [{"id": "old", "timestamp": "2020-01-01T00:00:00+0000"}]}  # 예전 스토리만
+
+    monkeypatch.setattr(publishing.time, "sleep", lambda s: None)
+    import pytest
+    with pytest.raises(GraphError):
+        publishing.publish(Graph(), "ig", "c1", kind="STORIES")
