@@ -7,7 +7,10 @@
     "dev:api": "./.venv/bin/uvicorn backend.main:app --reload --port 8000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:i18n": "tsx scripts/check-i18n.ts",
+    "test:api": "./.venv/bin/python -m pytest -q tests",
+    "check": "tsc --noEmit && npm run check:i18n && npm run test:api"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
@@ -23,6 +26,7 @@
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "tailwindcss": "^4.1.13",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2"
   }
 }
