@@ -18,7 +18,7 @@ import { Button, cx, Spinner } from "@/components/ui";
 import { useT } from "@/i18n/client";
 import { useApi } from "@/lib/api";
 import { mediaSrc } from "@/lib/format";
-import type { Asset, MusicPick } from "@/lib/types";
+import type { Asset } from "@/lib/types";
 
 type Tab = "text" | "sticker" | "draw" | "adjust" | "crop";
 type Brush = "pen" | "marker" | "neon" | "eraser";
@@ -28,7 +28,7 @@ type Crop = { zoom: number; turns: number; straighten: number; flip: boolean };
 type FontItem = { key: string; label: string; preview: string };
 type Named = F.FabricObject & { name?: string; isEditing?: boolean };
 
-export type EditorPreview = { kind: "feed" | "story"; assets: Asset[]; username: string; avatar?: string; caption: string; music?: MusicPick | null };
+export type EditorPreview = { kind: "feed" | "story"; assets: Asset[]; username: string; avatar?: string; caption: string; music?: { title: string } | null };
 
 const COLORS = ["#ffffff", "#111111", "#ff3b5c", "#ff9f1c", "#ffd60a", "#34c759", "#0a84ff", "#8b5cf6", "#ff7eb6"];
 const EMOJIS = ["❤️", "✨", "🔥", "😍", "🥹", "😂", "👍", "🙌", "🎉", "📍", "✈️", "🗼", "☕", "🍰", "🌸", "🌊", "☀️", "🌙", "⭐", "💯", "👀", "📸", "🎵", "💌", "🍀", "🎂", "🍕", "🏖️"];
@@ -53,13 +53,16 @@ const PRESETS: Record<string, Partial<Adjust> & { mono?: boolean; sepia?: boolea
   mono: { mono: true },
   drama: { mono: true, contrast: 0.35 },
 };
-const fontFamily = (key: string) => `ffont-${key}`;
+const faceName = (key: string) => `ffont-${key}`;
+// 글씨체에 없는 이모지는 기기의 이모지 글꼴로 그립니다 (없으면 빈칸·네모로 보임)
+const fontFamily = (key: string) => `"${faceName(key)}", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+const fontKeyOf = (family: string | undefined) => family?.match(/ffont-([a-z_]+)/)?.[1];
 const loadedFonts = new Map<string, Promise<void>>();
 
 /** 서버 글씨체를 브라우저에 등록 (한 번만) */
 function loadFont(key: string): Promise<void> {
   if (!loadedFonts.has(key)) {
-    const face = new FontFace(fontFamily(key), `url(/api/py/studio/fonts/${key}.font)`);
+    const face = new FontFace(faceName(key), `url(/api/py/studio/fonts/${key}.font)`);
     loadedFonts.set(key, face.load().then((f) => void document.fonts.add(f)).catch(() => undefined));
   }
   return loadedFonts.get(key)!;
@@ -344,6 +347,37 @@ export function ImageEditor({
       },
       font,
     );
+  }
+
+  /** 글자에 이모지 넣기: 고친 중이면 커서 자리에, 아니면 끝에. 고른 글자가 없으면 이모지로 새 글자 상자. */
+  async function insertEmoji(e: string) {
+    const o = selected;
+    if (!isText(o)) {
+      await addText();
+      const added = canvas.current?.getActiveObject() ?? null;
+      if (isText(added)) {
+        added.set("text", e);
+        canvas.current!.requestRenderAll();
+        snapshot();
+      }
+      return;
+    }
+    const text = o.text ?? "";
+    const editing = (o as Named).isEditing;
+    const start = editing ? o.selectionStart ?? text.length : text.length;
+    const end = editing ? o.selectionEnd ?? start : text.length;
+    o.set("text", text.slice(0, start) + e + text.slice(end));
+    if (editing) {
+      o.selectionStart = o.selectionEnd = start + e.length;
+      if (o.hiddenTextarea) {
+        o.hiddenTextarea.value = o.text ?? "";
+        o.hiddenTextarea.selectionStart = o.hiddenTextarea.selectionEnd = start + e.length;
+      }
+    }
+    o.initDimensions?.();
+    canvas.current!.requestRenderAll();
+    snapshot();
+    force((n) => n + 1);
   }
 
   function addEmoji(e: string) {
@@ -640,6 +674,21 @@ export function ImageEditor({
                     </button>
                     <span className="text-[11px] text-white/50">{t("editor.textHint")}</span>
                   </div>
+                  <Row className="text-xl">
+                    {EMOJIS.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        // 누르는 순간 글자 고치기가 끝나지 않게 (커서 자리에 넣기)
+                        onMouseDown={(ev) => ev.preventDefault()}
+                        onClick={() => insertEmoji(e)}
+                        aria-label={t("editor.insertEmoji", { e })}
+                        className="shrink-0 rounded-md px-1 py-0.5 hover:bg-white/10"
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </Row>
                   {textSel && (
                     <>
                       <Row>
@@ -664,7 +713,7 @@ export function ImageEditor({
                             key={fo.key}
                             type="button"
                             onClick={() => setTextProp({ fontFamily: fontFamily(fo.key) }, fo.key)}
-                            className={cx("shrink-0 rounded-md bg-white px-2 py-1", textSel.fontFamily === fontFamily(fo.key) ? "ring-2 ring-[#8b5cf6]" : "opacity-80")}
+                            className={cx("shrink-0 rounded-md bg-white px-2 py-1", fontKeyOf(textSel.fontFamily) === fo.key ? "ring-2 ring-[#8b5cf6]" : "opacity-80")}
                             title={fo.label}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}

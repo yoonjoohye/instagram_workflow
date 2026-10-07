@@ -34,7 +34,7 @@ export default defineMessages({
     stale: "그 뒤에 사진이 바뀌었어요. 게시할 때 같은 설정으로 영상을 다시 만들어 올려요.",
     mixedVideo: "동영상이 섞인 게시물은 동영상마다 '영상 편집'에서 음악을 넣을 수 있어요.",
     pickFirst: "먼저 음악을 골라 주세요.",
-    igNote: "인스타그램 앱의 음악(유명 곡)은 자동으로 붙일 수 없어요. 그런 곡은 아래 '음악' 추천을 보고 게시 후 앱에서 추가해 주세요.",
+    igNote: "인스타그램 앱의 음악(유명 곡)은 여기서 붙일 수 없어요. 그런 곡을 쓰려면 게시 후 인스타그램 앱에서 추가해 주세요.",
     rebuilding: "바뀐 사진으로 영상을 다시 만드는 중…",
 
     editVideo: "영상 편집",
@@ -95,7 +95,7 @@ export default defineMessages({
     stale: "The photos changed since then. We'll rebuild the video with the same settings when you publish.",
     mixedVideo: "For posts with videos, add music to each video with 'Edit video'.",
     pickFirst: "Pick some music first.",
-    igNote: "Music from the Instagram app (popular songs) can't be attached automatically. For those, see the 'Music' suggestions below and add it in the app after publishing.",
+    igNote: "Music from the Instagram app (popular songs) can't be attached here. To use one, add it in the Instagram app after publishing.",
     rebuilding: "Rebuilding the video with the new photos…",
 
     editVideo: "Edit video",
@@ -156,7 +156,7 @@ export default defineMessages({
     stale: "その後に写真が変わりました。投稿時に同じ設定で動画を作り直します。",
     mixedVideo: "動画を含む投稿は、動画ごとに「動画を編集」で音楽を入れられます。",
     pickFirst: "先に音楽を選んでください。",
-    igNote: "Instagramアプリの音楽(有名な曲)は自動では付けられません。その場合は下の「音楽」のおすすめを見て、投稿後にアプリで追加してください。",
+    igNote: "Instagramアプリの音楽(有名な曲)はここでは付けられません。使いたい場合は投稿後にInstagramアプリで追加してください。",
     rebuilding: "変わった写真で動画を作り直しています…",
 
     editVideo: "動画を編集",

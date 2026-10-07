@@ -5,22 +5,24 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMe } from "@/components/AdminShell";
 import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplySummary, autoReplyValid } from "@/components/AutoReplyCard";
 import { IconExternal, IconSpark } from "@/components/icons";
 import { AudioTrack, MediaStrip } from "@/components/studio/MediaStrip";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
-import { MusicCard } from "@/components/studio/MusicCard";
 import { StoryPreview } from "@/components/studio/StoryPreview";
+import { HashtagField } from "@/components/studio/HashtagField";
+import { CaptionField } from "@/components/studio/CaptionField";
 import { buildSoundtrack, SoundtrackCard } from "@/components/studio/SoundtrackCard";
 import { VideoEditor } from "@/components/studio/VideoEditor";
-import { Badge, Button, Card, cx, Field, inputClass, Notice, Skeleton, Spinner, StatusDot } from "@/components/ui";
+import { Badge, Button, Card, Notice, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { useI18n } from "@/i18n/client";
 import { rich } from "@/i18n/rich";
 import { api, toApiError, useApi } from "@/lib/api";
-import { composeCaption, fmtDateTime, KIND_LABEL, parseHashtags, STATUS_LABEL } from "@/lib/format";
+import { composeCaption, fmtDateTime, KIND_LABEL, STATUS_LABEL } from "@/lib/format";
 import { statusTone } from "@/lib/status";
+import { moveItem } from "@/lib/useDragSort";
 import type { Asset, AutoReplyInput, AutoReplyRule, Job, Quota } from "@/lib/types";
 
 // 편집기(fabric.js)는 열 때만 내려받습니다.
@@ -30,11 +32,11 @@ export const CAPTION_LIMIT = 2200; // Instagram 캡션 최대 길이
 export const HASHTAG_LIMIT = 30;
 
 export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { me } = useMe();
   const quota = useApi<Quota>("/workflow/quota");
   const [caption, setCaption] = useState("");
-  const [tagsText, setTagsText] = useState("");
+  const [hashtags, setHashtags] = useState<string[]>([]);
   const [shareToFeed, setShareToFeed] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -43,8 +45,6 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
   const [editing, setEditing] = useState<number | null>(null);
   const [editingVideo, setEditingVideo] = useState<number | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
-  const [rewriteHint, setRewriteHint] = useState("");
-  const [rewriting, setRewriting] = useState(false);
   // 댓글 자동 응답은 게시 흐름의 일부로 함께 저장합니다 (스토리는 댓글이 없어 제외).
   const supportsAutoReply = Boolean(job) && job!.media_kind !== "STORIES";
   const arRule = useApi<AutoReplyRule>(job && supportsAutoReply ? `/autoreply/jobs/${job.id}` : null);
@@ -56,11 +56,10 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
 
   useEffect(() => {
     setCaption(job?.caption ?? "");
-    setTagsText((job?.hashtags ?? []).map((t) => `#${t}`).join(" "));
+    setHashtags(job?.hashtags ?? []);
     setError(undefined);
   }, [job?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hashtags = useMemo(() => parseHashtags(tagsText), [tagsText]);
   const finalCaption = composeCaption(caption, hashtags);
 
   if (!job) {
@@ -160,23 +159,6 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
     }
   }
 
-  async function rewrite() {
-    setRewriting(true);
-    setError(undefined);
-    try {
-      const r = await api<{ caption: string; hashtags: string[] }>(`/studio/${job!.id}/caption`, {
-        method: "POST",
-        json: { instruction: rewriteHint, caption, language: locale },
-      });
-      setCaption(r.caption);
-      if (r.hashtags.length) setTagsText(r.hashtags.map((h) => `#${h}`).join(" "));
-    } catch (e) {
-      setError(toApiError(e).message);
-    } finally {
-      setRewriting(false);
-    }
-  }
-
   // ── 오른쪽: 올라갈 모습 + 임시저장 / 게시 ───────────────────────
   const canPublish =
     !locked || (isStory && job.status === "publishing" && !!progress && progress.done < progress.total);
@@ -201,7 +183,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
             avatar={me.profile_picture_url}
             assets={shown}
             caption={finalCaption}
-            music={track ? { title: track.name, artist: "" } : job.music?.selected}
+            music={track ? { title: track.name } : null}
           />
         )}
 
@@ -297,6 +279,20 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
             canRedoFromScratch={!original}
             onManualEdit={!locked ? (i) => setEditing(i) : undefined}
             onVideoEdit={!locked ? (i) => setEditingVideo(i) : undefined}
+            onReorder={
+              !locked && visual.length === job.assets.length
+                ? async (from, to) => {
+                    const order = moveItem(job.assets.map((_, i) => i), from, to);
+                    onChange({ ...job, assets: order.map((i) => job.assets[i]) }); // 바로 보이게
+                    try {
+                      onChange(await api<Job>(`/studio/${job.id}/reorder`, { method: "POST", json: { order } }));
+                    } catch (e) {
+                      setError(toApiError(e).message);
+                      reload().catch(() => {});
+                    }
+                  }
+                : undefined
+            }
             onRedo={
               !locked
                 ? async (i, instruction, fromCurrent) => {
@@ -347,53 +343,21 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
 
         {(!locked || job.soundtrack) && <SoundtrackCard job={job} locked={locked} onChange={onChange} />}
 
-        {job.music && <MusicCard job={job} locked={locked} onChange={onChange} />}
-
         {isStory ? (
           <Notice tone="neutral">{t("studio.storyReviewNote")}</Notice>
         ) : (
           <Card title={t("studio.captionTitle")}>
             <div className="space-y-4">
-              <Field
-                label={t("studio.captionBody")}
-                htmlFor="caption"
-                hint={
-                  <span className={cx(overCaption && "font-medium text-bad")}>
-                    {t("studio.captionCount", { n: finalCaption.length.toLocaleString(), max: CAPTION_LIMIT.toLocaleString() })}
-                  </span>
-                }
-              >
-                <textarea
-                  id="caption"
-                  rows={7}
-                  value={caption}
-                  onChange={(e) => setCaption(e.target.value)}
-                  className={cx(inputClass, "resize-y leading-relaxed")}
-                  disabled={locked}
-                />
-              </Field>
-              {!locked && (
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    value={rewriteHint}
-                    onChange={(e) => setRewriteHint(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), rewrite())}
-                    placeholder={t("studio.rewritePh")}
-                    maxLength={500}
-                    className={cx(inputClass, "min-w-0 flex-1 basis-60")}
-                  />
-                  <Button onClick={rewrite} loading={rewriting} disabled={rewriting}>
-                    ✨ {rewriting ? t("studio.rewriting") : t("studio.rewrite")}
-                  </Button>
-                </div>
-              )}
-              <Field
-                label={t("studio.hashtags")}
-                htmlFor="tags"
-                hint={<span className={cx(overTags && "font-medium text-bad")}>{t("studio.hashtagCount", { n: hashtags.length, max: HASHTAG_LIMIT })}</span>}
-              >
-                <input id="tags" value={tagsText} onChange={(e) => setTagsText(e.target.value)} className={inputClass} disabled={locked} />
-              </Field>
+              <CaptionField
+                jobId={job.id}
+                value={caption}
+                onChange={setCaption}
+                onHashtags={(tags) => !hashtags.length && setHashtags(tags)}
+                count={finalCaption.length}
+                max={CAPTION_LIMIT}
+                disabled={locked}
+              />
+              <HashtagField jobId={job.id} value={hashtags} onChange={setHashtags} caption={caption} max={HASHTAG_LIMIT} disabled={locked} />
 
               {supportsAutoReply &&
                 (arForm ? (
@@ -432,7 +396,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
             username: me.username,
             avatar: me.profile_picture_url,
             caption: finalCaption,
-            music: job.music?.selected,
+            music: track ? { title: track.name } : null,
           }}
           onClose={() => setEditing(null)}
           onSaved={reload}

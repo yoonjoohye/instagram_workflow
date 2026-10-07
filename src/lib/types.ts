@@ -54,8 +54,6 @@ export type Job = {
   created_at: string;
   sources?: { title: string; uri: string }[];
   requirements?: { requirement: string; how: string }[];
-  /** 인스타 음악 추천·선택 (사진 게시물은 게시 후 인스타 앱에서 추가) */
-  music?: { suggestions: MusicPick[]; selected: MusicPick | null } | null;
   /** 스토리: 올린 개수 / 전체 */
   story_progress?: { done: number; total: number } | null;
   /** 사진에 음악을 넣어 만든 영상 — 있으면 피드는 릴스로, 스토리는 동영상 스토리로 올라감. stale = 그 뒤 사진이 바뀜 */
@@ -85,8 +83,6 @@ export type VideoEdit = {
   music: MusicSource | null;
   duration: number;
 };
-
-export type MusicPick = { title: string; artist: string; reason?: string; section?: string };
 
 export type Quota = { used: number; total: number; remaining: number };
 

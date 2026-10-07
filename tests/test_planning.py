@@ -27,7 +27,6 @@ PLAN = {
     "slides": [{"photos": [0, 1, 1, 9], "layout": "photo", "title": "", "body": "", "cta": "", "image_text": "", "visual": "v"}],
     "caption_parts": ["파리 다녀옴"],
     "hashtags": ["#파리", "여행"],
-    "music": [{"title": "La Vie en rose", "artist": "Édith Piaf", "reason": "r", "section": "s"}, {"title": "", "artist": "x"}],
 }
 
 
@@ -36,7 +35,6 @@ def test_sanitize_plan_dedupes_and_bounds_photos():
     slide = design["slides"][0]
     assert slide["photos"] == [0, 1]  # 중복·범위 밖(9) 제거
     assert design["hashtags"] == ["파리", "여행"]
-    assert [m["title"] for m in design["music"]] == ["La Vie en rose"]  # 제목 없는 곡 제거
 
 
 def test_sanitize_plan_reads_legacy_single_photo():
@@ -74,7 +72,6 @@ def test_caption_modes(monkeypatch, caption_format, expect_in_prompt, expect_cap
     assert engine == "gemini"
     assert expect_in_prompt in seen["prompt"]
     assert design["caption"] == expect_caption
-    assert design["music"][0]["title"] == "La Vie en rose"
 
 
 def test_text_call_falls_back_and_cools_down(monkeypatch):

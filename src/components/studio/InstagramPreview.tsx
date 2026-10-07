@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useT } from "@/i18n/client";
 import { mediaSrc } from "@/lib/format";
-import type { Asset, MusicPick } from "@/lib/types";
+import type { Asset } from "@/lib/types";
 import { Avatar, cx } from "@/components/ui";
 
 /** 인스타그램 피드에 올라갔을 때의 모습 — 헤더·미디어(사진/캐러셀/동영상)·버튼·캡션.
@@ -19,7 +19,8 @@ export function InstagramPreview({
   avatar?: string;
   assets: Asset[];
   caption: string;
-  music?: MusicPick | null;
+  /** 영상에 넣은 음악 (헤더에 곡 이름 표시) */
+  music?: { title: string; artist?: string } | null;
 }) {
   const t = useT();
   const track = useRef<HTMLDivElement>(null);

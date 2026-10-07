@@ -1,4 +1,4 @@
-"""게시물 구성: 주제·연출 방향·사진으로 장 수, 장별 사진·레이아웃·글, 캡션·해시태그·음악을 Gemini 로 설계합니다."""
+"""게시물 구성: 주제·연출 방향·사진으로 장 수, 장별 사진·레이아웃·글, 캡션·해시태그를 Gemini 로 설계합니다."""
 from __future__ import annotations
 
 import json
@@ -19,7 +19,6 @@ from .fonts import FONTS, font_key
 from .gemini import GeminiError
 from .imaging import b64, small
 from .limits import MAX_SLIDES, MAX_STORIES
-from .music import MUSIC_RULES, clean_music
 from .textutil import clip
 
 _PLAN_PROMPT = """너는 인스타그램 게시물 크리에이티브 디렉터야. 사용자의 주제와 연출 방향을 그대로 실현하는 게시물을 설계해.
@@ -94,7 +93,7 @@ _ORIGINAL_RULES = """
 원본 게시 (매우 중요)
 - 첨부는 사용자가 올린 원본이고 이미지 편집 없이 그대로, 올린 순서대로 게시돼: {kinds}
 - 그러니 slides 는 첨부 순서대로 한 장씩(photos 에 그 번호 하나, layout 'photo', 글 없음)만 만들고,
-  캡션·해시태그·음악은 동영상 장면(대표 화면)과 사진 내용을 보고 만들어."""
+  캡션·해시태그는 동영상 장면(대표 화면)과 사진 내용을 보고 만들어."""
 
 
 LAYOUTS = ("designed", "photo", "overlay", "panel", "center")
@@ -144,21 +143,8 @@ def plan_schema(k: int) -> dict[str, Any]:
             },
             "caption_parts": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": k, "maxItems": k},
             "hashtags": {"type": "ARRAY", "items": {"type": "STRING"}},
-            "music": {
-                "type": "ARRAY",
-                "items": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "title": {"type": "STRING"},
-                        "artist": {"type": "STRING"},
-                        "reason": {"type": "STRING"},
-                        "section": {"type": "STRING"},
-                    },
-                    "required": ["title", "artist", "reason", "section"],
-                },
-            },
         },
-        "required": ["requirements", "concept", "format", "art_style", "font", "slides", "caption_parts", "hashtags", "music"],
+        "required": ["requirements", "concept", "format", "art_style", "font", "slides", "caption_parts", "hashtags"],
     }
 
 
@@ -213,7 +199,6 @@ def plan_post(
             else ""
         ),
     )
-    text += MUSIC_RULES.format(ui_lang=LANG_NAME.get(language, "English"))
     if story:
         text += STORY_RULES.format(max_stories=MAX_STORIES)
     if original:
@@ -303,7 +288,6 @@ def sanitize_plan(raw: dict[str, Any], n: int) -> dict[str, Any]:
         "font": font_key(raw.get("font")),
         "slides": slides,
         "hashtags": [str(t).lstrip("#").strip() for t in (raw.get("hashtags") or []) if str(t).strip()][:20],
-        "music": clean_music(raw.get("music")),
     }
 
 

@@ -10,6 +10,7 @@ import { Button, cx, inputClass, Spinner } from "@/components/ui";
 import { toApiError } from "@/lib/api";
 import { callNative, isNativeApp } from "@/lib/nativeBridge";
 import { mediaSrc } from "@/lib/format";
+import { useDragSort } from "@/lib/useDragSort";
 import type { Asset } from "@/lib/types";
 
 export type RedoFn = (index: number, instruction: string, fromCurrent: boolean) => Promise<void>;
@@ -62,10 +63,13 @@ export function MediaStrip({
   onRedo,
   onManualEdit,
   onVideoEdit,
+  onReorder,
   canRedoFromScratch = true,
   filePrefix = "post",
 }: {
   assets: Asset[];
+  /** 끌어서 순서 바꾸기 */
+  onReorder?: (from: number, to: number) => void;
   onRedo?: RedoFn;
   /** 이미지 편집기 열기 (글자·스티커·그리기·보정·자르기) */
   onManualEdit?: (index: number) => void;
@@ -78,6 +82,7 @@ export function MediaStrip({
   const t = useT();
   const [error, setError] = useState<string>();
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const { drag, sortProps } = useDragSort((from, to) => onReorder?.(from, to), !onReorder);
   if (!assets.length) return <p className="py-8 text-center text-sm text-fg-3">{t("studio.noMedia")}</p>;
   const single = assets.length === 1;
   const fileName = (a: Asset, i: number) => `${filePrefix}-${i + 1}.${a.type === "video" ? "mp4" : "jpg"}`;
@@ -106,7 +111,8 @@ export function MediaStrip({
     <>
       {error && <p className="mb-2 text-[12px] text-bad">{error}</p>}
       {!single && ready.length > 1 && (
-        <div className="mb-2 flex justify-end">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-[12px] text-fg-3">{onReorder ? `⠿ ${t("studio.dragToReorder")}` : ""}</span>
           <Button variant="ghost" size="sm" onClick={downloadAll} disabled={downloadingAll}>
             {downloadingAll ? <Spinner className="size-3" /> : "↓"} {t("studio.downloadAll", { n: ready.length })}
           </Button>
@@ -114,8 +120,17 @@ export function MediaStrip({
       )}
       <div className={cx("flex items-start gap-3", !single && "snap-x overflow-x-auto pb-2")}>
         {assets.map((a, i) => (
-          <MediaItem
+          <div
             key={`${a.url}-${i}`}
+            {...(single ? {} : sortProps(i))}
+            className={cx(
+              "shrink-0 snap-start rounded-lg transition-[opacity,box-shadow]",
+              onReorder && !single && "cursor-grab touch-manipulation select-none [-webkit-touch-callout:none]",
+              drag?.from === i && "opacity-40",
+              drag && drag.over === i && drag.from !== i && "ring-2 ring-accent ring-offset-2 ring-offset-surface-1",
+            )}
+          >
+          <MediaItem
             asset={a}
             index={i}
             total={assets.length}
@@ -127,6 +142,7 @@ export function MediaStrip({
             canRedoFromScratch={canRedoFromScratch}
             onError={setError}
           />
+          </div>
         ))}
       </div>
     </>
@@ -206,7 +222,7 @@ export function MediaItem({
           <video src={mediaSrc(a.url)} poster={mediaSrc(a.thumbnail_url) || undefined} controls playsInline className="block max-h-[520px] w-full object-contain" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={mediaSrc(a.url)} alt={t("studio.imageAlt", { n: i + 1 })} className="block max-h-[520px] w-full object-contain" />
+          <img src={mediaSrc(a.url)} alt={t("studio.imageAlt", { n: i + 1 })} draggable={false} className="block max-h-[520px] w-full object-contain" />
         )}
         {!single && (
           <figcaption className="tnum absolute top-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">

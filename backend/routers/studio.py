@@ -249,7 +249,6 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             ) from exc
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Gemini 로 게시물을 구성하지 못했습니다: {exc}") from exc
     slides = svc.slide_list(design)
-    music = design.get("music") or []
     if original:
         items = blobs[: svc.MAX_STORIES if story else 10]  # 캐러셀은 최대 10장
         media_kind = "STORIES" if story else "CAROUSEL" if len(items) > 1 else ("REELS" if items[0].kind == "video" else "IMAGE")
@@ -283,8 +282,6 @@ def plan(body: PlanIn, request: Request, account: Account = Depends(current_acco
             "sources": [s.model_dump() for s in body.sources],
             "original": original,
             "post_type": body.post_type,
-            # 인스타 음악 추천 — 첫 곡을 기본 선택 (사진 게시물에는 API 로 음악을 붙일 수 없어 앱에서 추가하도록 안내)
-            "music": {"suggestions": music, "selected": music[0] if music else None},
         },
         assets=assets,
     )
@@ -331,70 +328,12 @@ def manual(body: ManualIn, account: Account = Depends(current_account), db: Sess
             "topic": body.prompt.strip(),
             "original": True,
             "post_type": body.post_type,
-            "music": {"suggestions": [], "selected": None},
         },
         assets=[_original_asset(b) for b in blobs],
     )
     db.add(job)
     db.commit()
     db.refresh(job)
-    return _job_dict(job)
-
-
-class MusicPick(BaseModel):
-    title: str = Field(min_length=1, max_length=120)
-    artist: str = Field(default="", max_length=120)
-    section: str = Field(default="", max_length=120)
-    reason: str = Field(default="", max_length=200)
-
-
-class MusicIn(BaseModel):
-    selected: MusicPick | None = None  # None = 음악 없이
-
-
-@router.put("/studio/{job_id}/music")
-def set_music(job_id: int, body: MusicIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
-    """추천 곡 중 고르거나 직접 입력한 곡으로 바꿉니다."""
-    job = _own_job(db, account, job_id)
-    music = dict(job.plan.get("music") or {"suggestions": []})
-    music["selected"] = body.selected.model_dump() if body.selected else None
-    job.plan = {**job.plan, "music": music}
-    flag_modified(job, "plan")
-    db.commit()
-    return _job_dict(job)
-
-
-class MusicSuggestIn(BaseModel):
-    hint: str = Field(default="", max_length=300)  # 원하는 분위기·장르·언어
-    language: str | None = Field(default=None, max_length=8)
-
-
-@router.post("/studio/{job_id}/music/suggest")
-def resuggest_music(
-    job_id: int, body: MusicSuggestIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
-) -> dict:
-    """요청한 분위기로 음악을 다시 추천합니다 (Google 검색으로 실제 곡인지 확인)."""
-    job = _own_job(db, account, job_id)
-    music = dict(job.plan.get("music") or {"suggestions": [], "selected": None})
-    shown = [f"{m['title']} - {m['artist']}" for m in music.get("suggestions") or []]
-    try:
-        fresh = svc.suggest_music(
-            job.plan.get("topic") or job.prompt, job.caption, body.hint, shown,
-            language=norm_lang(body.language or lang_of(request)),
-        )
-    except svc.GeminiError as exc:
-        if svc.is_busy(exc):
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})",
-            ) from exc
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"음악을 추천하지 못했습니다: {exc}") from exc
-    if not fresh:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "음악을 추천하지 못했습니다: 결과 없음")
-    music["suggestions"] = fresh
-    job.plan = {**job.plan, "music": music}
-    flag_modified(job, "plan")
-    db.commit()
     return _job_dict(job)
 
 
@@ -587,6 +526,33 @@ async def save_manual_edit(
     return {"index": index, "asset": assets[index]}
 
 
+class ReorderIn(BaseModel):
+    order: list[int] = Field(min_length=1, max_length=20)  # 새 순서대로 나열한 지금 번호들
+
+
+@router.post("/studio/{job_id}/reorder")
+def reorder(job_id: int, body: ReorderIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """장 순서 바꾸기 (끌어서 놓기). 이미지와 그 장의 구성(다시 만들기에 쓰임)을 함께 옮깁니다."""
+    job = db.get(GenerationJob, job_id)
+    if not job or job.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
+    if job.status in ("published", "publishing"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "이미 게시된 작업입니다.")
+    assets = list(job.assets or [])
+    if sorted(body.order) != list(range(len(assets))):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "순서가 올바르지 않습니다.")
+    job.assets = [assets[i] for i in body.order]
+    plan = dict(job.plan or {})
+    slides = plan.get("slides")
+    if isinstance(slides, list) and len(slides) == len(assets):
+        plan["slides"] = [slides[i] for i in body.order]
+        job.plan = plan
+    flag_modified(job, "assets")
+    db.commit()
+    db.refresh(job)
+    return _job_dict(job)
+
+
 @router.get("/studio/fonts/{key}.font")
 def font_file(key: str) -> Response:
     """편집기(브라우저)에서 같은 글씨체를 쓰도록 제목용 글꼴 파일을 줍니다."""
@@ -607,7 +573,8 @@ class CaptionRewriteIn(BaseModel):
 def rewrite_caption(
     job_id: int, body: CaptionRewriteIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
 ) -> dict:
-    """캡션을 요청대로 다시 씁니다 (처음 정한 캡션 양식 유지). 저장은 화면에서 '임시저장'·'게시' 때."""
+    """사진·주제를 보고 캡션을 씁니다 (비어 있으면 새로, 있으면 요청대로 다시. 처음 정한 캡션 양식 유지).
+    저장은 화면에서 '임시저장'·'게시' 때."""
     job = db.get(GenerationJob, job_id)
     if not job or job.account_id != account.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
@@ -620,6 +587,7 @@ def rewrite_caption(
             instruction=body.instruction,
             caption_format=plan.get("caption_format", ""),
             language=norm_lang(body.language or lang_of(request)),
+            images=_job_images(db, account, job),
         )
     except svc.GeminiError as exc:
         if svc.is_busy(exc):
@@ -628,6 +596,49 @@ def rewrite_caption(
                 "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})",
             ) from exc
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"캡션을 다시 쓰지 못했습니다: {exc}") from exc
+
+
+def _job_images(db: Session, account: Account, job: GenerationJob) -> list[bytes]:
+    """게시물의 사진들 (동영상은 대표 화면) — 글·해시태그를 쓸 때 Gemini 가 참고합니다."""
+    images = []
+    for a in job.assets or []:
+        url = a.get("url", "") if a.get("type") == "image" else a.get("thumbnail_url", "")
+        blob = db.get(MediaBlob, _blob_id(url))
+        if blob is not None and blob.account_id == account.id and blob.data:
+            images.append(blob.data)
+    return images
+
+
+class HashtagIn(BaseModel):
+    caption: str = Field(default="", max_length=2200)  # 화면에서 지금 쓰고 있는 캡션
+    hint: str = Field(default="", max_length=300)  # 원하는 방향 (예: 여행, 영어로)
+    language: str | None = Field(default=None, max_length=8)
+
+
+@router.post("/studio/{job_id}/hashtags")
+def hashtags(
+    job_id: int, body: HashtagIn, request: Request, account: Account = Depends(current_account), db: Session = Depends(get_db)
+) -> dict:
+    """사진과 캡션을 보고 해시태그를 추천합니다 (저장은 화면에서 '임시저장'·'게시' 때)."""
+    job = db.get(GenerationJob, job_id)
+    if not job or job.account_id != account.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "게시물 작업을 찾을 수 없습니다.")
+    plan = job.plan if isinstance(job.plan, dict) else {}
+    try:
+        tags = svc.suggest_hashtags(
+            _job_images(db, account, job), topic=plan.get("topic") or job.prompt, caption=body.caption or job.caption, hint=body.hint,
+            language=norm_lang(body.language or lang_of(request)),
+        )
+    except svc.GeminiError as exc:
+        if svc.is_busy(exc):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Gemini 가 지금 혼잡하거나 사용 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요. " f"({exc})",
+            ) from exc
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"해시태그를 만들지 못했습니다: {exc}") from exc
+    if not tags:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "해시태그를 만들지 못했습니다: 결과 없음")
+    return {"hashtags": tags}
 
 
 def _image_failure_hint(engine: str) -> str:

@@ -19,9 +19,10 @@ export default defineMessages({
     presets: "필터", presetNone: "원본", presetMono: "흑백", presetVintage: "빈티지", presetWarm: "따뜻하게", presetCool: "차갑게", presetVivid: "선명하게",
     brightness: "밝기", contrast: "대비", saturation: "채도", reset: "초기화",
     cropHint: "사진을 끌어서 위치를 맞추고, 확대로 잘라낼 범위를 정해요.", zoom: "확대", rotate: "90° 회전", flip: "좌우 반전",
-    deleteSelected: "선택한 것 삭제", bringFront: "맨 앞으로", edited: "직접 편집함",
+    insertEmoji: "글자에 {e} 넣기", deleteSelected: "선택한 것 삭제", bringFront: "맨 앞으로", edited: "직접 편집함",
   },
   en: {
+    insertEmoji: "Insert {e} into text",
     warmth: "Warmth", fade: "Fade", vignette: "Vignette", sharpen: "Sharpen", straighten: "Straighten",
     brushPen: "Pen", brushMarker: "Marker", brushNeon: "Neon", eraser: "Eraser", eraserHint: "Rub over drawings, text or stickers to erase them.",
     shapeRect: "Rectangle", shapeLine: "Line", fill: "Fill", customColor: "Other color",
@@ -41,6 +42,7 @@ export default defineMessages({
     deleteSelected: "Delete selected", bringFront: "Bring to front", edited: "Edited",
   },
   ja: {
+    insertEmoji: "文字に{e}を入れる",
     warmth: "暖かさ", fade: "フェード", vignette: "ビネット", sharpen: "シャープ", straighten: "傾き補正",
     brushPen: "ペン", brushMarker: "マーカー", brushNeon: "ネオン", eraser: "消しゴム", eraserHint: "消したい絵・文字・スタンプをこすると消えます。",
     shapeRect: "四角", shapeLine: "線", fill: "塗りつぶし", customColor: "ほかの色",

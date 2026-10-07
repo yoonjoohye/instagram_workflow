@@ -1,4 +1,4 @@
-"""게시물 만들기 API 흐름: 업로드 → 구성 → 이미지 → 마무리 → 음악 → 삭제 (Gemini 는 가짜)."""
+"""게시물 만들기 API 흐름: 업로드 → 구성 → 이미지 → 마무리 → 삭제 (Gemini 는 가짜)."""
 import base64
 import io
 import json
@@ -21,7 +21,6 @@ PLAN = {
     "requirements": [], "concept": "c", "format": "f", "art_style": "a", "font": "pretendard",
     "slides": [{"photos": [0, 1], "layout": "overlay", "title": "PARIS ✨", "body": "", "cta": "", "image_text": "", "visual": "v"}],
     "caption_parts": ["파리"], "hashtags": ["파리"],
-    "music": [{"title": "La Vie en rose", "artist": "Édith Piaf", "reason": "r", "section": "s"}],
 }
 
 
@@ -44,15 +43,13 @@ def test_full_flow(monkeypatch, client, login, account, db):
     assert r.status_code == 201, r.text
     job, slides = r.json()["job"], r.json()["slides"]
     assert job["media_kind"] == "IMAGE" and len(slides) == 1
-    assert job["music"]["selected"]["title"] == "La Vie en rose"
+    assert "music" not in job  # 인스타 음악 추천은 없앰 (API 로 붙일 수 없음)
 
     r = client.post(f"{PREFIX}/{job['id']}/slides/0")
     assert r.status_code == 200 and r.json()["engine"] == "gemini"
     visual_id = r.json()["asset"]["meta"]["visual_id"]
 
     assert client.post(f"{PREFIX}/{job['id']}/finalize").json()["status"] == "ready"
-    r = client.put(f"{PREFIX}/{job['id']}/music", json={"selected": {"title": "Paris", "artist": "X"}})
-    assert r.json()["music"]["selected"]["title"] == "Paris"
 
     # 이미지 수정 실패(strict)면 원래 이미지를 바꾸지 않고 이유를 알림
     monkeypatch.setattr(gemini, "call", lambda *a, **k: (_ for _ in ()).throw(gemini.GeminiError("quota exceeded")))
@@ -125,3 +122,57 @@ def test_caption_rewrite_keeps_template(monkeypatch, client, login, account):
     assert r.json() == {"caption": "짧게 다시 씀\n👉 링크는 프로필", "hashtags": ["파리"], "hashtags_inline": False}
     assert "더 짧게" in seen["prompt"] and "지금 캡션" in seen["prompt"]
     client.delete(f"/workflow/jobs/{job['id']}")
+
+
+def test_reorder_moves_images_with_their_slide_plan(client, login, account, db):
+    from backend.models import GenerationJob
+
+    login(account)
+    job = GenerationJob(
+        account_id=account.id, prompt="p", media_kind="CAROUSEL", status="ready", provider="studio", caption="", hashtags=[],
+        assets=[{"type": "image", "url": f"u{i}", "thumbnail_url": "", "meta": {}} for i in range(3)],
+        plan={"slides": [{"title": f"s{i}"} for i in range(3)]},
+    )
+    db.add(job)
+    db.commit()
+    r = client.post(f"{PREFIX}/{job.id}/reorder", json={"order": [2, 0, 1]})
+    assert [a["url"] for a in r.json()["assets"]] == ["u2", "u0", "u1"]
+    db.expire_all()
+    assert [s["title"] for s in db.get(GenerationJob, job.id).plan["slides"]] == ["s2", "s0", "s1"]
+    assert client.post(f"{PREFIX}/{job.id}/reorder", json={"order": [0, 0, 1]}).status_code == 400
+
+
+def test_hashtags_from_photos_and_caption(monkeypatch, client, login, account, db):
+    seen = {}
+
+    def fake(model, parts, cfg=None, **_):
+        seen["images"] = sum(1 for p in parts if "inlineData" in p)
+        seen["text"] = parts[-1]["text"]
+        return {"candidates": [{"content": {"parts": [{"text": json.dumps({"hashtags": ["#파리 여행", "파리여행", "eiffel"]})}]}}]}
+
+    monkeypatch.setattr(gemini, "call", fake)
+    login(account)
+    ids = [client.post("/media/uploads", files={"file": ("a.jpg", jpeg("red"), "image/jpeg")}).json()["id"]]
+    job = client.post("/studio/manual", json={"upload_ids": ids}).json()
+    r = client.post(f"{PREFIX}/{job['id']}/hashtags", json={"caption": "에펠탑 앞에서", "language": "ko"})
+    assert r.status_code == 200, r.text
+    assert r.json()["hashtags"] == ["파리여행", "eiffel"]  # 띄어쓰기·# 제거, 중복 제거
+    assert seen["images"] == 1 and "에펠탑 앞에서" in seen["text"]
+
+
+def test_caption_written_from_photos_when_empty(monkeypatch, client, login, account, db):
+    seen = {}
+
+    def fake(model, parts, cfg=None, **_):
+        seen["images"] = sum(1 for p in parts if "inlineData" in p)
+        seen["text"] = parts[-1]["text"]
+        return {"candidates": [{"content": {"parts": [{"text": json.dumps({"caption_parts": ["에펠탑 앞 노을 🌅"], "hashtags": ["파리"]})}]}}]}
+
+    monkeypatch.setattr(gemini, "call", fake)
+    login(account)
+    ids = [client.post("/media/uploads", files={"file": ("a.jpg", jpeg("red"), "image/jpeg")}).json()["id"]]
+    job = client.post("/studio/manual", json={"upload_ids": ids, "prompt": "파리 여행"}).json()
+    r = client.post(f"{PREFIX}/{job['id']}/caption", json={"caption": "", "instruction": "", "language": "ko"})
+    assert r.status_code == 200, r.text
+    assert r.json()["caption"] == "에펠탑 앞 노을 🌅"
+    assert seen["images"] == 1 and "사진과 주제에 어울리게" in seen["text"] and "파리 여행" in seen["text"]

@@ -14,7 +14,7 @@ PLAN = {
     "slides": [
         {"photos": [], "layout": "center", "title": f"장 {i}", "body": "", "cta": "", "image_text": "", "visual": "v"} for i in range(7)
     ],
-    "caption_parts": ["무시됨"], "hashtags": ["무시됨"], "music": [],
+    "caption_parts": ["무시됨"], "hashtags": ["무시됨"],
 }
 
 

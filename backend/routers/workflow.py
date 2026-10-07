@@ -70,8 +70,6 @@ def _job_dict(job: GenerationJob) -> dict:
         "requirements": (job.plan or {}).get("requirements", []) if isinstance(job.plan, dict) else [],
         # 스토리: 올린 개수 / 전체 (여러 개를 이어서 올리는 중일 때 화면에 표시)
         "story_progress": _story_progress(job),
-        # 인스타 음악 추천·선택 (사진 게시물은 게시 후 인스타 앱에서 추가)
-        "music": (job.plan or {}).get("music") if isinstance(job.plan, dict) else None,
         # 사진에 음악을 넣어 만든 영상 — 있으면 피드는 릴스로, 스토리는 동영상 스토리로 올라갑니다.
         "soundtrack": _soundtrack(job),
     }

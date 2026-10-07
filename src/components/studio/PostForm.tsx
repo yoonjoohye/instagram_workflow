@@ -10,8 +10,9 @@ import { IconSpark } from "@/components/icons";
 import * as photoLib from "@/lib/photoLibrary";
 import { PhotoLibraryPanel } from "@/components/studio/PhotoLibraryPanel";
 import { Badge, Button, Card, cx, Field, inputClass, Notice, Segmented } from "@/components/ui";
-import { TEMPLATES, TEMPLATE_ICON, TemplateKey } from "@/components/studio/templates";
+import { groupOf, TEMPLATE_GROUPS, TEMPLATE_ICON, type TemplateGroup, type TemplateKey } from "@/components/studio/templates";
 import { captureCover, uploadImageBlob, uploadPhoto } from "@/lib/uploads";
+import { moveItem, useDragSort } from "@/lib/useDragSort";
 
 const MAX_PHOTOS = 8;
 
@@ -37,6 +38,7 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
   const [format, setFormat] = useState("");
   const refInput = useRef<HTMLInputElement>(null);
   const [template, setTemplate] = useState<TemplateKey>("auto");
+  const [group, setGroup] = useState<TemplateGroup>(groupOf("auto"));
   const [postType, setPostType] = useState<"feed" | "story">("feed");
   const [font, setFont] = useState("auto");
   const fonts = useApi<{ data: { key: string; label: string; preview: string }[] }>("/studio/fonts");
@@ -69,6 +71,8 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
       ];
     });
   }
+
+  const { drag, sortProps } = useDragSort((from, to) => setPhotos((prev) => moveItem(prev, from, to)), busy);
 
   const move = (i: number, d: -1 | 1) =>
     setPhotos((prev) => {
@@ -266,6 +270,68 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           />
         </Field>
 
+        {/* 컨셉: 묶음별로 골라 연출 방향·캡션 양식을 채우고, 예시 주제를 눌러 바로 쓸 수 있게 */}
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[13px] font-medium text-fg-2">{t("studio.templateLabel")}</span>
+            <Segmented
+              size="sm"
+              ariaLabel={t("studio.templateLabel")}
+              value={group}
+              onChange={setGroup}
+              options={(Object.keys(TEMPLATE_GROUPS) as TemplateGroup[]).map((g) => ({
+                value: g,
+                label: t(`templates.group${g[0].toUpperCase()}${g.slice(1)}` as MessageKey),
+              }))}
+            />
+          </div>
+          <div role="radiogroup" aria-label={t("studio.templateLabel")} className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            {(["auto", ...TEMPLATE_GROUPS[group]] as TemplateKey[]).map((key) => {
+              const on = template === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={busy}
+                  onClick={() => setTemplate(key)}
+                  className={cx(
+                    "flex min-w-0 flex-col items-start rounded-lg border px-2.5 py-1.5 text-left transition-colors",
+                    on ? "border-accent bg-accent/10" : "border-line-strong hover:bg-surface-2",
+                  )}
+                >
+                  <span className="w-full truncate text-[13px] font-semibold">
+                    {TEMPLATE_ICON[key]} {t(`templates.${key}` as MessageKey)}
+                  </span>
+                  <span className="w-full truncate text-[11px] text-fg-3">{t(`templates.${key}Desc` as MessageKey)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div>
+            <p className="mb-1 text-[12px] text-fg-3">{t("templates.examples")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {t(`templates.${template}Ex` as MessageKey)
+                .split(" | ")
+                .map((ex) => (
+                  <button
+                    key={ex}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setPrompt(ex)}
+                    className={cx(
+                      "rounded-full border px-2.5 py-1 text-[12px] transition-colors",
+                      prompt === ex ? "border-accent bg-accent/10 text-fg" : "border-line text-fg-2 hover:bg-surface-2",
+                    )}
+                  >
+                    {ex}
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+
         <div className="space-y-2">
           <Segmented
             ariaLabel={t("studio.postTypeLabel")}
@@ -277,31 +343,6 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
             ]}
           />
           {postType === "story" && <p className="text-[12px] leading-relaxed text-fg-3">{t("studio.storyHint")}</p>}
-        </div>
-
-        <div role="radiogroup" aria-label={t("studio.templateLabel")} className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
-          {TEMPLATES.map((key) => {
-            const on = template === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                disabled={busy}
-                onClick={() => setTemplate(key)}
-                className={cx(
-                  "flex w-[118px] shrink-0 snap-start flex-col items-start rounded-lg border px-2.5 py-2 text-left transition-colors",
-                  on ? "border-accent bg-accent/10" : "border-line-strong hover:bg-surface-2",
-                )}
-              >
-                <span className="text-[13px] font-semibold">
-                  {TEMPLATE_ICON[key]} {t(`templates.${key}` as MessageKey)}
-                </span>
-                <span className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-fg-3">{t(`templates.${key}Desc` as MessageKey)}</span>
-              </button>
-            );
-          })}
         </div>
 
         <PhotoLibraryPanel
@@ -338,12 +379,21 @@ export function PostForm({ onCreated }: { onCreated: (job: Job) => void }) {
           {photos.length > 0 && (
             <ol className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
               {photos.map((p, i) => (
-                <li key={p.key} title={p.file.name} className="group relative aspect-square overflow-hidden rounded-md bg-surface-2">
+                <li
+                  key={p.key}
+                  title={p.file.name}
+                  {...sortProps(i)}
+                  className={cx(
+                    "group relative aspect-square cursor-grab touch-manipulation overflow-hidden rounded-md bg-surface-2 transition-[opacity,box-shadow] select-none [-webkit-touch-callout:none]",
+                    drag?.from === i && "opacity-40",
+                    drag && drag.over === i && drag.from !== i && "ring-2 ring-accent ring-offset-2 ring-offset-surface-1",
+                  )}
+                >
                   {p.kind === "video" ? (
                     <video src={p.preview} muted playsInline preload="metadata" className="size-full object-cover" />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.preview} alt="" className="size-full object-cover" />
+                    <img src={p.preview} alt="" draggable={false} className="size-full object-cover" />
                   )}
                   <span className="tnum absolute top-1 left-1 rounded bg-black/60 px-1 text-[11px] text-white">
                     {i + 1}

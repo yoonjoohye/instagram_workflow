@@ -29,7 +29,7 @@
 | `security.py` | 세션 쿠키 서명, 액세스 토큰 암호화 |
 | `i18n.py` | 서버 메시지(한국어) → 요청 언어 번역표 |
 | `routers/auth.py` | Instagram 로그인·콜백, 여러 계정 연결·전환, **앱 로그인 코드 교환**, 로컬 테스트 로그인, 데이터 삭제 콜백 |
-| `routers/studio.py` | 게시물 만들기: 업로드, 조사, 구성, 장별 이미지, 음악, 마무리 |
+| `routers/studio.py` | 게시물 만들기: 업로드, 조사, 구성, 장별 이미지, AI 없이 직접 만들기, 순서 바꾸기, 캡션 다시 쓰기·해시태그 추천, 마무리 |
 | `routers/soundtrack.py` | **음악 넣기**(사진 → 릴스·동영상 스토리)·**동영상 편집**(자르기·소리·음악·대표 화면), 기본 제공 곡, 내 음원 등록 |
 | `routers/workflow.py` | 만든 게시물 목록·수정·삭제, **Instagram 게시** |
 | `routers/insights.py` | 대시보드·게시물 성과, 매일 cron |
@@ -47,7 +47,7 @@ PostForm (src/components/studio/PostForm.tsx)
  1. (사진 폴더·사진첩 연결 시) POST /studio/photo-query → 기기 안에서 사진 고르기 (src/lib/photoLibrary)
  2. POST /media/uploads (사진) · Blob 업로드 + POST /media/videos (동영상)
  3. POST /studio/research        → services/studio/research.py   (Gemini + Google 검색)
- 4. POST /studio/plan            → services/studio/planning.py   (장 수·레이아웃·캡션·해시태그·음악)
+ 4. POST /studio/plan            → services/studio/planning.py   (장 수·레이아웃·캡션·해시태그)
  5. POST /studio/{job}/slides/{i} (장마다) → visuals.render_visual → compose.compose
  6. POST /studio/{job}/finalize  → 검수 화면 (src/components/studio/Review.tsx)
  7. POST /workflow/publish       → services/publishing.py
