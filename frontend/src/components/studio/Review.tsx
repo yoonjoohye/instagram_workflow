@@ -35,14 +35,9 @@ export const HASHTAG_LIMIT = 30;
 export function Review({
   job,
   onChange,
-  autoEdit = null,
-  onAutoEditDone,
 }: {
   job: Job | null;
   onChange: (j: Job) => void;
-  /** 이 번호의 사진·동영상 편집기를 바로 띄움 (방금 첨부한 것) */
-  autoEdit?: number | null;
-  onAutoEditDone?: () => void;
 }) {
   const { t } = useI18n();
   const { me } = useMe();
@@ -64,20 +59,6 @@ export function Review({
   useEffect(() => {
     setArForm(arRule.data ? autoReplyForm(arRule.data) : null);
   }, [arRule.data]);
-
-  /** 사진이면 사진 편집기, 동영상이면 동영상 편집기 */
-  const openEditor = (j: Job, i: number) => {
-    const a = j.assets.filter((x) => x.type !== "audio")[i];
-    if (!a) return;
-    if (a.type === "video") setEditingVideo(i);
-    else setEditing(i);
-  };
-  useEffect(() => {
-    if (job && autoEdit !== null && job.status !== "published") {
-      openEditor(job, autoEdit);
-      onAutoEditDone?.();
-    }
-  }, [job?.id, autoEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setCaption(job?.caption ?? "");
@@ -298,10 +279,7 @@ export function Review({
               !locked
                 ? async (files) => {
                     const ids = await uploadMedia(files, t, () => {});
-                    const before = visual.length;
-                    const next = await api<Job>(`/studio/${job.id}/media`, { method: "POST", json: { upload_ids: ids } });
-                    onChange(next);
-                    openEditor(next, before); // 방금 넣은 첫 장을 바로 편집
+                    onChange(await api<Job>(`/studio/${job.id}/media`, { method: "POST", json: { upload_ids: ids } }));
                   }
                 : undefined
             }

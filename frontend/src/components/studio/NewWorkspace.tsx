@@ -19,8 +19,7 @@ import type { Job, JobSettings } from "@/lib/types";
 
 const MAX_MEDIA = 10; // backend/routers/studio.py 의 MAX_MEDIA 와 같게
 
-/** onCreated(job, editIndex): 만든 작업과, 바로 편집기를 띄울 장 번호 */
-export function NewWorkspace({ onCreated }: { onCreated: (job: Job, editIndex: number | null) => void }) {
+export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
   const { t, locale } = useI18n();
   const { me } = useMe();
   const [settings, setSettings] = useState<JobSettings>(DEFAULT_SETTINGS);
@@ -55,16 +54,16 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job, editIndex: n
     const usable = files.filter((f) => isMedia(f) && !tooBig(f)).slice(0, MAX_MEDIA);
     if (!usable.length) return;
     const ids = await uploadMedia(usable, t, () => {});
-    onCreated(await create(ids), 0); // 첫 장을 바로 편집
+    onCreated(await create(ids));
   }
 
   async function generate(instruction: string) {
     setError(undefined);
     const job = await create([]);
     try {
-      onCreated(await api<Job>(`/studio/${job.id}/media/generate`, { method: "POST", json: { instruction } }), null);
+      onCreated(await api<Job>(`/studio/${job.id}/media/generate`, { method: "POST", json: { instruction } }));
     } catch (e) {
-      onCreated(job, null); // 작업은 만들어졌으니 그 화면에서 다시 시도
+      onCreated(job); // 작업은 만들어졌으니 그 화면에서 다시 시도
       throw e;
     }
   }

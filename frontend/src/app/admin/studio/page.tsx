@@ -41,11 +41,9 @@ function Studio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
-  // 사진·동영상을 넣어 작업을 만들었다면 작업 공간이 열리자마자 그 장의 편집기를 띄움
-  const [autoEdit, setAutoEdit] = useState<number | null>(null);
-  const onCreated = (j: Job, editIndex: number | null) => {
+  // 사진·동영상을 넣거나 AI 로 이미지를 만들어 작업이 생기면 그 작업 공간으로
+  const onCreated = (j: Job) => {
     setJob(j);
-    setAutoEdit(editIndex);
     router.replace(`/admin/studio?job=${j.id}`, { scroll: false });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -66,7 +64,7 @@ function Studio() {
       {jobId ? (
         // 작업 공간: 왼쪽 편집 · 오른쪽 고정 미리보기
         <div id="review" className="min-w-0 scroll-mt-20">
-          {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} autoEdit={autoEdit} onAutoEditDone={() => setAutoEdit(null)} />}
+          {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}
         </div>
       ) : (
         // 새로 만들기도 작업 공간과 같은 화면 (빈 상태)
