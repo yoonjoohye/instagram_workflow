@@ -193,7 +193,11 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (prompt.trim().length < 2) return setError(t("studio.topicRequired"));
+    const typed = prompt.trim();
+    if (typed.length < 2 && !photos.length && !libReady) return setError(t("studio.needTopicOrMedia"));
+    // 주제는 선택: 비우면 고른 컨셉과 사진으로 만들고, 조사(주제 검색)는 건너뜁니다.
+    const topic =
+      typed.length >= 2 ? typed : template !== "auto" ? `${t(`templates.${template}` as MessageKey)} — ${t("studio.topicFromPhotos")}` : t("studio.topicFromPhotos");
     setError(undefined);
     try {
       // 사진을 고르지 않았고 사진 폴더가 연결돼 있으면, 주제에 맞는 사진을 먼저 자동으로 찾습니다.
@@ -208,18 +212,21 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
         setStep({ label: t("studio.stepUploadRefs"), done: i, total: refs.length });
         refIds.push(await uploadPhoto(refs[i].file, t));
       }
-      setStep({ label: t("studio.stepResearch"), done: 0, total: 1 });
-      const research = await api<Research>("/studio/research", {
-        method: "POST",
-        json: { prompt: prompt.trim(), caption_format: effFormat, style: effStyle, language: locale },
-      });
+      let research: Research = { notes: "", sources: [], warning: "" };
+      if (typed.length >= 2) {
+        setStep({ label: t("studio.stepResearch"), done: 0, total: 1 });
+        research = await api<Research>("/studio/research", {
+          method: "POST",
+          json: { prompt: typed, caption_format: effFormat, style: effStyle, language: locale },
+        });
+      }
       setStep({ label: t("studio.stepPlan"), done: 0, total: 1 });
       const plan = await api<{ job: Job; slides: { role: string }[]; warning: string }>("/studio/plan", {
         method: "POST",
         json: {
           upload_ids: ids,
           reference_ids: refIds,
-          prompt: prompt.trim(),
+          prompt: topic,
           style: effStyle,
           caption_format: postType === "story" ? "" : effFormat,
           post_type: postType,
@@ -266,18 +273,6 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
       className="h-fit"
     >
       <form onSubmit={submit} className="space-y-5">
-        <Field label={t("studio.topicLabel")} htmlFor="cn-prompt" hint={t("studio.topicHintSimple")}>
-          <textarea
-            id="cn-prompt"
-            rows={3}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={t("studio.topicPlaceholderSimple")}
-            className={cx(inputClass, "resize-y text-[15px]")}
-            disabled={busy}
-          />
-        </Field>
-
         {/* 컨셉: 묶음별로 골라 연출 방향·캡션 양식을 채우고, 예시 주제를 눌러 바로 쓸 수 있게 */}
         <div className="space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -339,6 +334,18 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
             </div>
           </div>
         </div>
+
+        <Field label={t("studio.topicLabelOptional")} htmlFor="cn-prompt" hint={t("studio.topicHintOptional")}>
+          <textarea
+            id="cn-prompt"
+            rows={3}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={t("studio.topicPlaceholderSimple")}
+            className={cx(inputClass, "resize-y text-[15px]")}
+            disabled={busy}
+          />
+        </Field>
 
         <div className="space-y-2">
           <Segmented
@@ -599,7 +606,7 @@ export function PostForm({ onCreated, onDraft }: { onCreated: (job: Job) => void
           </div>
         ) : (
           <div className="space-y-2">
-            <Button type="submit" variant="primary" className="w-full" disabled={prompt.trim().length < 2}>
+            <Button type="submit" variant="primary" className="w-full" disabled={prompt.trim().length < 2 && !photos.length && !libReady}>
               <IconSpark width={16} height={16} /> {t("studio.submit")}
             </Button>
             <Button type="button" className="w-full" onClick={startManual} disabled={!photos.length}>
