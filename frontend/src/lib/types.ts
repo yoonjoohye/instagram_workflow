@@ -56,25 +56,12 @@ export type Job = {
   requirements?: { requirement: string; how: string }[];
   /** 스토리: 올린 개수 / 전체 */
   story_progress?: { done: number; total: number } | null;
-  /** 사진에 음악을 넣어 만든 영상 — 있으면 피드는 릴스로, 스토리는 동영상 스토리로 올라감. stale = 그 뒤 사진이 바뀜 */
-  soundtrack?: Soundtrack | null;
   /** 작업 공간의 컨셉·주제 메모 (AI 버튼들이 참고) */
   settings?: JobSettings;
 };
 
 export type JobSettings = { post_type: "feed" | "story"; topic: string; template: string; style: string; caption_format: string };
 
-/** 영상에 넣을 음악: 기본 제공 곡(track) 또는 내 음원(audio_id) */
-export type MusicSource = { track: string; audio_id: string; offset: number; volume: number; name?: string; url?: string };
-
-export type Soundtrack = MusicSource & {
-  name: string;
-  seconds: number;
-  outputs: { index: number; url: string; thumbnail_url: string }[];
-  stale: boolean;
-};
-
-export type Track = { key: string; title: string; url: string };
 
 /** 동영상 편집 내용 (asset.meta.video_edit) — 원본(source)에서 언제든 다시 만듭니다 */
 export type VideoEdit = {
@@ -82,9 +69,7 @@ export type VideoEdit = {
   start: number;
   end: number | null;
   mute: boolean;
-  original_volume: number;
   cover_at: number | null;
-  music: MusicSource | null;
   duration: number;
 };
 

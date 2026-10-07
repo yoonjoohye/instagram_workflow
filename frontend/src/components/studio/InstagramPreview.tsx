@@ -13,14 +13,11 @@ export function InstagramPreview({
   avatar,
   assets,
   caption,
-  music,
 }: {
   username: string;
   avatar?: string;
   assets: Asset[];
   caption: string;
-  /** 영상에 넣은 음악 (헤더에 곡 이름 표시) */
-  music?: { title: string; artist?: string } | null;
 }) {
   const t = useT();
   const track = useRef<HTMLDivElement>(null);
@@ -48,12 +45,6 @@ export function InstagramPreview({
           <p className="truncate text-[13px] font-semibold">
             {username} <span className="font-normal text-fg-3">· {t("format.justNow")}</span>
           </p>
-          {music && (
-            <p className="truncate text-[12px] text-fg-2">
-              ♪ {music.title}
-              {music.artist && ` · ${music.artist}`}
-            </p>
-          )}
         </div>
         <span aria-hidden className="px-1 text-fg-2">
           •••

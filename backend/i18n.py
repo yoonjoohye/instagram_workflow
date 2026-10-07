@@ -38,29 +38,21 @@ def norm_lang(value: str | None) -> str:
 
 # 한국어 틀 → (English, 日本語). {이름} 자리는 순서와 관계없이 같은 이름으로 옮깁니다.
 CATALOG: dict[str, tuple[str, str]] = {
-    # 음악 넣기·동영상 편집 (routers/soundtrack.py, services/studio/soundtrack.py)
-    "음원 주소가 올바르지 않습니다.": ("The audio address isn't valid.", "音源のアドレスが正しくありません。"),
-    "없는 음악입니다.": ("That music doesn't exist.", "存在しない音楽です。"),
-    "음원을 찾을 수 없습니다.": ("Couldn't find the audio.", "音源が見つかりません。"),
+    # 동영상 편집 (routers/video.py, services/studio/video.py)
     "파일을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.": ("Couldn't fetch the file. Please try again shortly.", "ファイルを取得できませんでした。しばらくしてから再度お試しください。"),
     "만든 영상을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.": ("Couldn't save the video. Please try again shortly.", "作成した動画を保存できませんでした。しばらくしてから再度お試しください。"),
     "영상이 너무 길어 시간 안에 처리하지 못했습니다.": ("The video is too long to process in time.", "動画が長すぎて時間内に処理できませんでした。"),
     "영상을 만들지 못했습니다: {e}": ("Couldn't make the video: {e}", "動画を作成できませんでした: {e}"),
     "영상 처리 프로그램(ffmpeg)을 찾을 수 없습니다.": ("The video tool (ffmpeg) isn't available.", "動画処理ツール(ffmpeg)が見つかりません。"),
-    "영상으로 만들 사진이 없습니다.": ("There are no photos to make a video from.", "動画にする写真がありません。"),
     "그 위치의 장면을 가져오지 못했습니다.": ("Couldn't grab the frame at that point.", "その位置の場面を取得できませんでした。"),
-    "음악을 넣을 사진이 없습니다.": ("There are no photos to add music to.", "音楽を入れる写真がありません。"),
-    "동영상이 섞인 게시물은 동영상마다 '영상 편집'에서 음악을 넣어 주세요.": ("For posts with videos, add music to each video with 'Edit video'.", "動画を含む投稿は、動画ごとに「動画を編集」で音楽を入れてください。"),
     "해시태그를 만들지 못했습니다: {e}": ("Couldn't make hashtags: {e}", "ハッシュタグを作成できませんでした: {e}"),
     "캡션을 자동으로 쓰지 못했습니다. '✨ 자동 작성'을 다시 눌러 주세요. ({e})": ("Couldn't write the caption automatically. Tap '✨ Auto-write' to try again. ({e})", "キャプションを自動で書けませんでした。「✨ 自動作成」をもう一度押してください。({e})"),
     "사진·동영상은 최대 {n}개까지 넣을 수 있습니다.": ("You can add up to {n} photos and videos.", "写真・動画は最大{n}個まで追加できます。"),
     "이미지를 만들지 못했습니다. {e}": ("Couldn't make the image. {e}", "画像を作成できませんでした。{e}"),
     "순서가 올바르지 않습니다.": ("Invalid order.", "順番が正しくありません。"),
-    "음악을 골라 주세요.": ("Please pick some music.", "音楽を選んでください。"),
     "사진을 찾을 수 없습니다.": ("Couldn't find the photo.", "写真が見つかりません。"),
     "동영상을 찾을 수 없습니다.": ("Couldn't find the video.", "動画が見つかりません。"),
     "동영상 번호가 올바르지 않습니다.": ("Invalid video number.", "動画の番号が正しくありません。"),
-    "사진이 바뀌었습니다. 음악 넣은 영상을 다시 만들어 주세요.": ("The photos changed. Please rebuild the video with music.", "写真が変わりました。音楽付きの動画を作り直してください。"),
     # 로그인·세션
     "로그인이 필요합니다.": ("Please log in.", "ログインが必要です。"),
     "세션이 만료됐습니다. 다시 로그인하세요.": ("Your session has expired. Please log in again.", "セッションの有効期限が切れました。もう一度ログインしてください。"),

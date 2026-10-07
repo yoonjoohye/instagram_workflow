@@ -398,14 +398,8 @@ def update_settings(job_id: int, body: SettingsIn, account: Account = Depends(cu
     for key in ("style", "caption_format", "template"):
         if getattr(body, key) is not None:
             plan[key] = getattr(body, key)
-    if body.post_type is not None and body.post_type != plan.get("post_type", "feed"):
+    if body.post_type is not None:
         plan["post_type"] = body.post_type
-        # 피드 릴스 ↔ 스토리 영상은 모양이 달라 음악 넣은 영상은 다시 만들어야 함
-        if plan.get("soundtrack"):
-            from .soundtrack import discard_renders
-
-            discard_renders(db, account, [o.get("url", "") for o in plan["soundtrack"].get("outputs") or []])
-            plan.pop("soundtrack")
     job.plan = plan
     _sync_kind(job)
     flag_modified(job, "plan")
@@ -454,7 +448,7 @@ def remove_media(job_id: int, index: int, account: Account = Depends(current_acc
         if blob_id and (b := db.get(MediaBlob, blob_id)) is not None and b.account_id == account.id and b.kind in ("slide", "visual"):
             db.delete(b)
     if meta.get("video_edit"):
-        from .soundtrack import discard_renders
+        from .video import discard_renders
 
         discard_renders(db, account, [gone.get("url", "")])
     plan = dict(job.plan)

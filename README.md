@@ -9,7 +9,7 @@
 | 폴더 | 내용 |
 |---|---|
 | `frontend/` | 웹 화면 (Next.js 15 App Router, React 19, Tailwind v4) — `src/`, `public/`, 번역 키 점검 스크립트 |
-| `backend/` | API (FastAPI) — `tests/` (pytest, 외부 API 는 모두 가짜), `scripts/` (기본 음악 만들기) |
+| `backend/` | API (FastAPI) — `tests/` (pytest, 외부 API 는 모두 가짜) |
 | `api/index.py` | Vercel 이 API 를 실행하는 진입점 (backend 를 불러옴) |
 | `mobile/` | iPhone·Android 앱 (Expo SDK 57) — [mobile/README.md](mobile/README.md) |
 
@@ -19,7 +19,7 @@
 |---|---|
 | `/` (`/ko` `/en` `/ja`) | 소개 · 사용법 · 자주 묻는 질문, Instagram 계정 연결 |
 | `/admin` | 대시보드 — 도달·프로필 조회·참여 추이, 팔로워/비팔로워, 콘텐츠 유형별 성과, 연령·지역, 접속 시간대, 댓글 반응 |
-| `/admin/studio` | 게시물·스토리 만들기 — 주제 + 템플릿 + 사진(폴더·사진첩에서 자동 선택 가능) → 작업 공간(직접 편집·AI 수정, 동영상 자르기·소리·대표 화면, **음악 넣어 릴스·동영상 스토리로**, 캡션 AI 다시 쓰기, 실시간 미리보기) → 게시 |
+| `/admin/studio` | 게시물·스토리 만들기 — 주제 + 템플릿 + 사진(폴더·사진첩에서 자동 선택 가능) → 작업 공간(직접 편집·AI 수정, 동영상 자르기·소리·대표 화면, 게시글·해시태그 AI 작성, 실시간 미리보기) → 게시 |
 | `/admin/jobs` | 만든 게시물 기록 (인스타에서 지운 게시물은 '삭제됨'으로 동기화) |
 | `/admin/posts` | 게시물별 성과, 댓글 허용 켜기/끄기, 게시물별 자동 응답·댓글 감정 분석 |
 | `/admin/autoreply` | 댓글 자동 응답 — 연결 상태, 규칙, 처리 기록 |
@@ -61,7 +61,7 @@ npm run build             # 웹 빌드
 | `DATABASE_URL` | Neon Postgres (Vercel Storage 연결 시 자동) |
 | `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` | Instagram 로그인 (없으면 `META_APP_ID/SECRET` 로 Facebook 로그인) |
 | `GEMINI_API_KEY` | 게시물 구성·이미지 연출·댓글 감정 분석 (이미지 생성은 **결제 연결된 유료 등급** 필요) |
-| `BLOB_READ_WRITE_TOKEN` | 동영상·음원·만든 영상 저장소 (Vercel Blob 스토어 연결 시 자동) |
+| `BLOB_READ_WRITE_TOKEN` | 동영상·편집한 영상 저장소 (Vercel Blob 스토어 연결 시 자동) |
 | `WEBHOOK_VERIFY_TOKEN` | 댓글·DM Webhook 인증 |
 | `CRON_SECRET` | 매일 인사이트 적재·토큰 연장 cron 보호 |
 | `GOOGLE_SITE_VERIFICATION`, `NAVER_SITE_VERIFICATION` | 서치 콘솔·서치어드바이저 소유 확인 메타 태그 |
@@ -75,7 +75,6 @@ Webhooks 콜백 `https://<도메인>/api/py/webhooks/instagram` (구독 필드 `
 
 - 비즈니스·크리에이터(프로페셔널) 계정만 연결됩니다.
 - 게시물을 본 **개별 계정 목록은 API 로 제공되지 않습니다** (집계 수치만).
-- 인스타그램 음악 라이브러리의 곡은 API 로 **붙일 수 없습니다** (게시 후 인스타 앱에서 직접 추가).
-  대신 기본 제공 곡(직접 만든 곡, `backend/scripts/make_music.py`)이나 사용자의 음원을 **영상에 직접 넣어** 릴스·동영상 스토리로 올릴 수 있습니다.
+- 인스타그램 음악은 API 로 **붙일 수 없습니다** (게시 후 인스타 앱에서 직접 추가).
 - 댓글 작성자에게 보내는 DM 은 댓글당 1통이고, 팔로우 여부는 상대가 먼저 DM 을 보낸 뒤에만 조회됩니다 → 안내 DM 후 답장이 오면 팔로우 여부별 문구 전송.
 - Webhook·다른 사용자 댓글은 **Meta 앱이 라이브(검수 통과)** 상태여야 들어옵니다.

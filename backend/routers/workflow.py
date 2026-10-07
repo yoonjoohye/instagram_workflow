@@ -38,19 +38,6 @@ def _story_progress(job: GenerationJob) -> dict | None:
     return {"done": sum(1 for i in ids if i), "total": total}
 
 
-def assets_fingerprint(job: GenerationJob) -> str:
-    """사진이 바뀌었는지 알아보는 값 — 음악 넣은 영상을 만든 뒤 사진을 고치면 영상을 다시 만들어야 합니다."""
-    return "|".join(a.get("url", "") for a in job.assets or [])
-
-
-def _soundtrack(job: GenerationJob) -> dict | None:
-    """사진에 음악을 넣어 만든 영상 (routers/soundtrack.py). stale = 그 뒤에 사진이 바뀜."""
-    data = (job.plan or {}).get("soundtrack") if isinstance(job.plan, dict) else None
-    if not data:
-        return None
-    return {**{k: v for k, v in data.items() if k != "fingerprint"}, "stale": data.get("fingerprint") != assets_fingerprint(job)}
-
-
 def _settings(job: GenerationJob) -> dict:
     plan = job.plan if isinstance(job.plan, dict) else {}
     return {
@@ -84,8 +71,6 @@ def _job_dict(job: GenerationJob) -> dict:
         "requirements": (job.plan or {}).get("requirements", []) if isinstance(job.plan, dict) else [],
         # 스토리: 올린 개수 / 전체 (여러 개를 이어서 올리는 중일 때 화면에 표시)
         "story_progress": _story_progress(job),
-        # 사진에 음악을 넣어 만든 영상 — 있으면 피드는 릴스로, 스토리는 동영상 스토리로 올라갑니다.
-        "soundtrack": _soundtrack(job),
         # 작업 공간의 컨셉·주제 메모 (AI 버튼들이 참고)
         "settings": _settings(job),
     }
@@ -157,7 +142,7 @@ def delete_job(
     db: Session = Depends(get_db),
 ) -> Response:
     job = _get_job(db, account, job_id)
-    from .soundtrack import discard_renders  # 순환 import 를 피해 여기서
+    from .video import discard_renders  # 순환 import 를 피해 여기서
 
     # 올린 동영상은 Blob 에 있어 따로 지웁니다 (다른 작업이 같은 영상을 쓰지 않을 때만).
     video_urls = [_video_source(a) for a in (job.assets or []) if a.get("type") == "video"]
@@ -171,10 +156,8 @@ def delete_job(
     for blob in db.scalars(select(MediaBlob).where(MediaBlob.account_id == account.id, MediaBlob.kind == "video")):
         if blob.url in video_urls and blob.url not in in_use:
             db.delete(blob)
-    # 편집·음악 넣기로 만든 영상
-    renders = [a.get("url", "") for a in (job.assets or []) if (a.get("meta") or {}).get("video_edit")]
-    renders += [o.get("url", "") for o in ((job.plan or {}).get("soundtrack") or {}).get("outputs") or []]
-    discard_renders(db, account, renders)
+    # 동영상 편집으로 만든 영상
+    discard_renders(db, account, [a.get("url", "") for a in (job.assets or []) if (a.get("meta") or {}).get("video_edit")])
     # 스토리용으로 9:16 에 맞춘 사본
     for fitted_id in ((job.plan or {}).get("story_fit") or {}).values():
         blob = db.get(MediaBlob, fitted_id)
@@ -226,16 +209,6 @@ def publish_job(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "발행할 미디어가 없습니다.")
 
     kind = job.media_kind
-    if (track := _soundtrack(job)) is not None:
-        if track["stale"]:
-            raise HTTPException(status.HTTP_409_CONFLICT, "사진이 바뀌었습니다. 음악 넣은 영상을 다시 만들어 주세요.")
-        # 음악 넣은 영상으로 바꿔 올립니다 (스토리는 장마다, 피드는 릴스 한 개)
-        for out in track.get("outputs") or []:
-            i = out["index"] if kind == "STORIES" else 0
-            visual[i] = {"type": "video", "url": _current_media_url(out["url"]), "thumbnail_url": _current_media_url(out["thumbnail_url"])}
-        if kind != "STORIES":
-            visual, kind = visual[:1], "REELS"
-
     if kind == "STORIES":
         return _publish_stories(db, account, job, visual)
 
@@ -324,7 +297,6 @@ def publish_job(
         raise HTTPException(exc.status, str(exc)) from exc
 
     job.ig_media_id = result["media_id"]
-    job.media_kind = kind  # 음악을 넣었다면 릴스로 올라감
     job.permalink = result.get("permalink", "")
     job.published_at = dt.datetime.now(dt.timezone.utc)
     job.status = "published"
@@ -359,7 +331,7 @@ def _story_ready(db: Session, account: Account, job: GenerationJob, asset: dict)
         return url
     from ..services.studio import image_size
     from ..services.studio.limits import STORY_SIZE
-    from ..services.studio.soundtrack import fit_frame
+    from ..services.studio.video import fit_frame
 
     w, h = blob.width or 0, blob.height or 0
     if not (w and h):

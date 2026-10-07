@@ -1,15 +1,17 @@
 "use client";
 
-/** 동영상 편집: 자르기 · 원래 소리 끄기/크기 · 음악 넣기 · 대표 화면 고르기.
- *  화면에서는 원본을 재생하며 바로 확인하고(음악도 같이 재생), '적용'하면 서버가 원본에서 새로 만듭니다. */
+/** 동영상 편집기 (사진 편집기와 같은 전체 화면): 자르기 · 소리 끄기 · 대표 화면.
+ *  화면에서는 원본을 재생하며 바로 확인하고, '저장'하면 서버가 원본에서 새로 만듭니다 (원본은 그대로 남음). */
 
 import { useEffect, useRef, useState } from "react";
+import type { EditorPreview } from "@/components/editor/ImageEditor";
+import { InstagramPreview } from "@/components/studio/InstagramPreview";
+import { StoryPreview } from "@/components/studio/StoryPreview";
+import { Button, cx, Switch } from "@/components/ui";
 import { useT } from "@/i18n/client";
-import { Button, Dialog, Notice, Switch } from "@/components/ui";
 import { api, toApiError } from "@/lib/api";
 import { mediaSrc } from "@/lib/format";
-import type { Asset, Job, MusicSource, VideoEdit } from "@/lib/types";
-import { emptyMusic, hasMusic, MusicPicker } from "./MusicPicker";
+import type { Asset, Job, VideoEdit } from "@/lib/types";
 
 const MIN_SECONDS = 3; // 인스타그램 동영상 최소 길이
 const fmt = (s: number) => (Math.round(s * 10) / 10).toFixed(1);
@@ -18,12 +20,14 @@ export function VideoEditor({
   jobId,
   index,
   asset,
+  preview,
   onClose,
   onSaved,
 }: {
   jobId: number;
   index: number;
   asset: Asset;
+  preview?: EditorPreview;
   onClose: () => void;
   onSaved: (job: Job) => void;
 }) {
@@ -31,61 +35,54 @@ export function VideoEditor({
   const edit = asset.meta?.video_edit as VideoEdit | undefined;
   const source = edit?.source ?? { url: asset.url, thumbnail_url: asset.thumbnail_url };
   const video = useRef<HTMLVideoElement>(null);
-  const audio = useRef<HTMLAudioElement | null>(null);
   const [duration, setDuration] = useState(0);
   const [start, setStart] = useState(edit?.start ?? 0);
   const [end, setEnd] = useState<number | null>(edit?.end ?? null);
   const [mute, setMute] = useState(edit?.mute ?? false);
-  const [origVolume, setOrigVolume] = useState(edit?.original_volume ?? 1);
   const [cover, setCover] = useState<number | null>(edit?.cover_at != null ? (edit.start ?? 0) + edit.cover_at : null);
-  const [music, setMusic] = useState<MusicSource>(edit?.music ?? emptyMusic());
-  const [busy, setBusy] = useState<"apply" | "reset">();
+  const [busy, setBusy] = useState<"save" | "reset">();
   const [error, setError] = useState<string>();
+  const [showPreview, setShowPreview] = useState(false);
   const stop = end ?? duration;
-
-  // 음악 미리 듣기: 영상과 함께 재생
-  useEffect(() => {
-    audio.current?.pause();
-    audio.current = hasMusic(music) && music.url ? new Audio(mediaSrc(music.url)) : null;
-    return () => audio.current?.pause();
-  }, [music.url, music.track, music.audio_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const length = Math.max(0, stop - start);
+  const dirty =
+    start !== (edit?.start ?? 0) || end !== (edit?.end ?? null) || mute !== (edit?.mute ?? false) ||
+    cover !== (edit?.cover_at != null ? (edit.start ?? 0) + edit.cover_at : null);
 
   useEffect(() => {
-    const v = video.current;
-    if (!v) return;
-    v.muted = mute;
-    v.volume = Math.min(1, origVolume);
-    if (audio.current) audio.current.volume = Math.min(1, music.volume);
-  }, [mute, origVolume, music.volume]);
+    if (video.current) video.current.muted = mute;
+  }, [mute]);
 
-  const syncAudio = () => {
-    const v = video.current;
-    const a = audio.current;
-    if (!v || !a) return;
-    a.currentTime = music.offset + Math.max(0, v.currentTime - start);
-    if (!v.paused) a.play().catch(() => {});
-  };
+  // 화면을 연 동안 뒤 페이지가 스크롤되지 않게, Esc 로 닫기
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  });
 
   const onTime = () => {
     const v = video.current;
     if (!v || !stop) return;
-    if (v.currentTime >= stop - 0.05 || v.currentTime < start - 0.3) {
-      v.currentTime = start; // 자른 구간만 반복 재생
-      syncAudio();
-    }
+    if (v.currentTime >= stop - 0.05 || v.currentTime < start - 0.3) v.currentTime = start; // 자른 구간만 반복 재생
   };
-
   const seek = (s: number) => {
     if (video.current) video.current.currentTime = s;
   };
-  const length = Math.max(0, stop - start);
 
-  async function apply() {
-    if (duration && length < MIN_SECONDS) {
-      setError(t("media.tooShort"));
-      return;
-    }
-    setBusy("apply");
+  function close() {
+    if (busy) return;
+    if (dirty && !window.confirm(t("editor.discardConfirm"))) return;
+    onClose();
+  }
+
+  async function save() {
+    if (duration && length < MIN_SECONDS) return setError(t("media.tooShort"));
+    setBusy("save");
     setError(undefined);
     try {
       const r = await api<{ job: Job }>(`/studio/${jobId}/videos/${index}/edit`, {
@@ -94,9 +91,7 @@ export function VideoEditor({
           start: start > 0.05 ? start : 0,
           end: end !== null && end < duration - 0.05 ? end : null,
           mute,
-          original_volume: origVolume,
           cover_at: cover === null ? null : Math.max(0, cover - start),
-          music: hasMusic(music) ? { track: music.track, audio_id: music.audio_id, offset: music.offset, volume: music.volume } : null,
         },
       });
       onSaved(r.job);
@@ -123,148 +118,138 @@ export function VideoEditor({
     }
   }
 
-  const slider = (value: number, min: number, max: number, set: (n: number) => void) => (
-    <input
-      type="range"
-      min={min}
-      max={max}
-      step={0.1}
-      value={value}
-      disabled={!duration || !!busy}
-      onChange={(e) => {
-        const n = Number(e.target.value);
-        set(n);
-        seek(n);
-      }}
-      className="w-full accent-[var(--accent)]"
-    />
+  const slider = (label: string, value: number, set: (n: number) => void) => (
+    <div className="flex items-center gap-2 text-[12px] text-white/80">
+      <span className="w-10 shrink-0">{label}</span>
+      <input
+        type="range"
+        min={0}
+        max={duration || 1}
+        step={0.1}
+        value={value}
+        disabled={!duration || !!busy}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          set(n);
+          seek(n);
+        }}
+        className="w-full accent-[#8b5cf6]"
+      />
+      <span className="tnum w-12 shrink-0 text-right text-white/60">{fmt(value)}s</span>
+      <button
+        type="button"
+        onClick={() => video.current && set(video.current.currentTime)}
+        disabled={!duration || !!busy}
+        className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-white/80 hover:bg-white/10 disabled:opacity-50"
+      >
+        {t("media.setHere")}
+      </button>
+    </div>
+  );
+
+  // 오른쪽 미리보기: 이 동영상 자리에 편집 중인 원본을 보여 줌
+  const previewAssets = preview?.assets.map((a, i) => (i === index ? { ...a, url: source.url, thumbnail_url: source.thumbnail_url, type: "video" as const } : a)) ?? [];
+  const previewPane = preview && (
+    <div className="space-y-2">
+      <p className="text-[12px] text-white/60">{t("editor.livePreview")}</p>
+      <div className="rounded-xl bg-white p-2 text-black [color-scheme:light]">
+        {preview.kind === "story" ? (
+          <StoryPreview username={preview.username} avatar={preview.avatar} assets={previewAssets} />
+        ) : (
+          <InstagramPreview username={preview.username} avatar={preview.avatar} assets={previewAssets} caption={preview.caption} />
+        )}
+      </div>
+    </div>
   );
 
   return (
-    <Dialog
-      open
-      onClose={() => !busy && onClose()}
-      title={t("media.videoTitle")}
-      subtitle={t("media.videoSubtitle")}
-      footer={
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {edit ? (
-            <Button variant="ghost" onClick={reset} loading={busy === "reset"} disabled={!!busy}>
-              {t("media.reset")}
-            </Button>
-          ) : (
-            <span />
-          )}
-          <div className="flex gap-2">
-            <Button onClick={onClose} disabled={!!busy}>
-              {t("editor.cancel")}
-            </Button>
-            <Button variant="primary" onClick={apply} loading={busy === "apply"} disabled={!!busy || !duration}>
-              {busy === "apply" ? t("media.applying") : t("media.apply")}
-            </Button>
+    <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0b0c] text-white" role="dialog" aria-modal="true" aria-label={t("media.videoTitle")}>
+      <header className="flex items-center gap-2 border-b border-white/10 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
+        <button type="button" onClick={close} className="rounded-md px-2 py-1.5 text-[14px] text-white/80 hover:bg-white/10">
+          {t("editor.cancel")}
+        </button>
+        <span className="flex-1 text-center text-[14px] font-semibold">{t("media.videoTitle")}</span>
+        {edit && (
+          <button type="button" onClick={reset} disabled={!!busy} className="rounded-md px-2 py-1.5 text-[13px] text-white/80 hover:bg-white/10 disabled:opacity-50">
+            {t("media.reset")}
+          </button>
+        )}
+        {preview && (
+          <button type="button" onClick={() => setShowPreview((v) => !v)} className="rounded-md px-2 py-1.5 text-[13px] text-white/80 hover:bg-white/10 lg:hidden">
+            {t("editor.preview")}
+          </button>
+        )}
+        <Button variant="primary" size="sm" onClick={save} loading={busy === "save"} disabled={!!busy || !duration}>
+          {busy === "save" ? t("editor.saving") : t("editor.save")}
+        </Button>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative flex min-h-0 flex-1 items-center justify-center p-3">
+            <video
+              ref={video}
+              src={mediaSrc(source.url)}
+              poster={mediaSrc(source.thumbnail_url) || undefined}
+              controls
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={(e) => {
+                setDuration(e.currentTarget.duration);
+                e.currentTarget.currentTime = start;
+                e.currentTarget.muted = mute;
+              }}
+              onTimeUpdate={onTime}
+              className="max-h-full max-w-full rounded-lg bg-black"
+            />
+            {busy === "save" && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-[13px]">{t("media.applying")}</div>
+            )}
+          </div>
+
+          <div className="space-y-4 border-t border-white/10 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <section className="space-y-2">
+              <div className="flex items-center justify-between text-[13px] font-semibold">
+                ✂️ {t("media.trim")}
+                <span className="tnum text-[12px] font-normal text-white/60">{t("media.length", { s: fmt(length) })}</span>
+              </div>
+              {slider(t("media.start"), start, (n) => setStart(Math.min(n, stop - 0.5)))}
+              {slider(t("media.end"), stop, (n) => setEnd(Math.max(n, start + 0.5)))}
+            </section>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <label className="flex items-center gap-2 text-[13px] text-white/85">
+                <Switch checked={mute} onChange={setMute} label={t("media.mute")} disabled={!!busy} /> 🔇 {t("media.mute")}
+              </label>
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="text-white/85">🖼️ {t("media.cover")}</span>
+                <button
+                  type="button"
+                  onClick={() => video.current && setCover(Math.min(Math.max(video.current.currentTime, start), stop))}
+                  disabled={!duration || !!busy}
+                  className="rounded-md border border-white/20 px-2 py-1 text-[12px] hover:bg-white/10 disabled:opacity-50"
+                >
+                  {t("media.useThisFrame")}
+                </button>
+                <button type="button" onClick={() => cover !== null && seek(cover)} className="tnum text-[12px] text-white/60 underline-offset-2 hover:underline">
+                  {cover === null ? t("media.coverDefault") : t("media.coverAt", { s: fmt(cover) })}
+                </button>
+              </div>
+            </div>
+            <p className="text-[11px] text-white/45">{t("media.coverHint")}</p>
+            {error && <p className="rounded-md bg-red-500/15 px-2 py-1.5 text-[12px] text-red-300">{error}</p>}
           </div>
         </div>
-      }
-    >
-      <div className="space-y-5">
-        <video
-          ref={video}
-          src={mediaSrc(source.url)}
-          poster={mediaSrc(source.thumbnail_url) || undefined}
-          controls
-          playsInline
-          preload="metadata"
-          onLoadedMetadata={(e) => {
-            const d = e.currentTarget.duration;
-            setDuration(d);
-            e.currentTarget.currentTime = start;
-          }}
-          onTimeUpdate={onTime}
-          onPlay={syncAudio}
-          onPause={() => audio.current?.pause()}
-          onSeeked={syncAudio}
-          className="mx-auto block max-h-[45dvh] w-full rounded-lg bg-black object-contain"
-        />
 
-        {/* 자르기 */}
-        <section className="space-y-2">
-          <div className="flex items-center justify-between text-[13px] font-semibold">
-            {t("media.trim")} <span className="tnum text-[12px] font-normal text-fg-3">{t("media.length", { s: fmt(length) })}</span>
-          </div>
-          {[
-            { label: t("media.start"), value: start, set: (n: number) => setStart(Math.min(n, stop - 0.5)), min: 0, max: duration },
-            { label: t("media.end"), value: stop, set: (n: number) => setEnd(Math.max(n, start + 0.5)), min: 0, max: duration },
-          ].map((row) => (
-            <div key={row.label} className="flex items-center gap-2 text-[12px] text-fg-2">
-              <span className="w-10 shrink-0">{row.label}</span>
-              {slider(row.value, row.min, row.max, row.set)}
-              <span className="tnum w-12 shrink-0 text-right text-fg-3">{fmt(row.value)}s</span>
-              <button
-                type="button"
-                onClick={() => video.current && row.set(video.current.currentTime)}
-                disabled={!duration || !!busy}
-                className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-fg-2 hover:bg-surface-2 disabled:opacity-50"
-              >
-                {t("media.setHere")}
-              </button>
+        {/* 오른쪽: 올라갈 모습 (넓은 화면) / 미리보기 버튼 (휴대폰) */}
+        {previewPane && <aside className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-white/10 p-4 lg:block">{previewPane}</aside>}
+        {previewPane && showPreview && (
+          <div className={cx("fixed inset-0 z-[61] overflow-y-auto bg-black/85 p-4 lg:hidden")} onClick={() => setShowPreview(false)}>
+            <div className="mx-auto max-w-sm" onClick={(e) => e.stopPropagation()}>
+              {previewPane}
             </div>
-          ))}
-        </section>
-
-        {/* 원래 소리 */}
-        <section className="space-y-2">
-          <p className="text-[13px] font-semibold">{t("media.sound")}</p>
-          <label className="flex items-center gap-2 text-[13px] text-fg-2">
-            <Switch checked={mute} onChange={setMute} label={t("media.mute")} disabled={!!busy} /> {t("media.mute")}
-          </label>
-          {!mute && hasMusic(music) && (
-            <label className="block max-w-sm text-[12px] text-fg-2">
-              <span className="flex justify-between">
-                {t("media.originalVolume")} <span className="tnum text-fg-3">{Math.round(origVolume * 100)}%</span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={1.5}
-                step={0.05}
-                value={origVolume}
-                onChange={(e) => setOrigVolume(Number(e.target.value))}
-                className="mt-1 w-full accent-[var(--accent)]"
-              />
-            </label>
-          )}
-        </section>
-
-        {/* 음악 */}
-        <section className="space-y-2">
-          <p className="text-[13px] font-semibold">{t("media.music")}</p>
-          <MusicPicker value={music} onChange={setMusic} disabled={!!busy} allowNone />
-        </section>
-
-        {/* 대표 화면 */}
-        <section className="space-y-2">
-          <p className="text-[13px] font-semibold">{t("media.cover")}</p>
-          <p className="text-[12px] text-fg-3">{t("media.coverHint")}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() => video.current && setCover(Math.min(Math.max(video.current.currentTime, start), stop))}
-              disabled={!duration || !!busy}
-            >
-              {t("media.useThisFrame")}
-            </Button>
-            <button
-              type="button"
-              onClick={() => cover !== null && seek(cover)}
-              className="tnum text-[12px] text-fg-2 underline-offset-2 hover:underline"
-            >
-              {cover === null ? t("media.coverDefault") : t("media.coverAt", { s: fmt(cover) })}
-            </button>
           </div>
-        </section>
-
-        {error && <Notice tone="bad">{error}</Notice>}
+        )}
       </div>
-    </Dialog>
+    </div>
   );
 }

@@ -47,8 +47,11 @@ function Studio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
+  // 사진·동영상을 고르고 시작했다면 작업 공간이 열리자마자 첫 장 편집기를 띄움
+  const [autoEdit, setAutoEdit] = useState<number | null>(null);
   const onCreated = (j: Job) => {
     setJob(j);
+    setAutoEdit(j.assets.length ? 0 : null);
     router.replace(`/admin/studio?job=${j.id}`, { scroll: false });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -58,13 +61,6 @@ function Studio() {
       <PageHeader
         title={t("studio.title")}
         description={t("studio.description")}
-        action={
-          job && (
-            <Button variant="secondary" size="sm" onClick={() => router.push("/admin/studio")}>
-              {t("studio.newPost")}
-            </Button>
-          )
-        }
       />
       {jobError && (
         <div className="mb-6">
@@ -76,7 +72,7 @@ function Studio() {
       {jobId ? (
         // 작업 공간: 왼쪽 편집 · 오른쪽 고정 미리보기
         <div id="review" className="min-w-0 scroll-mt-20">
-          {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} />}
+          {loadingJob ? <Skeleton className="h-[520px] rounded-xl" /> : <Review job={job} onChange={setJob} autoEdit={autoEdit} onAutoEditDone={() => setAutoEdit(null)} />}
         </div>
       ) : (
         <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">

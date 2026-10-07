@@ -26,17 +26,16 @@ def test_api_errors_follow_language_cookie(client):
     assert client.get("/auth/me").json()["detail"] == "ログインが必要です。"
 
 
-def test_soundtrack_messages_are_translated():
-    """음악 넣기·동영상 편집 API 의 오류 문구가 모두 번역돼 있는지 (새 문구를 넣고 번역을 빠뜨리지 않게)."""
+def test_video_messages_are_translated():
+    """동영상 편집 API 의 오류 문구가 모두 번역돼 있는지 (새 문구를 넣고 번역을 빠뜨리지 않게)."""
     import re
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]  # backend/
     texts = []
-    for f in ("routers/soundtrack.py", "services/studio/soundtrack.py"):
-        texts += re.findall(r'(?:HTTPException\([^,]+,|SoundtrackError\()\s*"([^"]*[가-힣][^"]*)"', (root / f).read_text())
-    texts.append("사진이 바뀌었습니다. 음악 넣은 영상을 다시 만들어 주세요.")
-    assert len(texts) > 10
+    for f in ("routers/video.py", "services/studio/video.py"):
+        texts += re.findall(r'(?:HTTPException\([^,]+,|VideoError\()\s*"([^"]*[가-힣][^"]*)"', (root / f).read_text())
+    assert len(texts) > 5
     for ko in texts:
         sample = ko.replace("{e}", "x") + ("x" if ko.endswith(": ") else "")  # 뒤에 원인이 붙는 문구
         assert not re.search(r"[가-힣]", tr(sample, "en")), ko

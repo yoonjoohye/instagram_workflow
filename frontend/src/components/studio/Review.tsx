@@ -16,7 +16,6 @@ import { HashtagField } from "@/components/studio/HashtagField";
 import { CaptionField } from "@/components/studio/CaptionField";
 import { WorkspaceSettings } from "@/components/studio/WorkspaceSettings";
 import { uploadMedia } from "@/lib/mediaUpload";
-import { buildSoundtrack, SoundtrackCard } from "@/components/studio/SoundtrackCard";
 import { VideoEditor } from "@/components/studio/VideoEditor";
 import { Badge, Button, Card, cx, Notice, Skeleton, Spinner, StatusDot } from "@/components/ui";
 import { useI18n } from "@/i18n/client";
@@ -33,7 +32,18 @@ const ImageEditor = dynamic(() => import("@/components/editor/ImageEditor").then
 export const CAPTION_LIMIT = 2200; // Instagram 캡션 최대 길이
 export const HASHTAG_LIMIT = 30;
 
-export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) => void }) {
+export function Review({
+  job,
+  onChange,
+  autoEdit = null,
+  onAutoEditDone,
+}: {
+  job: Job | null;
+  onChange: (j: Job) => void;
+  /** 이 번호의 사진·동영상 편집기를 바로 띄움 (방금 첨부한 것) */
+  autoEdit?: number | null;
+  onAutoEditDone?: () => void;
+}) {
   const { t } = useI18n();
   const { me } = useMe();
   const quota = useApi<Quota>("/workflow/quota");
@@ -46,7 +56,6 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
   const [editingVideo, setEditingVideo] = useState<number | null>(null);
-  const [rebuilding, setRebuilding] = useState(false);
   // 댓글 자동 응답은 게시 흐름의 일부로 함께 저장합니다 (스토리는 댓글이 없어 제외).
   const supportsAutoReply = Boolean(job) && job!.media_kind !== "STORIES";
   const arRule = useApi<AutoReplyRule>(job && supportsAutoReply ? `/autoreply/jobs/${job.id}` : null);
@@ -55,6 +64,20 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
   useEffect(() => {
     setArForm(arRule.data ? autoReplyForm(arRule.data) : null);
   }, [arRule.data]);
+
+  /** 사진이면 사진 편집기, 동영상이면 동영상 편집기 */
+  const openEditor = (j: Job, i: number) => {
+    const a = j.assets.filter((x) => x.type !== "audio")[i];
+    if (!a) return;
+    if (a.type === "video") setEditingVideo(i);
+    else setEditing(i);
+  };
+  useEffect(() => {
+    if (job && autoEdit !== null && job.status !== "published") {
+      openEditor(job, autoEdit);
+      onAutoEditDone?.();
+    }
+  }, [job?.id, autoEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setCaption(job?.caption ?? "");
@@ -87,17 +110,6 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
   const original = job.provider.startsWith("original");
   const dirty = caption !== job.caption || hashtags.join(" ") !== (job.hashtags ?? []).join(" ");
   const visual = job.assets.filter((a) => a.type !== "audio");
-  // 음악을 넣어 만든 영상이 있으면 미리보기도 그 영상으로 (피드는 릴스 한 개, 스토리는 장마다)
-  const track = job.soundtrack && !job.soundtrack.stale ? job.soundtrack : null;
-  const shown: Asset[] = !track
-    ? visual
-    : isStory
-      ? visual.map((a, i) => {
-          const out = track.outputs.find((o) => o.index === i);
-          return out ? { type: "video", url: out.url, thumbnail_url: out.thumbnail_url, meta: {} } : a;
-        })
-      : track.outputs.slice(0, 1).map((o) => ({ type: "video", url: o.url, thumbnail_url: o.thumbnail_url, meta: {} }));
-  const publishKind = track && !isStory ? "REELS" : job.media_kind;
   const audio = job.assets.filter((a) => a.type === "audio");
   const overCaption = finalCaption.length > CAPTION_LIMIT;
   const overTags = hashtags.length > HASHTAG_LIMIT;
@@ -131,18 +143,12 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
 
   async function publish() {
     const arLine = arForm && autoReplyOn(arForm) ? t("studio.publishConfirmAutoReply", { summary: autoReplySummary(arForm, t) }) : "";
-    if (!window.confirm(t("studio.publishConfirm", { username: me.username, kind: KIND_LABEL[publishKind], autoReply: arLine }))) return;
+    if (!window.confirm(t("studio.publishConfirm", { username: me.username, kind: KIND_LABEL[job!.media_kind], autoReply: arLine }))) return;
     // 게시 전에 캡션과 자동 응답을 먼저 저장해, 게시되는 순간부터 자동 응답이 동작하게 합니다.
     if ((dirty || arDirty) && !(await save())) return;
     setPublishing(true);
     setError(undefined);
     try {
-      // 음악 넣은 영상을 만든 뒤 사진이 바뀌었다면 같은 설정으로 다시 만들고 올립니다.
-      if (job!.soundtrack?.stale) {
-        setRebuilding(true);
-        onChange(await buildSoundtrack(job!.id, job!.soundtrack, job!.soundtrack.seconds));
-        setRebuilding(false);
-      }
       let published = await api<Job>("/workflow/publish", { method: "POST", json: { job_id: job!.id, share_to_feed: shareToFeed } });
       onChange(published);
       // 스토리는 한 번에 다 못 올리면(서버 시간 제한) 이어서 요청합니다.
@@ -156,7 +162,6 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
       reload().catch(() => {});
     } finally {
       setPublishing(false);
-      setRebuilding(false);
       quota.reload();
     }
   }
@@ -179,16 +184,15 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
       >
         {isStory ? (
           <>
-            <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={shown} />
+            <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={visual} />
             <StoryLinks assets={visual} published={job.status === "published"} />
           </>
         ) : (
           <InstagramPreview
             username={me.username}
             avatar={me.profile_picture_url}
-            assets={shown}
+            assets={visual}
             caption={finalCaption}
-            music={track ? { title: track.name } : null}
           />
         )}
 
@@ -218,7 +222,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
                   : quota.loading && <Spinner />}
               {(dirty || arDirty) && <span className="ml-2 font-medium text-warn">· {t("studio.unsaved")}</span>}
             </div>
-            {publishKind === "REELS" && (
+            {job.media_kind === "REELS" && (
               <label className="flex items-center gap-2 text-[13px] text-fg-2">
                 <input type="checkbox" checked={shareToFeed} onChange={(e) => setShareToFeed(e.target.checked)} className="accent-[var(--accent)]" />
                 {t("studio.shareToFeed")}
@@ -245,7 +249,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
                       : t("studio.publish")}
               </Button>
             </div>
-            {publishing && <p className="text-[12px] text-fg-3">{rebuilding ? t("media.rebuilding") : t("studio.videoWait")}</p>}
+            {publishing && <p className="text-[12px] text-fg-3">{t("studio.videoWait")}</p>}
           </div>
         )}
         {locked && arDirty && (
@@ -289,7 +293,10 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
               !locked
                 ? async (files) => {
                     const ids = await uploadMedia(files, t, () => {});
-                    onChange(await api<Job>(`/studio/${job.id}/media`, { method: "POST", json: { upload_ids: ids } }));
+                    const before = visual.length;
+                    const next = await api<Job>(`/studio/${job.id}/media`, { method: "POST", json: { upload_ids: ids } });
+                    onChange(next);
+                    openEditor(next, before); // 방금 넣은 첫 장을 바로 편집
                   }
                 : undefined
             }
@@ -361,7 +368,6 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
         {/* 휴대폰·태블릿: 미리보기를 편집 사이에 (넓은 화면은 오른쪽에 고정) */}
         <div className="lg:hidden">{preview}</div>
 
-        {(!locked || job.soundtrack) && <SoundtrackCard job={job} locked={locked} onChange={onChange} />}
 
         {isStory ? (
           <Notice tone="neutral">{t("studio.storyReviewNote")}</Notice>
@@ -416,7 +422,6 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
             username: me.username,
             avatar: me.profile_picture_url,
             caption: finalCaption,
-            music: track ? { title: track.name } : null,
           }}
           onClose={() => setEditing(null)}
           onSaved={reload}
@@ -427,6 +432,7 @@ export function Review({ job, onChange }: { job: Job | null; onChange: (j: Job) 
           jobId={job.id}
           index={job.assets.indexOf(visual[editingVideo])}
           asset={visual[editingVideo]}
+          preview={{ kind: isStory ? "story" : "feed", assets: visual, username: me.username, avatar: me.profile_picture_url, caption: finalCaption }}
           onClose={() => setEditingVideo(null)}
           onSaved={onChange}
         />

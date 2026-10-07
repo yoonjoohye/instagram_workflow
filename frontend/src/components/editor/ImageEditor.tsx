@@ -28,7 +28,7 @@ type Crop = { zoom: number; turns: number; straighten: number; flip: boolean };
 type FontItem = { key: string; label: string; preview: string };
 type Named = F.FabricObject & { name?: string; isEditing?: boolean };
 
-export type EditorPreview = { kind: "feed" | "story"; assets: Asset[]; username: string; avatar?: string; caption: string; music?: { title: string } | null };
+export type EditorPreview = { kind: "feed" | "story"; assets: Asset[]; username: string; avatar?: string; caption: string };
 
 const COLORS = ["#ffffff", "#111111", "#ff3b5c", "#ff9f1c", "#ffd60a", "#34c759", "#0a84ff", "#8b5cf6", "#ff7eb6"];
 const EMOJIS = ["❤️", "✨", "🔥", "😍", "🥹", "😂", "👍", "🙌", "🎉", "📍", "✈️", "🗼", "☕", "🍰", "🌸", "🌊", "☀️", "🌙", "⭐", "💯", "👀", "📸", "🎵", "💌", "🍀", "🎂", "🍕", "🏖️"];
@@ -674,7 +674,7 @@ export function ImageEditor({
         {preview.kind === "story" ? (
           <StoryPreview username={preview.username} avatar={preview.avatar} assets={previewAssets} />
         ) : (
-          <InstagramPreview username={preview.username} avatar={preview.avatar} assets={previewAssets} caption={preview.caption} music={preview.music} />
+          <InstagramPreview username={preview.username} avatar={preview.avatar} assets={previewAssets} caption={preview.caption} />
         )}
       </div>
     </div>
