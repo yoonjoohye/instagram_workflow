@@ -226,7 +226,7 @@ export function Review({
                     : t("studio.publishStories", { n: visual.length })
                   : publishing
                     ? t("studio.publishing")
-                    : job.status === "failed" || job.status === "deleted"
+                    : job.status === "failed" || job.status === "deleted" || job.status === "expired"
                       ? t("studio.republish")
                       : t("studio.publish")}
               </Button>

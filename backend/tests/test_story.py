@@ -232,3 +232,29 @@ def test_consumed_without_recent_story_still_fails(monkeypatch):
     import pytest
     with pytest.raises(GraphError):
         publishing.publish(Graph(), "ig", "c1", kind="STORIES")
+
+
+def test_republish_deleted_story_uploads_again(monkeypatch, client, login, account, db):
+    """인스타에서 지웠거나 끝난 스토리를 다시 게시하면 지난 기록 없이 처음부터 올림."""
+    from backend.models import GenerationJob
+
+    login(account)
+    b = io.BytesIO()
+    Image.new("RGB", (1080, 1920), "green").save(b, "JPEG")
+    up = client.post("/media/uploads", files={"file": ("a.jpg", b.getvalue(), "image/jpeg")}).json()["id"]
+    job = client.post("/studio/manual", json={"upload_ids": [up], "post_type": "story"}).json()
+    row = db.get(GenerationJob, job["id"])
+    row.status = "deleted"
+    row.plan = {**row.plan, "story_media_ids": ["old-story"]}
+    db.commit()
+
+    made = []
+    monkeypatch.setattr(workflow, "graph_for", lambda acc: FakeGraph())
+    monkeypatch.setattr(workflow.publishing, "publishing_limit", lambda c, u: {"remaining": 25, "used": 0, "total": 25})
+    monkeypatch.setattr(workflow.publishing, "create_container", lambda c, u, **k: made.append(1) or "c-new")
+    monkeypatch.setattr(workflow.publishing, "wait_until_finished", lambda c, cid, **k: None)
+    monkeypatch.setattr(workflow.publishing, "publish", lambda c, u, cid, **k: {"media_id": "new-story", "permalink": ""})
+    r = client.post("/workflow/publish", json={"job_id": job["id"]}).json()
+    assert r["status"] == "published" and made == [1]
+    db.expire_all()
+    assert db.get(GenerationJob, job["id"]).plan["story_media_ids"] == ["new-story"]

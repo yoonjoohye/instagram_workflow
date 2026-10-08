@@ -1,4 +1,4 @@
-"""Instagram 앱에서 직접 지운 게시물을 서비스 기록에 반영합니다.
+"""Instagram 앱에서 직접 지운 게시물(과 끝나거나 지운 스토리)을 서비스 기록에 반영합니다.
 
 게시물 목록(성과)은 매번 Instagram 에서 새로 가져오지만, 작업함(게시됨)·자동 응답 규칙·댓글 감정 기록은
 게시물 ID 를 저장해 두므로 Instagram 에서 지워져도 남습니다. 저장된 ID 를 하나씩 조회해 없어진 것만 정리합니다.
@@ -31,12 +31,62 @@ def _gone(client: GraphClient, media_id: str) -> bool:
         return "does not exist" in str(exc)
 
 
+STORY_LIFETIME = dt.timedelta(hours=24)  # 스토리는 24시간 뒤 저절로 내려감
+STORY_GRACE = dt.timedelta(minutes=5)  # 막 올린 스토리는 목록에 늦게 나타날 수 있어 기다림
+
+
+def _aware(t: dt.datetime) -> dt.datetime:
+    return t.replace(tzinfo=dt.timezone.utc) if t.tzinfo is None else t
+
+
+def sync_stories(db: Session, account: Account, client: GraphClient) -> int:
+    """게시한 스토리: 24시간이 지나면 'expired'(스토리 종료), 그 전에 지금 올라가 있는 스토리 목록에 없으면
+    'deleted'(인스타에서 삭제됨). 여러 장이면 모두 없어졌을 때만. 바뀐 개수를 돌려줍니다."""
+    jobs = list(
+        db.scalars(
+            select(GenerationJob).where(
+                GenerationJob.account_id == account.id, GenerationJob.status == "published", GenerationJob.media_kind == "STORIES"
+            )
+        )
+    )
+    if not jobs:
+        return 0
+    now = dt.datetime.now(dt.timezone.utc)
+    changed = 0
+    live_check = []
+    for job in jobs:
+        age = now - _aware(job.published_at) if job.published_at else STORY_LIFETIME
+        if age >= STORY_LIFETIME:
+            job.status = "expired"
+            changed += 1
+        elif age >= STORY_GRACE:
+            live_check.append(job)
+    if live_check:
+        try:
+            rows = client.get(f"{account.ig_user_id}/stories", {"fields": "id", "limit": 100}).get("data") or []
+        except GraphError as exc:  # 권한·일시 오류면 이번엔 건너뜀 (지운 것으로 잘못 표시하지 않게)
+            log.warning("story sync skipped: %s", exc)
+            rows = None
+        if rows is not None:
+            live = {str(r.get("id")) for r in rows}
+            for job in live_check:
+                plan = job.plan if isinstance(job.plan, dict) else {}
+                ids = [str(i) for i in (plan.get("story_media_ids") or [job.ig_media_id]) if i]
+                if ids and not any(i in live for i in ids):
+                    job.status = "deleted"
+                    changed += 1
+    if changed:
+        db.commit()
+    return changed
+
+
 def sync_deleted(db: Session, account: Account, client: GraphClient, *, force: bool = False) -> dict[str, int]:
     now = dt.datetime.now(dt.timezone.utc)
     last = _last_run.get(account.id)
     if not force and last and now - last < MIN_INTERVAL:
         return {"checked": 0, "deleted": 0}
     _last_run[account.id] = now
+    sync_stories(db, account, client)
 
     ids: set[str] = set()
     ids |= set(

@@ -208,6 +208,10 @@ def publish_job(
     job = _get_job(db, account, body.job_id)
     if job.status == "published":
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 발행된 작업입니다.")
+    if job.status in ("deleted", "expired"):
+        # 인스타에서 지웠거나 끝난 게시물을 다시 올림 — 지난번에 올린 기록을 지우고 처음부터
+        job.plan = {k: v for k, v in (job.plan or {}).items() if k not in ("story_media_ids", "container_fingerprint")}
+        job.ig_container_id = ""
 
     visual = [
         {**a, "url": _current_media_url(a.get("url", "")), "thumbnail_url": _current_media_url(a.get("thumbnail_url", ""))}
