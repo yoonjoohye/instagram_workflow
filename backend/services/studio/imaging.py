@@ -10,13 +10,18 @@ from .limits import SIZE
 
 
 def normalize(data: bytes, *, max_side: int = 1600) -> tuple[bytes, int, int]:
-    """회전(EXIF) 보정 → RGB → 긴 변 max_side 로 축소 → JPEG."""
-    img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    """회전(EXIF) 보정 → RGB → 긴 변 max_side 로 축소 → JPEG.
+    이미 알맞은 JPEG(크기 이내, 회전·위치 등 EXIF 정보 없음 — 예: 편집기에서 내보낸 이미지)는 다시 압축하지 않고 그대로
+    (JPEG 를 여러 번 압축할수록 화질이 조금씩 떨어지므로)."""
+    src = Image.open(io.BytesIO(data))
+    if src.format == "JPEG" and src.mode == "RGB" and max(src.size) <= max_side and not src.info.get("exif"):
+        return data, src.width, src.height
+    img = ImageOps.exif_transpose(src).convert("RGB")
     img.thumbnail((max_side, max_side), Image.LANCZOS)
     return to_jpeg(img), img.width, img.height
 
 
-def to_jpeg(img: Image.Image, quality: int = 88) -> bytes:
+def to_jpeg(img: Image.Image, quality: int = 92) -> bytes:
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "JPEG", quality=quality, optimize=True, progressive=True)
     return buf.getvalue()
@@ -82,4 +87,22 @@ def basic_enhance(photo: bytes) -> bytes:
     img = ImageOps.autocontrast(Image.open(io.BytesIO(photo)).convert("RGB"), cutoff=1)
     img = ImageEnhance.Color(img).enhance(1.12)
     img = ImageEnhance.Sharpness(img).enhance(1.15)
+    return to_jpeg(img)
+
+
+def crop_to_ratio(data: bytes, lo: float, hi: float) -> bytes | None:
+    """가로/세로 비율이 lo~hi 를 벗어나면 가운데를 잘라 맞춘 JPEG (안이면 None)."""
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    w, h = img.size
+    ratio = w / h
+    if lo - 0.005 <= ratio <= hi + 0.005:
+        return None
+    if ratio < lo:  # 너무 길쭉 → 위아래를 자름
+        nh = round(w / lo)
+        top = (h - nh) // 2
+        img = img.crop((0, top, w, top + nh))
+    else:  # 너무 넓음 → 양옆을 자름
+        nw = round(h * hi)
+        left = (w - nw) // 2
+        img = img.crop((left, 0, left + nw, h))
     return to_jpeg(img)

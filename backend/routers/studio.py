@@ -52,18 +52,23 @@ def _save_blob(db: Session, account: Account, data: bytes, width: int, height: i
     return blob
 
 
+# 올린 사진의 긴 변. 인스타는 가로 1080 으로 보여 주므로, 9:16 세로 사진도 가로가 1080 이상 남게 2048
+# (1600 이면 9:16 사진이 가로 900 이 되어 피드·스토리에서 늘려지며 흐려짐)
+UPLOAD_SIDE = 2048
+
+
 @router.post("/media/uploads", status_code=status.HTTP_201_CREATED)
 async def upload(
     file: UploadFile = File(...),
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ) -> dict:
-    """사진 한 장 업로드. 회전 보정·축소 후 JPEG 로 보관합니다."""
+    """사진 한 장 업로드. 회전 보정·축소(긴 변 2048) 후 JPEG 로 보관합니다."""
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "사진이 너무 큽니다 (최대 8MB).")
     try:
-        data, w, h = svc.normalize(raw)
+        data, w, h = svc.normalize(raw, max_side=UPLOAD_SIDE)
     except OSError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "이미지 파일을 읽을 수 없습니다.") from exc
     blob = _save_blob(db, account, data, w, h, "upload")

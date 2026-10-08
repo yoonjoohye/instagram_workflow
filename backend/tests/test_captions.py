@@ -26,3 +26,28 @@ def test_no_emoji_for_server_drawn_text():
 def test_fill_template_drops_repeated_line_head():
     caption, _ = captions.fill_template("[첫 줄]\n📍 [가게 위치]", ["맛있다", "📍 성수 소바집"], [])
     assert caption == "맛있다\n📍 성수 소바집"
+
+
+def test_normalize_keeps_ready_jpeg_and_crops_feed_ratio():
+    """화질: 이미 알맞은 JPEG 는 다시 압축하지 않음. 피드 비율(4:5~1.91:1)을 벗어나면 가운데를 잘라 맞춤."""
+    import io
+
+    from PIL import Image
+
+    from backend.services.studio import imaging
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1080, 1350), "red").save(buf, "JPEG", quality=95)
+    raw = buf.getvalue()
+    assert imaging.normalize(raw, max_side=1920)[0] == raw  # 그대로
+    assert imaging.normalize(raw, max_side=1000)[0] != raw  # 크면 줄임
+
+    tall = io.BytesIO()
+    Image.new("RGB", (1080, 1920), "blue").save(tall, "JPEG")
+    out = imaging.crop_to_ratio(tall.getvalue(), 0.8, 1.91)
+    assert Image.open(io.BytesIO(out)).size == (1080, 1350)
+    wide = io.BytesIO()
+    Image.new("RGB", (2000, 800), "blue").save(wide, "JPEG")
+    w, h = Image.open(io.BytesIO(imaging.crop_to_ratio(wide.getvalue(), 0.8, 1.91))).size
+    assert h == 800 and abs(w / h - 1.91) < 0.01
+    assert imaging.crop_to_ratio(raw, 0.8, 1.91) is None  # 4:5 는 그대로

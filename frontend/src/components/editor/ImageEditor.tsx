@@ -1186,7 +1186,7 @@ export function ImageEditor({
         onClose();
         return;
       }
-      const dataUrl = c.toDataURL({ format: "jpeg", quality: 0.92, multiplier: 1 / zoom.current });
+      const dataUrl = c.toDataURL({ format: "jpeg", quality: 0.95, multiplier: 1 / zoom.current }); // 서버는 다시 압축하지 않고 그대로 보관
       const image = await (await fetch(dataUrl)).blob();
       const layers: Layers = {
         v: 1,

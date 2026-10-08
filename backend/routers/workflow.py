@@ -168,7 +168,7 @@ def delete_job(
         if o is not None and o.account_id == account.id and o.kind == "overlay":
             db.delete(o)
     # 스토리용으로 9:16 에 맞춘 사본
-    for fitted_id in ((job.plan or {}).get("story_fit") or {}).values():
+    for fitted_id in [*((job.plan or {}).get("story_fit") or {}).values(), *((job.plan or {}).get("feed_fit") or {}).values()]:
         blob = db.get(MediaBlob, fitted_id)
         if blob is not None and blob.account_id == account.id and blob.kind == "slide":
             db.delete(blob)
@@ -261,7 +261,7 @@ def publish_job(
                         client,
                         account.ig_user_id,
                         kind="REELS" if asset["type"] == "video" else "IMAGE",
-                        media_url=asset["url"],
+                        media_url=_feed_ready(db, account, job, asset),
                         is_carousel_item=True,
                     )
                     if asset["type"] == "video":
@@ -283,7 +283,7 @@ def publish_job(
                     client,
                     account.ig_user_id,
                     kind=kind,  # type: ignore[arg-type]
-                    media_url=asset["url"],
+                    media_url=_feed_ready(db, account, job, asset) if kind == "IMAGE" else asset["url"],
                     caption=caption,
                     cover_url=asset.get("thumbnail_url") or None,
                     share_to_feed=body.share_to_feed if kind == "REELS" else None,
@@ -357,6 +357,39 @@ def _story_ready(db: Session, account: Account, job: GenerationJob, asset: dict)
     job.plan = {**(job.plan or {}), "story_fit": cache}
     db.commit()
     return _current_media_url(f"/api/py/media/{fitted.id}.jpg")
+
+
+FEED_RATIO = (0.8, 1.91)  # 인스타 피드 사진이 받는 가로/세로 비율 (4:5 ~ 1.91:1) — 벗어나면 게시가 거절됨
+
+
+def _feed_ready(db: Session, account: Account, job: GenerationJob, asset: dict) -> str:
+    """피드 사진이 4:5 보다 길쭉하거나 1.91:1 보다 넓으면 가운데를 잘라 맞춘 사본 주소 (편집기의 '피드에 올라가는 영역' 점선과 같음).
+    한 번 만든 사본은 plan["feed_fit"] 에 기억."""
+    url = asset["url"]
+    if asset.get("type") != "image" or "/api/py/media/" not in url:
+        return url
+    blob_id = url.rsplit("/media/", 1)[-1].removesuffix(".jpg")
+    cache = dict((job.plan or {}).get("feed_fit") or {})
+    if blob_id in cache:
+        return _current_media_url(f"/api/py/media/{cache[blob_id]}.jpg") if cache[blob_id] else url
+    blob = db.get(MediaBlob, blob_id)
+    if blob is None or blob.account_id != account.id or not blob.data:
+        return url
+    from ..services.studio.imaging import crop_to_ratio
+
+    cropped = crop_to_ratio(blob.data, *FEED_RATIO)
+    fitted_id = ""
+    if cropped is not None:
+        from ..services.studio import image_size
+
+        fitted = MediaBlob(id=secrets.token_urlsafe(18), account_id=account.id, kind="slide", data=cropped)
+        fitted.width, fitted.height = image_size(cropped)
+        db.add(fitted)
+        fitted_id = fitted.id
+    cache[blob_id] = fitted_id  # 빈 값 = 그대로 써도 됨
+    job.plan = {**(job.plan or {}), "feed_fit": cache}
+    db.commit()
+    return _current_media_url(f"/api/py/media/{fitted_id}.jpg") if fitted_id else url
 
 
 def _publish_stories(db: Session, account: Account, job: GenerationJob, visual: list[dict]) -> dict:
