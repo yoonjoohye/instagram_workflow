@@ -15,6 +15,7 @@ import { filmFilters } from "./filmFilters";
 import { BAND_SWATCH, colorFilters, HSL_BANDS, type Band } from "./colorFilters";
 import { composite, removeBackground } from "@/lib/cutout";
 import { removeSolidBackground } from "@/lib/cutout/colorKey";
+import { MaskEditor } from "./MaskEditor";
 import { haptic } from "@/lib/haptics";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
@@ -321,6 +322,9 @@ export function ImageEditor({
   const photoFile = useRef<HTMLInputElement>(null);
   const [hasCutout, setHasCutout] = useState(false);
   const cutout = useRef<{ png: Blob; original: Blob } | null>(null);
+  const lastBg = useRef<{ color: string } | { blur: true }>({ color: "#ffffff" });
+  // 누끼 다듬기(지우개·되살리기) 화면
+  const [refine, setRefine] = useState<{ src: string; original: string; onApply: (png: Blob) => Promise<void> } | null>(null);
   const stickerFile = useRef<HTMLInputElement>(null);
   const stickers = useApi<{ data: Sticker[] }>("/studio/stickers");
   // 내 필터: 지금 보정 값을 이름 붙여 저장 (회원별)
@@ -824,6 +828,7 @@ export function ImageEditor({
   async function changeBackground(bg: { color: string } | { blur: true }) {
     const c = cutout.current;
     if (!c) return;
+    lastBg.current = bg;
     setAiBusy({ label: t("editor.applying") });
     try {
       const out = await composite(c.png, "color" in bg ? bg : { blurOf: c.original });
@@ -833,6 +838,46 @@ export function ImageEditor({
     } finally {
       setAiBusy(null);
     }
+  }
+
+  /** 사진(누끼) 다듬기: 지우개·되살리기 → 같은 배경으로 다시 합침 */
+  function refinePhoto() {
+    const c = cutout.current;
+    if (!c) return;
+    setRefine({
+      src: URL.createObjectURL(c.png),
+      original: URL.createObjectURL(c.original),
+      onApply: async (png) => {
+        cutout.current = { ...c, png };
+        await changeBackground(lastBg.current);
+      },
+    });
+  }
+
+  /** 고른 사진·스티커 다듬기 */
+  function refineSelected() {
+    const o = canvas.current?.getActiveObject() as (F.FabricImage & Named) | undefined;
+    if (!o || o.type !== "image" || SPECIAL.has(o.name ?? "")) return;
+    const current = o.getSrc();
+    const orig = o.orig || current;
+    setRefine({
+      src: mediaSrc(current),
+      original: mediaSrc(orig),
+      onApply: async (png) => {
+        setAiBusy({ label: t("editor.applying") });
+        try {
+          const url = await uploadLayer(png);
+          await o.setSrc(mediaSrc(url), { crossOrigin: "anonymous" });
+          o.orig = orig;
+          canvas.current!.requestRenderAll();
+          snapshot();
+        } catch (e) {
+          setError(t("editor.cutFailed", { e: toApiError(e).message }));
+        } finally {
+          setAiBusy(null);
+        }
+      },
+    });
   }
 
   async function restoreOriginalPhoto() {
@@ -1440,6 +1485,7 @@ export function ImageEditor({
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Chip onClick={() => cutSelected("ai")}>✂ {t("editor.removeBgAi")}</Chip>
                           <Chip onClick={() => cutSelected("solid")}>🪄 {t("editor.removeBgSolid")}</Chip>
+                          <Chip onClick={refineSelected}>🧽 {t("editor.refine")}</Chip>
                           {(selected as Named).orig && <Chip onClick={restoreSelectedImage}>{t("editor.restorePhoto")}</Chip>}
                         </div>
                         <Slider
@@ -1754,6 +1800,7 @@ export function ImageEditor({
                     >
                       ✂ {t("editor.removeBg")}
                     </button>
+                    {hasCutout && <Chip onClick={refinePhoto}>🧽 {t("editor.refine")}</Chip>}
                     {(hasCutout || (base() as Named | undefined)?.orig) && <Chip onClick={restoreOriginalPhoto}>{t("editor.restorePhoto")}</Chip>}
                   </div>
                   <p className="text-[11px] leading-relaxed text-white/50">{t("editor.removeBgHint")}</p>
@@ -1819,6 +1866,18 @@ export function ImageEditor({
         {/* 넓은 화면: 오른쪽에 올라갈 모습 */}
         {previewPane && <aside className="hidden w-[380px] shrink-0 overflow-y-auto border-l border-white/10 p-4 lg:block">{previewPane}</aside>}
       </div>
+      {refine && (
+        <MaskEditor
+          src={refine.src}
+          original={refine.original}
+          onApply={refine.onApply}
+          onClose={() => {
+            if (refine.src.startsWith("blob:")) URL.revokeObjectURL(refine.src);
+            if (refine.original.startsWith("blob:")) URL.revokeObjectURL(refine.original);
+            setRefine(null);
+          }}
+        />
+      )}
     </div>
   );
 }
