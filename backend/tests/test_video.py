@@ -79,6 +79,50 @@ def test_video_edit_trim_mute_cover_and_reset(client, login, account, db):
     assert db.get(MediaBlob, src.id) is not None  # 올린 원본은 그대로
 
 
+def test_video_overlay_drawn_on_whole_video_and_kept_on_trim(client, login, account, db):
+    """꾸미기: 투명 PNG(가운데 노란 네모)를 영상 전체에 겹치고, 자르기를 바꿔도 꾸미기는 남음, 빈 그림이면 꾸미기 지우기."""
+    login(account)
+    src = blob(db, account, clip(), "video", "video/mp4")
+    cover = blob(db, account, b"x", "upload", "image/jpeg")
+    job = GenerationJob(
+        account_id=account.id, prompt="p", media_kind="REELS", status="ready", provider="studio", caption="", hashtags=[],
+        assets=[{"type": "video", "url": url(src), "thumbnail_url": url(cover), "meta": {}}], plan={"slides": [{}]},
+    )
+    db.add(job)
+    db.commit()
+
+    ov = Image.new("RGBA", (216, 384), (0, 0, 0, 0))  # 영상의 2배 크기 → 영상 크기에 맞춰 줄여 겹침
+    ov.paste((255, 230, 0, 255), (68, 152, 148, 232))
+    buf = io.BytesIO()
+    ov.save(buf, "PNG")
+    r = client.post(f"/studio/{job.id}/videos/0/overlay", files={"file": ("o.png", buf.getvalue(), "image/png")}, data={"layers": '{"v":1}'})
+    assert r.status_code == 200, r.text
+    edit = r.json()["asset"]["meta"]["video_edit"]
+    assert edit["overlay_id"] and edit["overlay_layers"] == '{"v":1}' and edit["overlay_url"].endswith(".png")
+
+    def center_and_corner(asset):
+        frame = Image.open(io.BytesIO(client.get(asset["thumbnail_url"].replace("https://testserver/api/py", "")).content)).convert("RGB")
+        return frame.getpixel((frame.width // 2, frame.height // 2)), frame.getpixel((3, 3))
+
+    (cr, cg, cb), (kr, kg, kb) = center_and_corner(r.json()["asset"])
+    assert cr > 200 and cg > 180 and cb < 90  # 가운데는 꾸민 노란 네모
+    assert kr > 150 and kg < 90  # 가장자리는 원래 영상(빨강)
+
+    # 자르기를 바꿔도 꾸미기는 그대로 (파란 구간에서도 노란 네모)
+    trimmed = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 3.5}).json()["asset"]
+    assert trimmed["meta"]["video_edit"]["overlay_id"] == edit["overlay_id"]
+    (cr, cg, cb), (kr, kg, kb) = center_and_corner(trimmed)
+    assert cr > 200 and cg > 180 and kb > 150
+
+    # 빈 그림을 보내면 꾸미기 지우기 (그림 파일도 정리)
+    empty = io.BytesIO()
+    Image.new("RGBA", (216, 384), (0, 0, 0, 0)).save(empty, "PNG")
+    cleared = client.post(f"/studio/{job.id}/videos/0/overlay", files={"file": ("e.png", empty.getvalue(), "image/png")}).json()["asset"]
+    assert cleared["meta"]["video_edit"]["overlay_id"] == ""
+    db.expire_all()
+    assert db.get(MediaBlob, edit["overlay_id"]) is None
+
+
 def test_fit_frame_keeps_whole_photo_on_other_ratio():
     buf = io.BytesIO()
     Image.new("RGB", (200, 100), "red").save(buf, "JPEG")

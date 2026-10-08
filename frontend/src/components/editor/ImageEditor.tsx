@@ -149,11 +149,16 @@ function loadFont(key: string): Promise<void> {
 const blobIdOf = (url: string) => url.split("/media/").pop()!.replace(/\.jpg$/, "");
 const SPECIAL = new Set(["base", "vignette"]);
 
+/** 동영상 꾸미기 모드: 영상의 한 장면(baseUrl)을 바탕으로 글자·스티커·그리기만 하고,
+ *  저장하면 꾸민 것만 그린 투명 PNG(아무것도 없으면 null)와 편집기 상태를 넘깁니다. 바탕 장면은 내보내지 않음. */
+export type OverlayMode = { title: string; baseUrl: string; layers?: string; onSubmit: (png: Blob | null, layers: string) => Promise<void> };
+
 export function ImageEditor({
   jobId,
   index,
   asset,
   preview,
+  overlay,
   onClose,
   onSaved,
 }: {
@@ -161,6 +166,7 @@ export function ImageEditor({
   index: number;
   asset: Asset;
   preview?: EditorPreview;
+  overlay?: OverlayMode;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
 }) {
@@ -294,7 +300,8 @@ export function ImageEditor({
         // 개발용: 브라우저 테스트에서 캔버스 상태를 확인 (배포 빌드에는 없음)
         if (process.env.NODE_ENV === "development") (window as unknown as { __editorCanvas?: F.Canvas }).__editorCanvas = c;
 
-        const saved = meta.edit?.layers ? (JSON.parse(meta.edit.layers) as Layers) : null;
+        const savedJson = overlay ? overlay.layers : meta.edit?.layers;
+        const saved = savedJson ? (JSON.parse(savedJson) as Layers) : null;
         if (saved?.canvas) {
           size.current = { w: saved.w, h: saved.h };
           const families = new Set<string>(JSON.stringify(saved.canvas).match(/ffont-[a-z_]+/g) ?? []);
@@ -305,7 +312,7 @@ export function ImageEditor({
           setAdjustState(adjustRef.current);
           setCropState(cropRef.current);
         } else {
-          const img = await f.FabricImage.fromURL(mediaSrc(`/api/py/media/${baseId}.jpg`), { crossOrigin: "anonymous" });
+          const img = await f.FabricImage.fromURL(mediaSrc(overlay ? overlay.baseUrl : `/api/py/media/${baseId}.jpg`), { crossOrigin: "anonymous" });
           const long = Math.max(img.width, img.height);
           const scale = long > 1920 ? 1920 / long : 1;
           size.current = { w: Math.round(img.width * scale), h: Math.round(img.height * scale) };
@@ -959,6 +966,24 @@ export function ImageEditor({
       c.discardActiveObject();
       c.isDrawingMode = false;
       c.requestRenderAll();
+      if (overlay) {
+        // 꾸민 것만: 바탕 장면을 숨기고 투명 배경으로 내보냄
+        const b = base();
+        const bg = c.backgroundColor;
+        b?.set({ visible: false });
+        c.backgroundColor = "";
+        c.renderAll();
+        const drawn = c.getObjects().some((o) => o.visible !== false && !SPECIAL.has((o as Named).name ?? ""));
+        const png = drawn ? await (await fetch(c.toDataURL({ format: "png", multiplier: 1 / zoom.current }))).blob() : null;
+        b?.set({ visible: true });
+        c.backgroundColor = bg;
+        c.renderAll();
+        const layers: Layers = { v: 1, w: size.current.w, h: size.current.h, canvas: c.toObject(KEEP), adjust: adjustRef.current, crop: cropRef.current };
+        await overlay.onSubmit(png, JSON.stringify(layers));
+        await onSaved();
+        onClose();
+        return;
+      }
       const dataUrl = c.toDataURL({ format: "jpeg", quality: 0.92, multiplier: 1 / zoom.current });
       const image = await (await fetch(dataUrl)).blob();
       const layers: Layers = {
@@ -1010,7 +1035,7 @@ export function ImageEditor({
     { key: "adjust", label: t("editor.tabAdjust"), icon: "◐" },
     { key: "bg", label: t("editor.tabBackground"), icon: "✂" },
     { key: "crop", label: t("editor.tabCrop"), icon: "⤢" },
-  ];
+  ].filter((x) => !overlay || x.key === "text" || x.key === "sticker" || x.key === "draw") as { key: Tab; label: string; icon: string }[];
   const previewAssets = preview?.assets.map((a, i) => (i === index && previewUrl ? { ...a, url: previewUrl, type: "image" as const } : a)) ?? [];
   const previewPane = preview && (
     <div className="space-y-2">
@@ -1026,12 +1051,12 @@ export function ImageEditor({
   );
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0b0c] text-white" role="dialog" aria-modal="true" aria-label={t("editor.title")}>
+    <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0b0c] text-white" role="dialog" aria-modal="true" aria-label={overlay?.title ?? t("editor.title")}>
       <header className="flex items-center gap-2 border-b border-white/10 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <button type="button" onClick={close} className="rounded-md px-2 py-1.5 text-[14px] text-white/80 hover:bg-white/10">
           {t("editor.cancel")}
         </button>
-        <span className="flex-1 text-center text-[14px] font-semibold">{t("editor.title")}</span>
+        <span className="flex-1 text-center text-[14px] font-semibold">{overlay?.title ?? t("editor.title")}</span>
         <button type="button" disabled={h.at <= 0} onClick={() => restore(h.at - 1)} aria-label={t("editor.undo")} className="rounded-md px-2 py-1.5 text-lg disabled:opacity-30">
           ↶
         </button>
@@ -1407,7 +1432,11 @@ export function ImageEditor({
               )}
             </div>
 
-            <nav className="mt-2 grid grid-cols-5 border-t border-white/10 pb-[max(0.5rem,env(safe-area-inset-bottom))]" aria-label={t("editor.title")}>
+            <nav
+              className="mt-2 grid border-t border-white/10 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+              style={{ gridTemplateColumns: `repeat(${TABS.length}, minmax(0, 1fr))` }}
+              aria-label={t("editor.title")}
+            >
               {TABS.map((x) => (
                 <button
                   key={x.key}

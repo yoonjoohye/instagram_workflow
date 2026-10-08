@@ -100,6 +100,10 @@ export type VideoEdit = {
   mute: boolean;
   cover_at: number | null;
   duration: number;
+  /** 꾸미기: 영상 전체에 겹친 글자·스티커·그림 (투명 PNG) + 다시 꾸밀 때 불러올 편집기 상태 */
+  overlay_id?: string;
+  overlay_url?: string;
+  overlay_layers?: string;
 };
 
 export type Quota = { used: number; total: number; remaining: number };

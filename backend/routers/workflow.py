@@ -161,6 +161,12 @@ def delete_job(
             db.delete(blob)
     # 동영상 편집으로 만든 영상
     discard_renders(db, account, [a.get("url", "") for a in (job.assets or []) if (a.get("meta") or {}).get("video_edit")])
+    # 동영상 꾸미기 그림(투명 PNG)도 함께
+    for a in job.assets or []:
+        oid = ((a.get("meta") or {}).get("video_edit") or {}).get("overlay_id")
+        o = db.get(MediaBlob, oid) if oid else None
+        if o is not None and o.account_id == account.id and o.kind == "overlay":
+            db.delete(o)
     # 스토리용으로 9:16 에 맞춘 사본
     for fitted_id in ((job.plan or {}).get("story_fit") or {}).values():
         blob = db.get(MediaBlob, fitted_id)

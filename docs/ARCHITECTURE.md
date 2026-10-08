@@ -31,8 +31,8 @@
 | `routers/members.py` | **회원**: 이메일 인증번호 가입, 로그인(10회 틀리면 15분 잠금), 비밀번호 재설정·변경, 프로필, 탈퇴, `/auth/session` |
 | `routers/auth.py` | 회원에 **Instagram(여러 개)·Facebook(하나) 연동** OAuth·콜백, 계정 전환·연동 해제, 앱 연동 티켓·코드 교환, 로컬 테스트 로그인, Meta 데이터 삭제 콜백 |
 | `routers/studio.py` | 게시물 만들기: 업로드, 조사, 구성, 장별 이미지, AI 없이 직접 만들기, 순서 바꾸기, 캡션 다시 쓰기·해시태그 추천, 마무리 |
-| `routers/video.py` | **동영상 편집** (자르기·소리 끄기·대표 화면) |
-| `routers/stickers.py` | **내 스티커** (투명 PNG 저장·목록·삭제, `/api/py/media/<id>.png`) |
+| `routers/video.py` | **동영상 편집** (자르기·소리 끄기·대표 화면·**꾸미기** — 사진 편집기의 꾸미기 모드로 그린 투명 PNG 를 ffmpeg overlay 로 영상 전체에 겹침) |
+| `routers/stickers.py` | **내 스티커** (투명 PNG 저장·목록·삭제, `/api/py/media/<id>.png`), 편집기에 붙인 사진·레이어 저장(`/studio/layers`) |
 | `routers/workflow.py` | 만든 게시물 목록·수정·삭제, **Instagram 게시** |
 | `routers/insights.py` | 대시보드·게시물 성과, 매일 cron |
 | `routers/autoreply.py` · `webhooks.py` | 댓글 자동 응답 규칙 / Meta Webhook 수신 |
