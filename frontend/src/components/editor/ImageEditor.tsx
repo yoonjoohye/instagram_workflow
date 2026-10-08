@@ -27,7 +27,7 @@ import { api, toApiError, useApi } from "@/lib/api";
 import { mediaSrc } from "@/lib/format";
 import type { Asset } from "@/lib/types";
 
-type Tab = "text" | "sticker" | "draw" | "adjust" | "bg" | "crop";
+type Tab = "text" | "sticker" | "draw" | "adjust" | "bg" | "crop" | `x:${string}`;
 type Brush = "pen" | "marker" | "neon" | "eraser";
 type Layers = { v: 1; w: number; h: number; canvas: object; adjust?: Adjust; crop?: Crop };
 type HslKey = `hsl${"H" | "S" | "L"}_${Band}`;
@@ -273,6 +273,30 @@ const SPECIAL = new Set(["base", "vignette", "backdrop"]);
  *  저장하면 보이는 시간이 같은 것끼리 묶어 꾸민 것만 그린 투명 PNG 들과 편집기 상태를 넘깁니다. 바탕 장면은 내보내지 않음.
  *  video 가 있으면 바탕에 영상을 재생하고 아래에 타임라인을, 없으면 한 장면(baseUrl)만. */
 export type OverlayPart = { png: Blob; start: number | null; end: number | null };
+/** 동영상 편집기가 꾸미기 화면에 붙이는 것들 (소리·대표 화면 탭, 음악 줄, 적용하기) — 한 화면에서 다 하도록 */
+export type OverlayExtras = {
+  tabs: { key: string; label: string; icon: string; panel: ReactNode }[];
+  tracks: Track[];
+  onTrack: (id: string, start: number, end: number, how: "move" | "left" | "right") => void;
+  onSelectTrack?: (id: string) => void;
+  /** 재생 위치가 바뀔 때 (음악 맞추기) */
+  onTime: (t: number, playing: boolean) => void;
+  /** 자르기가 바뀔 때 */
+  onCut: (cut: { start: number; end: number }) => void;
+  /** 원본 소리 크기 (미리 듣기) */
+  volume: number;
+  /** 편집기 바깥에서 바꾼 것(음악·대표 화면 등)이 있는지 — 닫을 때 확인, 적용하기 켜기 */
+  dirty: boolean;
+  submitLabel: string;
+  submittingLabel: string;
+  /** 캔버스 위에 덮어 보여 줄 진행 문구 (올리는 중·만드는 중) */
+  busy?: string | null;
+  /** 타임라인 위 안내 (적용했어요 등) */
+  notice?: ReactNode;
+  headerExtra?: ReactNode;
+  /** 바깥에서 재생 위치를 옮기거나 읽을 때 */
+  controller: { current: { seek: (t: number) => void; time: () => number } | null };
+};
 export type OverlayMode = {
   title: string;
   baseUrl: string;
@@ -280,6 +304,10 @@ export type OverlayMode = {
   /** start·end: 지금 자른 구간, duration: 원본 길이 (꾸미면서 자르기도 바꿀 수 있음) */
   video?: { src: string; start: number; end: number; duration: number };
   onSubmit: (parts: OverlayPart[], layers: string, cut?: { start: number; end: number }) => Promise<void>;
+  /** 있으면 동영상 편집 전체를 이 화면에서 (적용한 뒤에도 닫지 않음) */
+  extras?: OverlayExtras;
+  /** 인스타에서 가려지는 곳 안내 (피드·스토리) */
+  guideKind?: "feed" | "story";
 };
 const DEFAULT_SPAN = 3; // 새로 넣은 글자·스티커가 보이는 시간 (초)
 const round1 = (x: number) => Math.round(x * 10) / 10;
@@ -322,6 +350,9 @@ export function ImageEditor({
   const [vt, setVt] = useState(clip?.start ?? 0);
   // 자른 구간 (꾸미기 화면에서도 노란 틀로 바꿀 수 있음)
   const [clipCut, setClipCut] = useState({ start: clip?.start ?? 0, end: clip?.end ?? 0 });
+  const [videoDur, setVideoDur] = useState(clip?.duration ?? 0);
+  const extras = overlay?.extras;
+  const guideKind = preview?.kind ?? overlay?.guideKind;
   const cutRef = useRef(clipCut);
   cutRef.current = clipCut;
   const vtRef = useRef(vt);
@@ -1402,7 +1433,7 @@ export function ImageEditor({
   /** 인스타에서 실제로 보이는 영역(피드 4:5 등)에 사진 전체가 들어오는 크기 */
   function fitZoom(cr: Crop = cropRef.current) {
     const { w, h } = size.current;
-    const area = visibleArea(preview?.kind, w, h);
+    const area = visibleArea(guideKind, w, h);
     return Math.floor(Math.min(containZoom(w, h, cr), containZoom(area.w, area.h, cr)) * 1000) / 1000;
   }
   /** 가장 작게 줄일 수 있는 값 (인스타 영역에 맞춘 크기보다 조금 더 작게까지) */
@@ -1523,7 +1554,7 @@ export function ImageEditor({
       edge = clampBase(o);
     } else if (!SPECIAL.has(o.name ?? "")) {
       // 글자·스티커가 인스타에서 보이는 영역 밖으로 나가면 경고
-      const area = visibleArea(preview?.kind, w, h);
+      const area = visibleArea(guideKind, w, h);
       const pts = o.getCoords();
       const xs = pts.map((p) => p.x);
       const ys = pts.map((p) => p.y);
@@ -1703,7 +1734,15 @@ export function ImageEditor({
   });
   // 이미 불러온 뒤에 이벤트를 붙인 경우 (빠른 캐시) 대비
   useEffect(() => {
-    if (clip && ready && (videoEl.current?.readyState ?? 0) >= 2) setVideoOk(true);
+    const v = videoEl.current;
+    if (!clip || !ready || !v) return;
+    if (v.readyState >= 2) setVideoOk(true);
+    // 길이도 (이벤트를 붙이기 전에 이미 읽었을 수 있어서)
+    if (v.readyState >= 1 && isFinite(v.duration) && v.duration > 0) {
+      const d = v.duration;
+      setVideoDur(d);
+      setClipCut((k) => (k.end > 0 && k.end <= d ? k : { start: Math.min(k.start, d), end: d }));
+    }
   }, [clip, ready]);
   // 영상이 바탕: 장면 사진은 숨기고 캔버스는 투명하게 (영상을 못 불러오면 장면 사진 그대로)
   useEffect(() => {
@@ -1732,7 +1771,7 @@ export function ImageEditor({
   }, [clip, playing]);
   const seekTo = (s0: number) => {
     if (!clip) return;
-    const x = Math.min(clip.duration || clipCut.end, Math.max(0, s0)); // 자르기 틀을 끄는 중에도 그 위치를 보여 줌
+    const x = Math.min(videoDur || clip.duration || clipCut.end, Math.max(0, s0)); // 자르기 틀을 끄는 중에도 그 위치를 보여 줌
     if (videoEl.current) videoEl.current.currentTime = x;
     setVt(x);
   };
@@ -1748,6 +1787,20 @@ export function ImageEditor({
       setPlaying(false);
     }
   };
+  // 동영상 편집기에 알림: 재생 위치(음악 맞추기)·자르기, 원본 소리 크기, 바깥에서 재생 위치 옮기기
+  useEffect(() => {
+    extras?.onTime(vt, playing);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vt, playing]);
+  useEffect(() => {
+    if (clipCut.end > 0) extras?.onCut(clipCut);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipCut.start, clipCut.end]);
+  useEffect(() => {
+    if (videoEl.current && extras) videoEl.current.volume = Math.min(1, extras.volume);
+  }, [extras, extras?.volume, videoOk]);
+  if (extras) extras.controller.current = { seek: (x: number) => seekTo(x), time: () => vtRef.current };
+
   function setTiming(o: Named, s0: number, e0: number, commit = true) {
     if (!clip) return;
     const a = Math.max(clipCut.start, Math.min(s0, clipCut.end - 0.3));
@@ -1800,6 +1853,11 @@ export function ImageEditor({
         const layers: Layers = { v: 1, w: size.current.w, h: size.current.h, canvas: c.toObject(KEEP), adjust: adjustRef.current, crop: cropRef.current };
         await overlay.onSubmit(parts, JSON.stringify(layers), clip ? clipCut : undefined);
         await onSaved();
+        if (extras) {
+          // 동영상 편집: 적용한 뒤에도 그대로 이어서 고칠 수 있게
+          setDirty(false);
+          return;
+        }
         onClose();
         return;
       }
@@ -1831,7 +1889,7 @@ export function ImageEditor({
   }
 
   function close() {
-    if (dirty && !window.confirm(t("editor.discardConfirm"))) return;
+    if ((dirty || extras?.dirty) && !window.confirm(extras ? t("media.unappliedConfirm") : t("editor.discardConfirm"))) return;
     onClose();
   }
 
@@ -1855,7 +1913,10 @@ export function ImageEditor({
     { key: "adjust", label: t("editor.tabAdjust"), icon: "◐" },
     { key: "bg", label: t("editor.tabBackground"), icon: "✂" },
     { key: "crop", label: t("editor.tabCrop"), icon: "⤢" },
-  ].filter((x) => !overlay || x.key === "text" || x.key === "sticker" || x.key === "draw") as { key: Tab; label: string; icon: string }[];
+  ]
+    .filter((x) => !overlay || x.key === "text" || x.key === "sticker" || x.key === "draw")
+    .concat((extras?.tabs ?? []).map((x) => ({ key: `x:${x.key}` as Tab, label: x.label, icon: x.icon }))) as { key: Tab; label: string; icon: string }[];
+  const extraPanel = extras?.tabs.find((x) => `x:${x.key}` === tab)?.panel;
   const previewAssets = preview?.assets.map((a, i) => (i === index && previewUrl ? { ...a, url: previewUrl, type: "image" as const } : a)) ?? [];
   const previewPane = preview && (
     <div className="space-y-2">
@@ -1874,7 +1935,7 @@ export function ImageEditor({
     <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0b0c] text-white" role="dialog" aria-modal="true" aria-label={overlay?.title ?? t("editor.title")}>
       <header className="flex items-center gap-2 border-b border-white/10 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <button type="button" onClick={close} className="rounded-md px-2 py-1.5 text-[14px] text-white/80 hover:bg-white/10">
-          {clip ? `← ${t("editor.back")}` : t("editor.cancel")}
+          {extras ? t("media.close") : clip ? `← ${t("editor.back")}` : t("editor.cancel")}
         </button>
         <span className="flex-1 text-center text-[14px] font-semibold">{overlay?.title ?? t("editor.title")}</span>
         <button type="button" disabled={h.at <= 0} onClick={() => restore(h.at - 1)} aria-label={t("editor.undo")} className="rounded-md px-2 py-1.5 text-lg disabled:opacity-30">
@@ -1888,8 +1949,9 @@ export function ImageEditor({
             {t("editor.preview")}
           </button>
         )}
-        <Button variant="primary" size="sm" onClick={save} loading={saving} disabled={!ready}>
-          {saving ? t("editor.saving") : clip ? t("editor.done") : t("editor.save")}
+        {extras?.headerExtra}
+        <Button variant="primary" size="sm" onClick={save} loading={saving} disabled={!ready || (!!extras && !dirty && !extras.dirty)}>
+          {extras ? (saving ? extras.submittingLabel : extras.submitLabel) : saving ? t("editor.saving") : clip ? t("editor.done") : t("editor.save")}
         </Button>
       </header>
 
@@ -1917,6 +1979,13 @@ export function ImageEditor({
                   e.currentTarget.currentTime = vtRef.current;
                   setVideoOk(true);
                 }}
+                onLoadedMetadata={(e) => {
+                  const d = e.currentTarget.duration;
+                  if (!isFinite(d) || d <= 0) return;
+                  setVideoDur(d);
+                  // 끝을 정하지 않았으면(0) 영상 끝까지
+                  setClipCut((k) => (k.end > 0 && k.end <= d ? k : { start: Math.min(k.start, d), end: d }));
+                }}
                 onCanPlay={() => setVideoOk(true)}
                 onError={() => setVideoOk(false)}
                 onPause={() => setPlaying(false)}
@@ -1925,7 +1994,7 @@ export function ImageEditor({
               />
             )}
             <canvas ref={canvasEl} />
-            {ready && (guides || snap.warn) && preview && view.w > 0 && <SizeGuides kind={preview.kind} w={view.w} h={view.h} warn={snap.warn} />}
+            {ready && (guides || snap.warn) && guideKind && view.w > 0 && <SizeGuides kind={guideKind} w={view.w} h={view.h} warn={snap.warn} />}
             {/* 가운데에 맞았을 때 선 (인스타 스토리처럼) */}
             {(snap.v || snap.h) && view.w > 0 && (
               <svg aria-hidden width={view.w} height={view.h} className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -1951,6 +2020,9 @@ export function ImageEditor({
               <div className="absolute inset-0 flex items-center justify-center">
                 <Spinner className="size-6" />
               </div>
+            )}
+            {extras?.busy && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 text-[13px]">{extras.busy}</div>
             )}
             {/* 사진을 꾹 누르고 있는 동안 보정 전 원본 */}
             {showOriginal && (
@@ -2004,6 +2076,7 @@ export function ImageEditor({
 
           {clip && ready && (
             <div className="space-y-2 border-t border-white/10 px-4 pt-3 pb-2">
+              {extras?.notice}
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -2030,7 +2103,7 @@ export function ImageEditor({
               </div>
               <Timeline
                 min={0}
-                max={clip.duration || clipCut.end}
+                max={videoDur || clip.duration || clipCut.end}
                 trim={clipCut}
                 onTrim={(a, b) => {
                   setClipCut({ start: round1(a), end: round1(b) });
@@ -2039,20 +2112,25 @@ export function ImageEditor({
                 time={vt}
                 onSeek={seekTo}
                 frames={frames}
-                tracks={timed()
-                  .map((o, i) => ({
-                    id: String(i),
-                    ...trackOf(o),
-                    start: o.tStart ?? clipCut.start,
-                    end: o.tEnd ?? clipCut.end,
-                    selected: (canvas.current?.getActiveObjects() ?? []).includes(o),
-                  }))
-                  .reverse()}
-                onTrack={(id, a, b, done) => {
+                tracks={[
+                  ...timed()
+                    .map((o, i) => ({
+                      id: String(i),
+                      ...trackOf(o),
+                      start: o.tStart ?? clipCut.start,
+                      end: o.tEnd ?? clipCut.end,
+                      selected: (canvas.current?.getActiveObjects() ?? []).includes(o),
+                    }))
+                    .reverse(),
+                  ...(extras?.tracks ?? []),
+                ]}
+                onTrack={(id, a, b, done, how) => {
+                  if (extras?.tracks.some((x) => x.id === id)) return extras.onTrack(id, a, b, how);
                   const o = timed()[Number(id)];
                   if (o) setTiming(o, a, b, done);
                 }}
                 onSelect={(id) => {
+                  if (extras?.tracks.some((x) => x.id === id)) return extras.onSelectTrack?.(id);
                   const o = timed()[Number(id)];
                   const c = canvas.current;
                   if (!o || !c) return;
@@ -2061,7 +2139,7 @@ export function ImageEditor({
                   c.requestRenderAll();
                 }}
               />
-              {timed().length === 0 && <p className="text-[11px] text-white/45">{t("media.timelineHint")}</p>}
+              {timed().length === 0 && !extras?.tracks.length && <p className="text-[11px] text-white/45">{t("media.timelineHint")}</p>}
             </div>
           )}
 
@@ -2533,6 +2611,7 @@ export function ImageEditor({
                 </div>
               )}
 
+              {extraPanel}
               {tab === "crop" && (
                 <div className="space-y-2">
                   <p className="text-[11px] text-white/50">{t("editor.cropHint")}</p>
