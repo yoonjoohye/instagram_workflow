@@ -323,6 +323,8 @@ export function ImageEditor({
   const cutout = useRef<{ png: Blob; original: Blob } | null>(null);
   const stickerFile = useRef<HTMLInputElement>(null);
   const stickers = useApi<{ data: Sticker[] }>("/studio/stickers");
+  // 내 필터: 지금 보정 값을 이름 붙여 저장 (회원별)
+  const myFilters = useApi<{ data: { id: string; name: string; values: Record<string, number> }[] }>(overlay ? null : "/studio/filters");
   const isStory = preview?.kind === "story";
   const myPosts = useApi<{ data: { id: number; status: string; permalink: string; media_kind: string; assets: Asset[] }[] }>(
     isStory ? "/workflow/jobs?limit=30" : null,
@@ -1120,6 +1122,30 @@ export function ImageEditor({
     }
   }
 
+  async function saveMyFilter() {
+    const name = window.prompt(t("editor.saveFilterPrompt"))?.trim();
+    if (!name) return;
+    const values: Record<string, number> = {};
+    for (const [k, v] of Object.entries(adjustRef.current)) if (typeof v === "number" && k !== "v") values[k] = v;
+    try {
+      const saved = await api<{ id: string }>("/studio/filters", { method: "POST", json: { name: name.slice(0, 20), values } });
+      myFilters.reload();
+      applyAdjust({ ...adjustRef.current, preset: `my:${saved.id}` }, true);
+    } catch (e) {
+      setError(toApiError(e).message);
+    }
+  }
+
+  async function deleteMyFilter(id: string) {
+    if (!window.confirm(t("editor.deleteFilterConfirm"))) return;
+    try {
+      await api(`/studio/filters/${id}`, { method: "DELETE" });
+      myFilters.reload();
+    } catch (e) {
+      setError(toApiError(e).message);
+    }
+  }
+
   function applyAdjust(next: Adjust, commit = false) {
     adjustRef.current = next;
     setAdjustState(next);
@@ -1579,6 +1605,29 @@ export function ImageEditor({
                       </Chip>
                     ))}
                     <Chip onClick={() => applyAdjust(NO_ADJUST, true)}>{t("editor.reset")}</Chip>
+                  </Row>
+                  {/* 내 필터 */}
+                  <Row>
+                    <span className="shrink-0 text-[11px] font-semibold text-white/45">★ {t("editor.myFilters")}</span>
+                    {(myFilters.data?.data ?? []).map((mf) => (
+                      <span key={mf.id} className="relative shrink-0">
+                        <Chip
+                          on={adjust.preset === `my:${mf.id}`}
+                          onClick={() => applyAdjust({ ...NO_ADJUST, ...(mf.values as Partial<Adjust>), preset: `my:${mf.id}`, v: 2 }, true)}
+                        >
+                          {mf.name}
+                        </Chip>
+                        <button
+                          type="button"
+                          onClick={() => deleteMyFilter(mf.id)}
+                          aria-label={t("editor.deleteFilter")}
+                          className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-black/80 text-[9px] text-white/80 ring-1 ring-white/30 hover:bg-[#ff3b5c]"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                    <Chip onClick={saveMyFilter}>+ {t("editor.saveFilter")}</Chip>
                   </Row>
                   {/* 기본 · 곡선 · 효과 (Camera Raw 패널 순서) — 많아서 패널 안에서 스크롤 */}
                   <div className="max-h-[30vh] space-y-3 overflow-y-auto pr-1 lg:max-h-[26vh]">

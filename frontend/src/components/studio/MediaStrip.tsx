@@ -92,6 +92,8 @@ export function MediaStrip({
   const [error, setError] = useState<string>();
   const [downloadingAll, setDownloadingAll] = useState(false);
   const { drag, sortProps } = useDragSort((from, to) => onReorder?.(from, to), !onReorder);
+  // 작은 썸네일 줄: 한눈에 보며 멀리(예: 첫 장 → 마지막) 한 번에 옮기기
+  const mini = useDragSort((from, to) => onReorder?.(from, to), !onReorder);
   const canAdd = Boolean(onAdd || onGenerate);
   if (!assets.length && !canAdd) return <p className="py-8 text-center text-sm text-fg-3">{t("studio.noMedia")}</p>;
   const single = assets.length === 1 && !canAdd;
@@ -126,6 +128,32 @@ export function MediaStrip({
           <Button variant="ghost" size="sm" onClick={downloadAll} disabled={downloadingAll}>
             {downloadingAll ? <Spinner className="size-3" /> : "↓"} {t("studio.downloadAll", { n: ready.length })}
           </Button>
+        </div>
+      )}
+      {onReorder && assets.length > 1 && (
+        <div className="mb-3 flex flex-wrap gap-1.5" aria-label={t("studio.dragToReorder")}>
+          {assets.map((a, i) => (
+            <div
+              key={`mini-${a.url}-${i}`}
+              {...mini.sortProps(i)}
+              title={t("studio.imageAlt", { n: i + 1 })}
+              className={cx(
+                "relative size-12 shrink-0 cursor-grab touch-manipulation overflow-hidden rounded-md bg-surface-2 select-none [-webkit-touch-callout:none] sm:size-14",
+                mini.drag?.from === i && "opacity-40",
+                mini.drag && mini.drag.over === i && mini.drag.from !== i && "ring-2 ring-accent ring-offset-2 ring-offset-surface-1",
+              )}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={mediaSrc(a.type === "video" ? a.thumbnail_url || a.url : a.url)}
+                alt=""
+                draggable={false}
+                className="size-full object-cover"
+              />
+              <span className="tnum absolute top-0.5 left-0.5 rounded bg-black/60 px-1 text-[10px] leading-4 text-white">{i + 1}</span>
+              {a.type === "video" && <span className="absolute right-0.5 bottom-0.5 text-[10px] text-white drop-shadow">▶</span>}
+            </div>
+          ))}
         </div>
       )}
       <div className={cx("flex items-start gap-3", !single && "snap-x overflow-x-auto pb-2")}>

@@ -37,6 +37,8 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(80), default="")
     birth_date: Mapped[dt.date | None] = mapped_column(Date)
     phone: Mapped[str] = mapped_column(String(20), default="")  # 숫자만 (예: 01012345678)
+    # 사진 편집기 '내 필터' — [{id, name, values{보정 항목: 값}}] (모든 Instagram 계정에서 같이 씀)
+    filter_presets: Mapped[Any] = mapped_column(JSON, default=list)
     email_verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     # 비밀번호를 바꾸면 1 올려 다른 기기의 로그인(세션)을 끊습니다.
     session_version: Mapped[int] = mapped_column(Integer, default=1)
