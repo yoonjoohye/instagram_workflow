@@ -180,6 +180,7 @@ CATALOG: dict[str, tuple[str, str]] = {
     "스티커 이미지가 너무 큽니다 (최대 4MB).": ("The sticker image is too large (max 4MB).", "ステッカー画像が大きすぎます(最大4MB)。"),
     "스티커는 {n}개까지 저장할 수 있습니다. 안 쓰는 스티커를 지워 주세요.": ("You can save up to {n} stickers. Delete ones you don't use.", "ステッカーは{n}個まで保存できます。使わないステッカーを削除してください。"),
     "스티커를 찾을 수 없습니다.": ("Sticker not found.", "ステッカーが見つかりません。"),
+    "이미 인증된 이메일입니다.": ("This email is already verified.", "このメールアドレスはすでに認証済みです。"),
     "이름을 입력해 주세요.": ("Please enter your name.", "名前を入力してください。"),
     "생년월일을 확인해 주세요.": ("Please check your date of birth.", "生年月日を確認してください。"),
     "만 14세 이상만 가입할 수 있습니다.": ("You must be at least 14 years old to sign up.", "満14歳以上の方のみ登録できます。"),

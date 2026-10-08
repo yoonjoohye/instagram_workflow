@@ -330,3 +330,20 @@ def test_link_from_old_host_moves_to_public_host(client, login, account, monkeyp
     r = client.get(f"/auth/login?provider=instagram&ticket={ticket}", follow_redirects=False)
     assert r.status_code == 307 and r.headers["location"].startswith("https://new.example.com/api/py/auth/login?")
     assert f"ticket={ticket}" in r.headers["location"]
+
+
+def test_verify_email_after_signup(client, cleanup, monkeypatch):
+    """인증 없이 가입한 회원도 나중에 인증할 수 있고, 인증을 켜면 미인증 회원은 인증이 필요하다고 알려 줌."""
+    from backend.routers import members
+
+    cleanup.append("later@test.dev")
+    _signup(client, "later@test.dev")
+    u = client.get("/auth/session").json()["user"]
+    assert u["email_verified"] is False and u["verify_required"] is False
+    monkeypatch.setattr(members.settings, "signup_email_verify", True)
+    assert client.get("/auth/session").json()["user"]["verify_required"] is True
+    code = client.post("/auth/email/code").json()["dev_code"]
+    assert client.post("/auth/email/verify", json={"code": "000000" if code != "000000" else "111111"}).status_code == 400
+    u = client.post("/auth/email/verify", json={"code": code}).json()
+    assert u["email_verified"] is True and u["verify_required"] is False
+    assert client.post("/auth/email/code").status_code == 409

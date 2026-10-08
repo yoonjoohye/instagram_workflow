@@ -306,6 +306,9 @@ def session_dict(db: Session, user: User, account: Account | None) -> dict:
             "birth_date": user.birth_date.isoformat() if user.birth_date else None,
             "phone": user.phone,
             "created_at": user.created_at.isoformat(),
+            "email_verified": user.email_verified_at is not None,
+            # 이메일 인증을 켠 서비스에서 아직 인증하지 않은 회원 → 화면이 인증부터 하게 함
+            "verify_required": settings.signup_email_verify and user.email_verified_at is None,
         },
         "account": account_dict(account) if account else None,
         "accounts": [{**account_dict(a), "current": account is not None and a.id == account.id} for a in user_accounts(db, user)],
@@ -337,6 +340,27 @@ def update_profile(body: ProfileIn, user: User = Depends(current_user), db: Sess
     if body.phone is not None:
         user.phone = check_phone(body.phone)
     db.commit()
+    return session_dict(db, user, None)["user"]
+
+
+@router.post("/email/code")
+def email_code(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    """가입한 이메일로 인증번호를 보냅니다 (아직 인증하지 않은 회원)."""
+    if user.email_verified_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "이미 인증된 이메일입니다.")
+    return _issue_code(db, user.email, "verify", lang_of(request))
+
+
+class CodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
+
+
+@router.post("/email/verify")
+def email_verify(body: CodeIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    if user.email_verified_at is None:
+        _use_code(db, user.email, "verify", body.code)
+        user.email_verified_at = utcnow()
+        db.commit()
     return session_dict(db, user, None)["user"]
 
 

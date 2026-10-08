@@ -77,8 +77,6 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
           ...prefs,
         },
       }),
-    tags: async (v: { caption: string; language: string }) =>
-      (await api<{ hashtags: string[] }>("/studio/hashtags/draft", { method: "POST", json: { ...v, prompt: settings.topic.trim() } })).hashtags,
   };
 
   async function addFiles(files: File[]) {

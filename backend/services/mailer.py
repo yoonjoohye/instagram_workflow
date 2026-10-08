@@ -28,6 +28,7 @@ def can_show_code_locally() -> bool:
 
 _SUBJECT = {
     "signup": {"ko": "[Auto Studio] 회원가입 인증번호", "en": "[Auto Studio] Your sign-up code", "ja": "[Auto Studio] 会員登録の認証番号"},
+    "verify": {"ko": "[Auto Studio] 이메일 인증번호", "en": "[Auto Studio] Your email verification code", "ja": "[Auto Studio] メール認証番号"},
     "reset": {"ko": "[Auto Studio] 비밀번호 재설정 인증번호", "en": "[Auto Studio] Your password reset code", "ja": "[Auto Studio] パスワード再設定の認証番号"},
 }
 _BODY = {
@@ -35,6 +36,11 @@ _BODY = {
         "ko": "Auto Studio 회원가입 화면에 아래 인증번호를 입력해 주세요.",
         "en": "Enter this code on the Auto Studio sign-up screen.",
         "ja": "Auto Studio の会員登録画面に次の認証番号を入力してください。",
+    },
+    "verify": {
+        "ko": "이메일 인증 화면에 아래 인증번호를 입력해 주세요.",
+        "en": "Enter this code to verify your email address.",
+        "ja": "メール認証画面に次の認証番号を入力してください。",
     },
     "reset": {
         "ko": "비밀번호 재설정 화면에 아래 인증번호를 입력해 주세요.",

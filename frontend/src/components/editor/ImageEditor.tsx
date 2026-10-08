@@ -27,6 +27,8 @@ type Tab = "text" | "sticker" | "draw" | "adjust" | "bg" | "crop";
 type Brush = "pen" | "marker" | "neon" | "eraser";
 type Layers = { v: 1; w: number; h: number; canvas: object; adjust?: Adjust; crop?: Crop };
 type Adjust = {
+  /** 2: 프리셋을 누르면 슬라이더가 그 값으로 바뀜 (예전 1: 프리셋 값이 슬라이더에 몰래 더해짐) */
+  v?: 2;
   preset: string;
   brightness: number;
   contrast: number;
@@ -72,6 +74,7 @@ const SHAPES = {
   star: "M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z",
 } as const;
 const NO_ADJUST: Adjust = {
+  v: 2,
   preset: "none", brightness: 0, contrast: 0, warmth: 0, saturation: 0, fade: 0, vignette: 0, sharpen: 0,
   exposure: 0, shadows: 0, blacks: 0, lift: 0, curve: 0, grain: 0, grainSize: 0.25, grainRough: 0.3,
   glow: 0, glowRadius: 0.5, glowSoft: 0,
@@ -92,8 +95,36 @@ const PRESETS: Record<string, Partial<Adjust> & { mono?: boolean; sepia?: boolea
   mono: { mono: true },
   drama: { mono: true, contrast: 0.35 },
 };
+/** 프리셋을 누르면: 모든 보정을 그 프리셋 값으로 (흑백·세피아 같은 켜고 끄는 효과는 프리셋 이름으로) */
+function presetAdjust(key: string): Adjust {
+  const { mono: _m, sepia: _s, ...values } = PRESETS[key] ?? {};
+  return { ...NO_ADJUST, ...values, preset: key, v: 2 };
+}
+
+/** 예전에 저장한 보정(프리셋 값이 슬라이더에 더해지던 방식)을 지금 방식으로 — 보이는 결과는 그대로 */
+function normalizeAdjust(a?: Partial<Adjust>): Adjust {
+  const merged = { ...NO_ADJUST, ...a } as Adjust;
+  if (a?.v === 2) return merged;
+  const p = PRESETS[merged.preset] ?? {};
+  const out = { ...merged, v: 2 as const };
+  for (const [k, val] of Object.entries(p)) if (typeof val === "number") (out as Record<string, unknown>)[k] = Number(merged[k as keyof Adjust] ?? 0) + val;
+  return out;
+}
+
+/** 저장된 캔버스에서: 사진에 걸려 있던 필터(직접 만든 필터는 다시 못 읽음)와 예전 비네트 막을 뺌 — 보정은 adjust 로 다시 적용 */
+function cleanCanvasJson(json: { objects?: Record<string, unknown>[] }) {
+  const walk = (objs?: Record<string, unknown>[]): Record<string, unknown>[] =>
+    (objs ?? [])
+      .filter((o) => o.name !== "vignette")
+      .map((o) => {
+        const { filters: _f, resizeFilter: _r, ...rest } = o;
+        return Array.isArray(rest.objects) ? { ...rest, objects: walk(rest.objects as Record<string, unknown>[]) } : rest;
+      });
+  return { ...json, objects: walk(json.objects) };
+}
+
 // 보정 슬라이더: [항목, 최소, 최대, 보이는 값]
-type SliderKey = Exclude<keyof Adjust, "preset" | "glowSoft">;
+type SliderKey = Exclude<keyof Adjust, "preset" | "glowSoft" | "v">;
 const pct = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`;
 const ev = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
 const ADJUST_GROUPS: { title: "editor.groupBasic" | "editor.groupCurve" | "editor.groupEffects"; sliders: [SliderKey, number, number, (v: number) => string][] }[] = [
@@ -256,8 +287,9 @@ export function ImageEditor({
       if (!c || to < 0 || to >= h.stack.length) return;
       h.restoring = true;
       const state = JSON.parse(h.stack[to]);
-      await c.loadFromJSON(state.canvas);
-      state.adjust = { ...NO_ADJUST, ...state.adjust };
+      await c.loadFromJSON(cleanCanvasJson(state.canvas));
+      state.adjust = normalizeAdjust(state.adjust);
+      setPost(state.adjust);
       adjustRef.current = state.adjust;
       cropRef.current = state.crop;
       setAdjustState(state.adjust);
@@ -306,11 +338,12 @@ export function ImageEditor({
           size.current = { w: saved.w, h: saved.h };
           const families = new Set<string>(JSON.stringify(saved.canvas).match(/ffont-[a-z_]+/g) ?? []);
           await Promise.all([...families].map((ff) => loadFont(ff.replace("ffont-", ""))));
-          await c.loadFromJSON(saved.canvas);
-          adjustRef.current = { ...NO_ADJUST, ...saved.adjust }; // 예전에 저장한 편집엔 새 보정 항목이 없음
+          await c.loadFromJSON(cleanCanvasJson(saved.canvas as { objects?: Record<string, unknown>[] }));
+          adjustRef.current = normalizeAdjust(saved.adjust); // 예전에 저장한 편집엔 새 보정 항목이 없음
           cropRef.current = saved.crop ?? NO_CROP;
           setAdjustState(adjustRef.current);
           setCropState(cropRef.current);
+          setPost(adjustRef.current);
         } else {
           const img = await f.FabricImage.fromURL(mediaSrc(overlay ? overlay.baseUrl : `/api/py/media/${baseId}.jpg`), { crossOrigin: "anonymous" });
           const long = Math.max(img.width, img.height);
@@ -328,6 +361,7 @@ export function ImageEditor({
         c.on("selection:created", (e) => setSelected((e.selected?.[0] as Named) ?? null));
         c.on("selection:updated", (e) => setSelected((e.selected?.[0] as Named) ?? null));
         c.on("selection:cleared", () => setSelected(null));
+        c.on("after:render", ({ ctx }) => postProcess(ctx));
         c.on("after:render", refreshPreview);
         for (const ev of ["object:added", "object:modified", "object:removed", "path:created", "text:changed"] as const) c.on(ev, () => snapshot());
         snapshot();
@@ -868,14 +902,15 @@ export function ImageEditor({
   }
 
   // ── 보정: 사진(base)에만 필터, 비네트는 위에 덮는 막 ─────────────────
-  function applyAdjust(next: Adjust, commit = false) {
-    adjustRef.current = next;
-    setAdjustState(next);
+  // 보정은 사진만이 아니라 캔버스 전체(사진·글자·스티커·도형·그림)에 한 번에 — 캔버스를 다 그린 뒤 걸러냅니다.
+  // 화면·미리보기·저장(toDataURL) 모두 같은 'after:render' 를 거치므로 결과가 같습니다.
+  const post = useRef<{ filters: F.filters.BaseFilter<string, object>[]; vignette: number }>({ filters: [], vignette: 0 });
+  const scratch = useRef<{ src?: HTMLCanvasElement; out?: HTMLCanvasElement }>({});
+
+  function buildFilters(a: Adjust): F.filters.BaseFilter<string, object>[] {
     const f = fab.current!;
-    const img = base();
-    if (!img) return;
-    const p = PRESETS[next.preset] ?? {};
-    const v = (k: keyof Adjust) => Number(p[k] ?? 0) + Number(next[k]);
+    const p = PRESETS[a.preset] ?? {};
+    const v = (k: keyof Adjust) => Number(a[k] ?? 0);
     const list: F.filters.BaseFilter<string, object>[] = [];
     if (p.mono) list.push(new f.filters.Grayscale());
     if (p.sepia) list.push(new f.filters.Sepia());
@@ -896,37 +931,68 @@ export function ImageEditor({
     if (v("glow") > 0) list.push(new film.FilmGlow({ amount: v("glow"), radius: v("glowRadius"), mode: v("glowSoft") >= 0.5 ? "soft" : "screen" }));
     // 그레인은 맨 마지막 (선명도·글로우에 깎이지 않게)
     if (v("grain") > 0) list.push(new film.FilmGrain({ amount: v("grain"), size: v("grainSize"), roughness: v("grainRough") }));
-    img.filters = list;
-    img.applyFilters();
+    return list;
+  }
 
-    // 비네트: 가장자리를 어둡게 하는 막
-    const c = canvas.current!;
-    let vig = find("vignette") as Named | undefined;
-    if (next.vignette > 0) {
-      if (!vig) {
-        const { w: W, h: H } = size.current;
-        // fabric 7 은 기본 기준점이 가운데라 left/top 0 이면 사진의 1/4 만 덮음 → 왼쪽 위 기준으로
-        vig = new f.Rect({ left: 0, top: 0, originX: "left", originY: "top", width: W, height: H, selectable: false, evented: false }) as Named;
-        vig.set(
-          "fill",
-          new f.Gradient({
-            type: "radial",
-            coords: { x1: W / 2, y1: H / 2, r1: Math.min(W, H) * 0.35, x2: W / 2, y2: H / 2, r2: Math.hypot(W, H) / 2 },
-            colorStops: [
-              { offset: 0, color: "rgba(0,0,0,0)" },
-              { offset: 1, color: "rgba(0,0,0,0.85)" },
-            ],
-          }),
-        );
-        vig.name = "vignette";
-        history.current.restoring = true; // 막 추가는 기록하지 않고 아래에서 한 번만
-        c.add(vig);
-        c.moveObjectTo(vig, 1);
-        history.current.restoring = false;
-      }
-      // 예전에 저장한 편집(가운데 기준으로 잘못 놓인 막)도 바로잡습니다.
-      vig.set({ opacity: next.vignette, left: 0, top: 0, originX: "left", originY: "top" });
-    } else if (vig) {
+  function setPost(a: Adjust) {
+    if (!fab.current) return;
+    post.current = { filters: buildFilters(a), vignette: Number(a.vignette) || 0 };
+    // 예전 방식으로 사진에만 걸려 있던 필터는 걷어냄 (이제 전체에 한 번만)
+    const img = base();
+    if (img && img.filters?.length) {
+      img.filters = [];
+      img.applyFilters();
+    }
+  }
+
+  /** 다 그린 캔버스 전체에 보정 필터 → 그 위에 비네트 */
+  function postProcess(ctx: CanvasRenderingContext2D) {
+    const { filters, vignette } = post.current;
+    if (!filters.length && !vignette) return;
+    const f = fab.current;
+    const cv = ctx.canvas as HTMLCanvasElement;
+    const W = cv.width, H = cv.height;
+    if (!f || !W || !H) return;
+    if (filters.length) {
+      const sc = scratch.current;
+      const src = (sc.src ??= document.createElement("canvas"));
+      const out = (sc.out ??= document.createElement("canvas"));
+      if (src.width !== W || src.height !== H) Object.assign(src, { width: W, height: H });
+      if (out.width !== W || out.height !== H) Object.assign(out, { width: W, height: H });
+      const sctx = src.getContext("2d")!;
+      sctx.clearRect(0, 0, W, H);
+      sctx.drawImage(cv, 0, 0);
+      out.getContext("2d")!.clearRect(0, 0, W, H);
+      const gl = f.getFilterBackend() as { tileSize?: number };
+      const backend = gl.tileSize && Math.max(W, H) > gl.tileSize ? new f.Canvas2dFilterBackend() : f.getFilterBackend();
+      backend.applyFilters(filters, src, W, H, out);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "copy";
+      ctx.drawImage(out, 0, 0);
+      ctx.restore();
+    }
+    if (vignette > 0) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W, H) / 2);
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, `rgba(0,0,0,${0.85 * Math.min(1, vignette)})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  }
+
+  function applyAdjust(next: Adjust, commit = false) {
+    adjustRef.current = next;
+    setAdjustState(next);
+    setPost(next);
+    const c = canvas.current;
+    if (!c) return;
+    // 예전 편집에 남은 비네트 막은 지움 (이제 맨 위에 그려 줌)
+    const vig = find("vignette");
+    if (vig) {
       history.current.restoring = true;
       c.remove(vig);
       history.current.restoring = false;
@@ -1337,7 +1403,7 @@ export function ImageEditor({
                 <div className="space-y-1.5">
                   <Row>
                     {Object.keys(PRESETS).map((p) => (
-                      <Chip key={p} on={adjust.preset === p} onClick={() => applyAdjust({ ...adjust, preset: p }, true)}>
+                      <Chip key={p} on={adjust.preset === p} onClick={() => applyAdjust(presetAdjust(p), true)}>
                         {t(`editor.preset${p[0].toUpperCase()}${p.slice(1)}` as "editor.presetNone")}
                       </Chip>
                     ))}
@@ -1363,7 +1429,7 @@ export function ImageEditor({
                             />
                           ))}
                         </div>
-                        {g.title === "editor.groupEffects" && adjust.glow + Number(PRESETS[adjust.preset]?.glow ?? 0) > 0 && (
+                        {g.title === "editor.groupEffects" && adjust.glow > 0 && (
                           <div className="mt-1.5 flex items-center gap-3 text-[12px] text-white/70">
                             <span className="w-20 shrink-0">{t("editor.glowMode")}</span>
                             <Chip on={adjust.glowSoft < 0.5} onClick={() => applyAdjust({ ...adjust, glowSoft: 0 }, true)}>

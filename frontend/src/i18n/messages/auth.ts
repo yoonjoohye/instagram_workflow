@@ -35,6 +35,9 @@ export default defineMessages({
     withdrawButton: "탈퇴하기", withdrawConfirmTitle: "정말 탈퇴할까요?", withdrawPasswordPh: "비밀번호를 입력해 확인", withdrawFinal: "탈퇴",
     connectGateTitle: "Instagram 계정을 연동해 주세요", connectGateBody: "게시물을 만들고 성과를 보려면 Instagram 비즈니스·크리에이터 계정을 연동해야 해요.",
     goProfile: "프로필에서 연동하기",
+    verified: "인증됨", unverified: "미인증", verifyNow: "이메일 인증하기", verifyConfirm: "인증",
+    verifyIntro: "{email} 로 인증번호를 보내 확인해요.",
+    verifyGateTitle: "이메일 인증이 필요해요", verifyGateBody: "가입한 이메일로 받은 인증번호를 입력하면 바로 계속 쓸 수 있어요.",
   },
   en: {
     email: "Email", password: "Password", name: "Name", birthDate: "Date of birth", phone: "Phone number", phonePh: "010-1234-5678", code: "6-digit code",
@@ -69,6 +72,9 @@ export default defineMessages({
     withdrawButton: "Delete account", withdrawConfirmTitle: "Delete your account?", withdrawPasswordPh: "Enter your password to confirm", withdrawFinal: "Delete",
     connectGateTitle: "Link an Instagram account", connectGateBody: "To create posts and see performance, link an Instagram business or creator account.",
     goProfile: "Link it in your profile",
+    verified: "Verified", unverified: "Not verified", verifyNow: "Verify email", verifyConfirm: "Verify",
+    verifyIntro: "We'll send a code to {email} to confirm it.",
+    verifyGateTitle: "Please verify your email", verifyGateBody: "Enter the code sent to your email to keep going.",
   },
   ja: {
     email: "メールアドレス", password: "パスワード", name: "名前", birthDate: "生年月日", phone: "電話番号", phonePh: "090-1234-5678", code: "6桁の認証番号",
@@ -103,5 +109,8 @@ export default defineMessages({
     withdrawButton: "退会する", withdrawConfirmTitle: "本当に退会しますか?", withdrawPasswordPh: "パスワードを入力して確認", withdrawFinal: "退会",
     connectGateTitle: "Instagram アカウントを連携してください", connectGateBody: "投稿を作成して成果を見るには、Instagram ビジネス・クリエイターアカウントの連携が必要です。",
     goProfile: "プロフィールで連携する",
+    verified: "認証済み", unverified: "未認証", verifyNow: "メールを認証する", verifyConfirm: "認証",
+    verifyIntro: "{email} に認証番号を送って確認します。",
+    verifyGateTitle: "メール認証が必要です", verifyGateBody: "登録したメールに届いた認証番号を入力すると、そのまま使い続けられます。",
   },
 });

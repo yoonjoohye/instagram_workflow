@@ -10,6 +10,7 @@ import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, I
 import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useT } from "@/i18n/client";
+import { EmailVerify, VerifiedBadge } from "./auth/EmailVerify";
 import { Avatar, cx, Dialog, Notice, Spinner } from "./ui";
 
 const MeContext = createContext<{ me: Me; refreshMe: () => void } | null>(null);
@@ -62,7 +63,8 @@ export function AdminShell({ children }: { children: ReactNode }) {
   if (!session.data) return <LoadError message={session.error?.message} onRetry={session.reload} />;
 
   const s = session.data;
-  const body = s.account || pathname.startsWith(PROFILE) ? children : <ConnectGate />;
+  // 순서: 이메일 인증(켠 경우) → Instagram 연동 → 화면. 프로필은 언제나 열림 (인증·연동을 거기서 함)
+  const body = pathname.startsWith(PROFILE) ? children : s.user.verify_required ? <VerifyGate /> : s.account ? children : <ConnectGate />;
   const page = (
     <div className="min-h-dvh md:grid md:grid-cols-[232px_1fr]">
       <Sidebar session={s} />
@@ -202,6 +204,11 @@ function Sidebar({ session }: { session: Session }) {
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-semibold">{who}</p>
             {sub && <p className="truncate text-[12px] text-fg-3">{sub}</p>}
+            {!session.user.email_verified && (
+              <span className="mt-0.5 inline-block">
+                <VerifiedBadge verified={false} />
+              </span>
+            )}
           </div>
         </Link>
         <div className="-mx-2 mt-2">
@@ -332,6 +339,21 @@ function OAuthResultBanner() {
       </Notice>
       {skipped && <Notice tone="warn">{t("auth.skipped", { names: skipped.split(",").map((n) => `@${n}`).join(", ") })}</Notice>}
       {warning && <Notice tone="warn">{warning}</Notice>}
+    </div>
+  );
+}
+
+/** 이메일 인증을 켠 서비스에서 아직 인증하지 않은 회원 */
+function VerifyGate() {
+  const t = useT();
+  const { session, refresh } = useSession();
+  return (
+    <div className="flex min-h-[60dvh] items-center justify-center">
+      <div className="w-full max-w-sm rounded-2xl border border-line bg-surface-1 p-7">
+        <h1 className="text-lg font-semibold">{t("auth.verifyGateTitle")}</h1>
+        <p className="mt-1.5 mb-4 text-[13px] leading-relaxed text-fg-2">{t("auth.verifyGateBody")}</p>
+        <EmailVerify email={session.user.email} onVerified={refresh} autoOpen />
+      </div>
     </div>
   );
 }

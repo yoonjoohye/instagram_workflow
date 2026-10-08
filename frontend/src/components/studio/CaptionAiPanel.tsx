@@ -1,6 +1,6 @@
 "use client";
 
-/** 캡션·게시 맨 위: ✨ AI 로 쓰기. 말투·길이 → 바라는 점 → [게시글 자동 작성] [해시태그 자동 생성].
+/** 캡션·게시 맨 위: ✨ AI 로 쓰기. 말투·길이 → 바라는 점 → [게시글 자동 작성] (본문과 해시태그를 함께 씀).
  *  바라는 점은 적고 작성하면 입력칸에서 비우고 '바란 점' 기록(접기)에 남겨, 다음 자동 작성에도 계속 반영됩니다 (✕ 로 빼기).
  *  직접 쓰는 본문·해시태그 입력은 이 아래 (CaptionField · HashtagField). */
 
@@ -16,7 +16,6 @@ export type CaptionWritten = { caption: string; hashtags: string[]; requests: st
 /** 작업이 있으면 그 작업의 사진까지 보고, 새로 만드는 중이면 컨셉·주제만 보고 씁니다 (부르는 쪽이 정함). */
 export type CaptionAi = {
   write: (v: { instruction: string; caption: string; language: string }) => Promise<CaptionWritten>;
-  tags: (v: { caption: string; language: string }) => Promise<string[]>;
 };
 
 export function CaptionAiPanel({
@@ -42,10 +41,10 @@ export function CaptionAiPanel({
 }) {
   const { t, locale } = useI18n();
   const [wish, setWish] = useState("");
-  const [busy, setBusy] = useState<"caption" | "tags">();
+  const [busy, setBusy] = useState<"caption">();
   const [error, setError] = useState<string>();
-  const [prevCaption, setPrevCaption] = useState<string | null>(null);
-  const [prevTags, setPrevTags] = useState<string[] | null>(null);
+  // 되돌리기: 자동 작성 전의 본문과 해시태그
+  const [prev, setPrev] = useState<{ caption: string; hashtags: string[] } | null>(null);
   const [showLog, setShowLog] = useState(false);
   const tone = prefs.caption_tone ?? "casual";
   const length = prefs.caption_length ?? "auto";
@@ -56,28 +55,14 @@ export function CaptionAiPanel({
     setError(undefined);
     try {
       const r = await ai.write({ instruction: wish.trim(), caption, language: locale });
-      setPrevCaption(caption);
+      setPrev({ caption, hashtags });
       onCaption(r.caption);
-      // 함께 나온 해시태그는 해시태그가 비어 있을 때만 채움
-      if (r.hashtags.length && !hashtags.length) onHashtags(r.hashtags);
+      // 해시태그도 새 글에 맞춰 함께 (양식 안에 해시태그 칸이 있으면 본문에 들어가 빈 목록으로 옴)
+      if (r.hashtags.length) onHashtags(r.hashtags);
       if (wish.trim()) {
         setWish("");
         onRequests(r.requests);
       }
-    } catch (e) {
-      setError(toApiError(e).message);
-    } finally {
-      setBusy(undefined);
-    }
-  }
-
-  async function generateTags() {
-    setBusy("tags");
-    setError(undefined);
-    try {
-      const tags = await ai.tags({ caption, language: locale });
-      setPrevTags(hashtags);
-      onHashtags(tags);
     } catch (e) {
       setError(toApiError(e).message);
     } finally {
@@ -144,32 +129,18 @@ export function CaptionAiPanel({
         <button type="button" onClick={writeCaption} disabled={!!busy} className={cx(aiButton, "bg-accent text-on-accent hover:opacity-90")}>
           {busy === "caption" ? <Spinner className="size-3.5" /> : "✨"} {busy === "caption" ? t("studio.rewriting") : t("studio.captionAutoFull")}
         </button>
-        <button type="button" onClick={generateTags} disabled={!!busy} className={cx(aiButton, "border border-line-strong bg-surface-1 text-fg hover:bg-surface-2")}>
-          {busy === "tags" ? <Spinner className="size-3.5" /> : "#"} {busy === "tags" ? t("studio.hashtagGenerating") : t("studio.hashtagAutoFull")}
-        </button>
         <div className="ml-auto flex items-center gap-3 text-[12px] text-fg-3">
-          {prevCaption !== null && (
+          {prev && (
             <button
               type="button"
               onClick={() => {
-                onCaption(prevCaption);
-                setPrevCaption(null);
+                onCaption(prev.caption);
+                onHashtags(prev.hashtags);
+                setPrev(null);
               }}
               className="underline-offset-2 hover:text-fg hover:underline"
             >
-              ↩ {t("studio.undoCaption")}
-            </button>
-          )}
-          {prevTags !== null && (
-            <button
-              type="button"
-              onClick={() => {
-                onHashtags(prevTags);
-                setPrevTags(null);
-              }}
-              className="underline-offset-2 hover:text-fg hover:underline"
-            >
-              ↩ {t("studio.undoHashtags")}
+              ↩ {t("studio.hashtagUndo")}
             </button>
           )}
         </div>

@@ -5,6 +5,7 @@
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { useSession } from "@/components/AdminShell";
+import { EmailVerify, VerifiedBadge } from "@/components/auth/EmailVerify";
 import { IconFacebook, IconInstagram } from "@/components/icons";
 import { Avatar, Badge, Button, Card, cx, Dialog, inputClass, Notice, PageHeader } from "@/components/ui";
 import { useT } from "@/i18n/client";
@@ -82,8 +83,15 @@ function MemberInfo() {
     >
       <form onSubmit={save} className="space-y-3">
         <div>
-          <p className="mb-1.5 text-[13px] font-medium text-fg-2">{t("auth.email")}</p>
+          <p className="mb-1.5 flex items-center gap-2 text-[13px] font-medium text-fg-2">
+            {t("auth.email")} <VerifiedBadge verified={u.email_verified} />
+          </p>
           <p className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg-2">{u.email}</p>
+          {!u.email_verified && (
+            <div className="mt-2">
+              <EmailVerify email={u.email} onVerified={refresh} autoOpen={u.verify_required} />
+            </div>
+          )}
         </div>
         {input(t("auth.name"), <input value={name} required maxLength={80} onChange={(e) => setName(e.target.value)} className={cx(inputClass, "h-10")} autoComplete="name" />)}
         {input(
