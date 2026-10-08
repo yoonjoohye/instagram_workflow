@@ -220,10 +220,18 @@ def _link_facebook(code: str) -> _FbLinked:
         me = client.me()
         pages = client.my_pages(with_instagram_only=False)
         perms = client.get("me/permissions").get("data", [])
+        try:
+            targets = client.granular_targets(token)
+        except GraphError:
+            targets = {}
     granted = ",".join(p["permission"] for p in perms if p.get("status") == "granted")
     declined = [p["permission"] for p in perms if p.get("status") == "declined"]
-    log.warning("facebook link: %d pages (%d with instagram), declined=%s", len(pages),
-             sum(1 for p in pages if p.get("instagram_business_account")), declined)
+    # 진단: 페이지 수 · Instagram 이 붙은 페이지 수 · 거절한 권한 · 앱에 허락한 Instagram 계정 수 (토큰·ID 는 남기지 않음)
+    log.warning(
+        "facebook link: %d pages (%d with instagram), declined=%s, granted instagram accounts=%s, granted pages=%s",
+        len(pages), sum(1 for p in pages if p.get("instagram_business_account")), declined,
+        len(targets.get("instagram_basic", [])), len(targets.get("pages_show_list", [])),
+    )
     return _FbLinked(
         fb_user_id=str(me.get("id", "")),
         name=me.get("name", ""),

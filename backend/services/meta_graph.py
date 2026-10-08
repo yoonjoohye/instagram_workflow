@@ -141,15 +141,25 @@ class GraphClient:
 
         페이지 토큰은 만료가 없어(장기 사용자 토큰에서 파생) 발행에 유리합니다.
         """
+        ig_fields = "{id,username,name,profile_picture_url,followers_count,follows_count,media_count}"
         data = self.get(
             "me/accounts",
             {
-                "fields": "id,name,access_token,instagram_business_account{id,username,name,profile_picture_url,followers_count,follows_count,media_count}",
+                # 연결 방식에 따라 둘 중 한쪽에만 나오는 경우가 있어 둘 다 받음
+                "fields": f"id,name,access_token,instagram_business_account{ig_fields},connected_instagram_account{ig_fields}",
                 "limit": 100,
             },
         )
         pages = data.get("data", [])
+        for p in pages:
+            if not p.get("instagram_business_account") and p.get("connected_instagram_account"):
+                p["instagram_business_account"] = p["connected_instagram_account"]
         return [p for p in pages if p.get("instagram_business_account")] if with_instagram_only else pages
+
+    def granular_targets(self, user_token: str) -> dict[str, list[str]]:
+        """이 사용자가 앱에 허락한 권한별 대상 (예: instagram_basic → 허락한 Instagram 계정 ID 들). 진단용."""
+        info = self.debug_token(user_token).get("data", {})
+        return {g.get("scope", ""): [str(t) for t in g.get("target_ids", [])] for g in info.get("granular_scopes", [])}
 
     # ── Instagram 로그인 OAuth ─────────────────────────────────────────
     def ig_exchange_code(self, code: str) -> dict[str, Any]:
