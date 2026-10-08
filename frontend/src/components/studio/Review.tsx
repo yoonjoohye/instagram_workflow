@@ -278,8 +278,8 @@ export function Review({
             onVideoEdit={!locked ? (i) => setEditingVideo(i) : undefined}
             onAdd={
               !locked
-                ? async (files) => {
-                    const ids = await uploadMedia(files, t, () => {});
+                ? async (files, onStep) => {
+                    const ids = await uploadMedia(files, t, onStep);
                     onChange(await api<Job>(`/studio/${job.id}/media`, { method: "POST", json: { upload_ids: ids } }));
                   }
                 : undefined

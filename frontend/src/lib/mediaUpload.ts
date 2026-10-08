@@ -8,7 +8,8 @@ import { api } from "@/lib/api";
 import { captureCover, uploadImageBlob, uploadPhoto } from "@/lib/uploads";
 
 export const MAX_VIDEO_MB = 300;
-export type UploadStep = { label: string; done: number; total: number };
+/** 올리기 진행: pct 는 동영상을 올린 정도(0~100) */
+export type UploadStep = { label: string; done: number; total: number; pct?: number };
 
 export const isMedia = (f: File) => f.type.startsWith("image/") || f.type.startsWith("video/");
 export const tooBig = (f: File) => f.type.startsWith("video/") && f.size > MAX_VIDEO_MB * 1024 * 1024;
@@ -24,7 +25,8 @@ async function uploadVideo(file: File, t: T, onStep: (s: UploadStep) => void, in
       access: "public",
       handleUploadUrl: "/api/blob/upload",
       multipart: file.size > 20 * 1024 * 1024,
-      onUploadProgress: ({ percentage }) => onStep({ label: t("studio.stepUploadVideo", { pct: Math.round(percentage) }), done: index, total }),
+      onUploadProgress: ({ percentage }) =>
+        onStep({ label: t("studio.stepUploadVideo", { pct: Math.round(percentage) }), done: index, total, pct: Math.round(percentage) }),
     });
     url = blob.url;
   } catch (err) {

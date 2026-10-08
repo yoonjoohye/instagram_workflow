@@ -12,6 +12,7 @@ import { callNative, isNativeApp } from "@/lib/nativeBridge";
 import { mediaSrc } from "@/lib/format";
 import { useDragSort } from "@/lib/useDragSort";
 import type { Asset } from "@/lib/types";
+import type { UploadStep } from "@/lib/mediaUpload";
 
 export type RedoFn = (index: number, instruction: string, fromCurrent: boolean) => Promise<void>;
 
@@ -74,7 +75,7 @@ export function MediaStrip({
   /** 끌어서 순서 바꾸기 */
   onReorder?: (from: number, to: number) => void;
   /** 사진·동영상 더 넣기 */
-  onAdd?: (files: File[]) => Promise<void>;
+  onAdd?: (files: File[], onStep: (s: UploadStep) => void) => Promise<void>;
   /** AI 로 새 이미지 만들기 (요청 글) */
   onGenerate?: (instruction: string) => Promise<void>;
   /** 한 장 빼기 */
@@ -424,16 +425,18 @@ export function AudioTrack({ asset }: { asset: Asset }) {
 }
 
 /** 목록 끝 칸: 사진·동영상 더 넣기 / AI 로 새 이미지 만들기 */
-function AddTile({ onAdd, onGenerate, empty }: { onAdd?: (files: File[]) => Promise<void>; onGenerate?: (instruction: string) => Promise<void>; empty: boolean }) {
+function AddTile({ onAdd, onGenerate, empty }: { onAdd?: (files: File[], onStep: (s: UploadStep) => void) => Promise<void>; onGenerate?: (instruction: string) => Promise<void>; empty: boolean }) {
   const t = useT();
   const input = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"idle" | "ai">("idle");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<"add" | "ai">();
+  const [step, setStep] = useState<UploadStep>();
   const [error, setError] = useState<string>();
 
   async function run(kind: "add" | "ai", fn: () => Promise<void>) {
     setBusy(kind);
+    setStep(undefined);
     setError(undefined);
     try {
       await fn();
@@ -458,7 +461,18 @@ function AddTile({ onAdd, onGenerate, empty }: { onAdd?: (files: File[]) => Prom
               className="flex flex-1 flex-col items-center justify-center gap-1 rounded-md py-6 text-[13px] font-medium text-fg-2 hover:bg-surface-2 disabled:opacity-60"
             >
               {busy === "add" ? <Spinner /> : <span className="text-xl">＋</span>}
-              {busy === "add" ? t("studio.uploading") : t("studio.addMedia")}
+              {busy === "add" ? (step?.label ?? t("studio.uploading")) : t("studio.addMedia")}
+              {/* 여러 개를 올릴 때 몇 번째인지, 동영상은 올린 만큼 막대로 (큰 영상은 몇 분 걸릴 수 있어 멈춘 것처럼 보이지 않게) */}
+              {busy === "add" && step && step.total > 1 && (
+                <span className="tnum text-[11px] text-fg-3">
+                  {Math.min(step.done + 1, step.total)}/{step.total}
+                </span>
+              )}
+              {busy === "add" && step?.pct !== undefined && (
+                <span className="mt-1 h-1.5 w-32 overflow-hidden rounded-full bg-surface-2">
+                  <span className="block h-full bg-accent transition-[width]" style={{ width: `${step.pct}%` }} />
+                </span>
+              )}
             </button>
           )}
           {onGenerate && (
@@ -480,7 +494,7 @@ function AddTile({ onAdd, onGenerate, empty }: { onAdd?: (files: File[]) => Prom
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
               e.target.value = "";
-              if (files.length && onAdd) run("add", () => onAdd(files));
+              if (files.length && onAdd) run("add", () => onAdd(files, setStep));
             }}
           />
         </>

@@ -17,7 +17,7 @@ import { DEFAULT_SETTINGS, WorkspaceSettings, type SettingsPatch } from "@/compo
 import { Button, Card, Notice } from "@/components/ui";
 import { useI18n } from "@/i18n/client";
 import { api, toApiError } from "@/lib/api";
-import { isMedia, MAX_VIDEO_MB, tooBig, uploadMedia } from "@/lib/mediaUpload";
+import { isMedia, MAX_VIDEO_MB, tooBig, uploadMedia, type UploadStep } from "@/lib/mediaUpload";
 import { composeCaption } from "@/lib/format";
 import * as photoLib from "@/lib/photoLibrary";
 import type { Job, JobSettings } from "@/lib/types";
@@ -79,12 +79,12 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
       }),
   };
 
-  async function addFiles(files: File[]) {
+  async function addFiles(files: File[], onStep: (s: UploadStep) => void = () => {}) {
     setError(undefined);
     if (files.some(tooBig)) setError(t("studio.videoTooBig", { mb: MAX_VIDEO_MB }));
     const usable = files.filter((f) => isMedia(f) && !tooBig(f)).slice(0, MAX_MEDIA);
     if (!usable.length) return;
-    const ids = await uploadMedia(usable, t, () => {});
+    const ids = await uploadMedia(usable, t, onStep);
     onCreated(await create(ids));
   }
 
