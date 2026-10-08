@@ -240,7 +240,7 @@ def test_instagram_link_and_taken_account(client, login, account, db, monkeypatc
     login(account)
     ig = {"id": "424242", "username": "linked_ig", "name": "L"}
     r = _callback(client, monkeypatch, "instagram", auth._IgLinked(ig=ig, token="tok", expires_at=None, granted="a,b"))
-    assert r.headers["location"].endswith("/admin/profile?connected=instagram")
+    assert r.headers["location"].endswith("/admin?connected=instagram")  # 연동하면 바로 대시보드로
     linked = db.query(Account).filter(Account.ig_user_id == "424242").one()
     assert linked.user_id == db.get(Account, account.id).user_id and linked.provider == "instagram"
     assert client.get("/auth/me").json()["username"] == "linked_ig"  # 방금 연동한 계정으로 전환
@@ -379,3 +379,12 @@ def test_facebook_reconnect_rerequests_permissions(client, login, account, monke
     login(account)
     r = client.get("/auth/login?provider=facebook&switch=1", follow_redirects=False)
     assert "auth_type=rerequest" in r.headers["location"]
+
+
+def test_personal_instagram_account_is_guided_to_switch(client, login, account, db, monkeypatch):
+    monkeypatch.setattr(auth.GraphClient, "subscribe_webhooks", lambda self, *a: {})
+    login(account)
+    ig = {"id": "565656", "username": "personal_ig", "account_type": "PERSONAL"}
+    r = _callback(client, monkeypatch, "instagram", auth._IgLinked(ig=ig, token="t", expires_at=None, granted=""))
+    assert r.headers["location"].endswith("/admin?need=professional")
+    assert db.query(Account).filter(Account.ig_user_id == "565656").first() is None

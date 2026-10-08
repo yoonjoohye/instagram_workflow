@@ -217,8 +217,13 @@ function LinkedAccounts() {
           </div>
         </section>
 
-        {/* Facebook */}
-        <section className="border-t border-line pt-5">
+        {/* Facebook — 대부분 필요 없어 '고급 기능'으로 접어 둠 (연동돼 있으면 펼침) */}
+        <details className="group border-t border-line pt-4" open={!!fb || undefined}>
+          <summary className="cursor-pointer list-none text-[13px] font-medium text-fg-2 hover:text-fg">
+            <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
+            {t("auth.advanced")} <span className="font-normal text-fg-3">· {t("auth.advancedHint")}</span>
+          </summary>
+        <section className="pt-4">
           <div className="flex items-start gap-3">
             <span className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-fg-2">
               <IconFacebook width={20} height={20} />
@@ -264,6 +269,7 @@ function LinkedAccounts() {
             </div>
           )}
         </section>
+        </details>
         {error && <Notice tone="bad">{error}</Notice>}
       </div>
     </Card>

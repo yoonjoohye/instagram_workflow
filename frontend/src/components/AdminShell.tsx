@@ -11,6 +11,7 @@ import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useT } from "@/i18n/client";
 import { EmailVerify, VerifiedBadge } from "./auth/EmailVerify";
+import { ProfessionalGuide } from "./auth/ProfessionalGuide";
 import { Avatar, cx, Dialog, Notice, Spinner } from "./ui";
 
 const MeContext = createContext<{ me: Me; refreshMe: () => void } | null>(null);
@@ -72,7 +73,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       <main className="min-w-0 px-4 pt-5 pb-[calc(88px+env(safe-area-inset-bottom))] sm:px-8 sm:py-8 md:pb-8">
         <div className="mx-auto max-w-6xl">
           <Suspense fallback={null}>
-            <OAuthResultBanner />
+            <OAuthResultBanner hasAccount={!!s.account} />
           </Suspense>
           {body}
         </div>
@@ -311,7 +312,7 @@ function AccountSwitcher({ session, compact, onSwitched }: { session: Session; c
 }
 
 /** 연동 콜백이 ?connected=instagram|facebook (&skipped, &warning) 또는 ?error=... 로 돌려보냅니다. */
-function OAuthResultBanner() {
+function OAuthResultBanner({ hasAccount }: { hasAccount: boolean }) {
   const t = useT();
   const params = useSearchParams();
   const router = useRouter();
@@ -320,7 +321,21 @@ function OAuthResultBanner() {
   const error = params.get("error");
   const skipped = params.get("skipped");
   const warning = params.get("warning");
-  if (!connected && !error) return null;
+  const needPro = params.get("need") === "professional";
+  // 계정이 하나도 없으면 연동 안내 화면(ConnectGate)이 이 안내를 보여 줌
+  if (!connected && !error && !(needPro && hasAccount)) return null;
+
+  const dismiss0 = () => router.replace(pathname);
+  if (needPro) {
+    return (
+      <div className="mb-6 space-y-2">
+        <Notice tone="warn" onClose={dismiss0}>
+          {t("auth.personalAccount")}
+        </Notice>
+        <ProfessionalGuide open />
+      </div>
+    );
+  }
 
   const dismiss = () => router.replace(pathname);
   if (error) {
@@ -362,24 +377,30 @@ function VerifyGate() {
 function ConnectGate() {
   const t = useT();
   const { session } = useSession();
+  const needPro = useSearchParams().get("need") === "professional";
   return (
     <div className="flex min-h-[60dvh] items-center justify-center">
-      <div className="w-full max-w-sm rounded-2xl border border-line bg-surface-1 p-7 text-center">
+      <div className="w-full max-w-md rounded-2xl border border-line bg-surface-1 p-7 text-center">
         <IconInstagram className="mx-auto text-fg-2" width={36} height={36} />
         <h1 className="mt-4 text-lg font-semibold">{t("auth.connectGateTitle")}</h1>
         <p className="mt-1.5 text-[13px] leading-relaxed text-fg-2">{t("auth.connectGateBody")}</p>
+        {needPro && (
+          <div className="mt-4 text-left">
+            <Notice tone="warn">{t("auth.personalAccount")}</Notice>
+          </div>
+        )}
         {session.can_link.instagram && (
           <button
             type="button"
-            onClick={() => startLink("instagram")}
+            onClick={() => startLink("instagram", { switch: needPro })}
             className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent text-sm font-semibold text-on-accent hover:opacity-90"
           >
             <IconInstagram /> {t("auth.connectInstagram")}
           </button>
         )}
-        <Link href={PROFILE} className="mt-3 inline-block text-[13px] text-fg-3 hover:text-fg">
-          {t("auth.goProfile")}
-        </Link>
+        <div className="mt-4">
+          <ProfessionalGuide open={needPro} />
+        </div>
         <DevLoginLink />
       </div>
     </div>

@@ -20,8 +20,8 @@ function useNext(fallback = "/admin") {
   return next.startsWith("/") && !next.startsWith("//") ? next : fallback;
 }
 
-/** 계정이 이미 있으면(예전 인스타 로그인에서 옮겨 온 경우) 대시보드, 없으면 프로필에서 연동부터 */
-const landing = (s: Session, next: string) => (s.account ? next : "/admin/profile");
+/** 계정이 이미 있으면(예전 인스타 로그인에서 옮겨 온 경우) 가려던 곳, 없으면 'Instagram 연동하기' 한 버튼 화면부터 */
+const landing = (s: Session, next: string) => (s.account ? next : "/admin");
 
 function AuthCard({ title, subtitle, children, footer }: { title: string; subtitle?: string; children: ReactNode; footer?: ReactNode }) {
   return (

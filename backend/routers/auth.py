@@ -275,6 +275,10 @@ class _Taken(Exception):
     """다른 회원이 이미 연동한 Instagram 계정."""
 
 
+class _Personal(Exception):
+    """개인 계정 — Instagram API 는 프로페셔널(비즈니스·크리에이터) 계정만 씁니다 (Meta 정책)."""
+
+
 def _fill_profile(account: Account, ig: dict) -> None:
     account.username = ig.get("username", "") or account.username
     account.name = ig.get("name", "") or ""
@@ -296,6 +300,8 @@ def _owned_or_new(db: Session, user: User, ig_user_id: str) -> Account:
 
 
 def save_instagram(db: Session, user: User, linked: _IgLinked) -> Account:
+    if str(linked.ig.get("account_type") or "").upper() == "PERSONAL":
+        raise _Personal()
     account = _owned_or_new(db, user, linked.ig["id"])
     if account.provider == "facebook" and account.access_token_enc:
         # Facebook 페이지로 연결돼 있던 계정: 그 페이지 토큰은 Facebook 전용 기능용으로 남겨 둠
@@ -404,6 +410,9 @@ def callback(
                 params["skipped"] = ",".join(skipped)
             if not accounts and not skipped:
                 params["warning"] = facebook_warning(fb, lang)
+    except _Personal:
+        # 화면이 '프로페셔널 계정으로 바꾸는 방법'을 보여 줌
+        return RedirectResponse(_admin_url(need="professional"))
     except _Taken:
         return RedirectResponse(_profile_url(error=tr("이미 다른 회원에게 연동된 Instagram 계정입니다. 그 회원에서 연동을 해제한 뒤 다시 시도해 주세요.", lang)))
     except GraphError as exc:
@@ -417,7 +426,8 @@ def callback(
         sep = "&" if "?" in app_redirect else "?"
         resp = RedirectResponse(f"{app_redirect}{sep}{urlencode({'code': one_time})}")
     else:
-        resp = RedirectResponse(_profile_url(**params))
+        # Instagram 연동은 바로 쓰기 시작하도록 대시보드로, Facebook 은 결과를 보는 프로필로
+        resp = RedirectResponse(_admin_url(**params) if provider == "instagram" else _profile_url(**params))
         set_session(resp, user, current if isinstance(current, int) else None)
     resp.delete_cookie(OAUTH_STATE_COOKIE)
     resp.delete_cookie(APP_REDIRECT_COOKIE)
