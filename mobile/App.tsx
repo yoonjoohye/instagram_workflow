@@ -63,7 +63,8 @@ export default function App() {
             return reply(msg.id, await photos.photo(String(msg.photoId)));
           case "haptic":
             // 웹 슬라이더의 '틱'(눈금) · '팡'(가운데에 붙을 때)
-            if (msg.kind === "snap") await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            if (msg.kind === "warn") await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            else if (msg.kind === "snap") await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             else await Haptics.selectionAsync();
             return reply(msg.id, true);
           case "save": {

@@ -7,7 +7,8 @@
 
 import { callNative, isNativeApp } from "./nativeBridge";
 
-export type HapticKind = "tick" | "snap";
+/** tick: 눈금 · snap: 맞춤(가운데·끝에 붙음) · warn: 경고(인스타에서 가려지는 곳으로 넘어감) */
+export type HapticKind = "tick" | "snap" | "warn";
 
 let lastTick = 0;
 let iosSwitch: HTMLLabelElement | null = null;
@@ -40,10 +41,11 @@ export function haptic(kind: HapticKind = "tick") {
     if (isNativeApp()) {
       callNative("haptic", { kind }, 2000).catch(() => {});
     } else if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      navigator.vibrate(kind === "snap" ? [0, 24] : 6);
+      navigator.vibrate(kind === "warn" ? [0, 30, 50, 30, 50, 30] : kind === "snap" ? [0, 24] : 6);
     } else if (isIOS()) {
       iosHaptic();
       if (kind === "snap") setTimeout(iosHaptic, 60); // 두 번 → '팡'
+      if (kind === "warn") [70, 140].forEach((ms) => setTimeout(iosHaptic, ms)); // 세 번 → '드르륵'
     }
   } catch {
     // 진동이 막혀 있어도 슬라이더는 그대로

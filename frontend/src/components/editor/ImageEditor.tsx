@@ -346,6 +346,8 @@ export function ImageEditor({
   // 인스타 게시 사이즈 가이드 (화면에만 — 저장 이미지엔 안 들어감)
   const [view, setView] = useState({ w: 0, h: 0 });
   const [guides, setGuides] = useState(true);
+  // 끌거나 두 손가락으로 만지는 동안: 가운데 맞춤 선(v·h), 인스타에서 가려지는 곳으로 넘어감(warn)
+  const [snap, setSnap] = useState({ v: false, h: false, warn: false });
   const photoFile = useRef<HTMLInputElement>(null);
   const [hasCutout, setHasCutout] = useState(false);
   const cutout = useRef<{ png: Blob; original: Blob } | null>(null);
@@ -486,6 +488,9 @@ export function ImageEditor({
         c.on("text:selection:changed", () => force((n) => n + 1));
         c.on("text:editing:exited", () => force((n) => n + 1));
         c.on("selection:cleared", () => setSelected(null));
+        // 바로 만지기: 끄는 동안 맞춤·경고, 손을 떼면 표시를 지움
+        c.on("object:moving", (e) => live.current.moving(e.target as Named));
+        c.on("mouse:up", () => live.current.endMove());
         c.on("after:render", ({ ctx }) => postProcess(ctx));
         c.on("after:render", refreshPreview);
         // 동영상 꾸미기: 새로 넣은 것은 지금 재생 위치부터 몇 초 동안 보이게
@@ -551,8 +556,9 @@ export function ImageEditor({
     } else c.selection = true;
     const img = base();
     if (img) {
-      const movable = tab === "crop";
-      img.set({ selectable: movable, evented: movable, hasControls: false, lockRotation: true });
+      // 사진은 어느 탭에서나 빈 곳을 끌어 옮길 수 있음 (그리기 중에만 고정)
+      const movable = tab !== "draw" && !overlay; // 동영상 꾸미기는 바탕이 영상이라 고정
+      img.set({ selectable: movable, evented: movable, hasControls: false, hasBorders: false, lockRotation: true, hoverCursor: "grab" });
       if (!movable && c.getActiveObject() === img) c.discardActiveObject();
     }
     c.requestRenderAll();
@@ -1370,9 +1376,182 @@ export function ImageEditor({
     img.set({ angle, flipX: next.flip, scaleX: s, scaleY: s, originX: "center", originY: "center" });
     if (recenter) img.set({ left: w / 2, top: h / 2 });
     img.setCoords();
+    clampBase(img); // 확대를 줄여도 틀 밖(빈 곳)이 드러나지 않게
     canvas.current!.requestRenderAll();
     refreshPreview();
   }
+
+  /** 사진이 늘 틀을 다 덮도록 위치를 당김 (돌려도). 당겼으면 true — 틀 끝에 닿았다는 뜻 */
+  function clampBase(img: F.FabricObject): boolean {
+    const { w, h } = size.current;
+    const a = ((img.angle ?? 0) * Math.PI) / 180;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const hw = (img.width * (img.scaleX ?? 1)) / 2;
+    const hh = (img.height * (img.scaleY ?? 1)) / 2;
+    let cx = img.left ?? w / 2;
+    let cy = img.top ?? h / 2;
+    let clamped = false;
+    for (let it = 0; it < 8; it++) {
+      let moved = false;
+      for (const [px, py] of [[0, 0], [w, 0], [0, h], [w, h]]) {
+        // 틀의 모서리를 사진 기준(돌리기 전) 좌표로 바꿔, 사진 밖이면 그만큼 사진을 옮김
+        const dx = px - cx;
+        const dy = py - cy;
+        const lx = dx * cos + dy * sin;
+        const ly = -dx * sin + dy * cos;
+        const ex = lx - Math.max(-hw, Math.min(hw, lx));
+        const ey = ly - Math.max(-hh, Math.min(hh, ly));
+        if (Math.abs(ex) > 1e-6 || Math.abs(ey) > 1e-6) {
+          cx += ex * cos - ey * sin;
+          cy += ex * sin + ey * cos;
+          moved = clamped = true;
+        }
+      }
+      if (!moved) break;
+    }
+    img.set({ left: cx, top: cy });
+    img.setCoords();
+    return clamped;
+  }
+
+  // ── 바로 만지기: 끄는 동안 가운데 맞춤(착 붙고 진동)·틀 끝 닿음(진동)·가려지는 곳 경고(진동) ─────
+  const feel = useRef({ edge: false, v: false, h: false, warn: false });
+  function moving(o: Named) {
+    const f = fab.current;
+    if (!f || !o) return;
+    const { w, h } = size.current;
+    const thr = 10 / (zoom.current || 1); // 화면에서 10px 안이면 붙임
+    const c0 = o.getCenterPoint();
+    const v = Math.abs(c0.x - w / 2) < thr;
+    const hz = Math.abs(c0.y - h / 2) < thr;
+    if (v || hz) o.setPositionByOrigin(new f.Point(v ? w / 2 : c0.x, hz ? h / 2 : c0.y), "center", "center");
+    let edge = false;
+    let warn = false;
+    if (o.name === "base") {
+      edge = clampBase(o);
+    } else if (!SPECIAL.has(o.name ?? "")) {
+      // 글자·스티커가 인스타에서 보이는 영역 밖으로 나가면 경고
+      const area = visibleArea(preview?.kind, w, h);
+      const pts = o.getCoords();
+      const xs = pts.map((p) => p.x);
+      const ys = pts.map((p) => p.y);
+      const tol = 2;
+      warn = Math.min(...xs) < area.x - tol || Math.max(...xs) > area.x + area.w + tol || Math.min(...ys) < area.y - tol || Math.max(...ys) > area.y + area.h + tol;
+    }
+    const prev = feel.current;
+    if ((v && !prev.v) || (hz && !prev.h)) haptic("snap");
+    else if (edge && !prev.edge) haptic("snap");
+    if (warn && !prev.warn) haptic("warn");
+    feel.current = { edge, v, h: hz, warn };
+    if (v !== snap.v || hz !== snap.h || warn !== snap.warn) setSnap({ v, h: hz, warn });
+  }
+  function endMove() {
+    feel.current = { edge: false, v: false, h: false, warn: false };
+    setSnap((x) => (x.v || x.h || x.warn ? { v: false, h: false, warn: false } : x));
+  }
+
+  // ── 두 손가락: 고른 글자·스티커는 크기·각도, 아무것도 안 골랐으면 사진 확대 ─────────────
+  type Pinch = { d0: number; a0: number; mx: number; my: number; target: Named | null; s0: number; r0: number; cx: number; cy: number; z0: number; minHit: boolean };
+  const pinch = useRef<Pinch | null>(null);
+  function pinchStart(t: TouchList) {
+    const c = canvas.current;
+    if (!c) return;
+    const [p, q] = [t[0], t[1]];
+    const active = c.getActiveObject() as Named | undefined;
+    const target = active && !SPECIAL.has(active.name ?? "") && !active.isEditing ? active : null;
+    const ctr = target?.getCenterPoint();
+    pinch.current = {
+      d0: Math.hypot(q.clientX - p.clientX, q.clientY - p.clientY) || 1,
+      a0: Math.atan2(q.clientY - p.clientY, q.clientX - p.clientX),
+      mx: (p.clientX + q.clientX) / 2,
+      my: (p.clientY + q.clientY) / 2,
+      target,
+      s0: target?.scaleX ?? 1,
+      r0: target?.angle ?? 0,
+      cx: ctr?.x ?? 0,
+      cy: ctr?.y ?? 0,
+      z0: cropRef.current.zoom,
+      minHit: false,
+    };
+    // 한 손가락으로 끌던 것은 멈춤
+    for (const o of c.getObjects()) o.set({ lockMovementX: true, lockMovementY: true });
+  }
+  function pinchMove(t: TouchList) {
+    const g = pinch.current;
+    const f = fab.current;
+    if (!g || !f) return;
+    const [p, q] = [t[0], t[1]];
+    const ratio = Math.hypot(q.clientX - p.clientX, q.clientY - p.clientY) / g.d0;
+    if (g.target) {
+      let deg = g.r0 + ((Math.atan2(q.clientY - p.clientY, q.clientX - p.clientX) - g.a0) * 180) / Math.PI;
+      const near = Math.round(deg / 90) * 90;
+      const snapped = Math.abs(deg - near) < 4; // 수평·수직 근처면 붙임
+      if (snapped) deg = near;
+      const z = zoom.current || 1;
+      g.target.set({ scaleX: g.s0 * ratio, scaleY: g.s0 * ratio, angle: deg });
+      g.target.setPositionByOrigin(new f.Point(g.cx + ((p.clientX + q.clientX) / 2 - g.mx) / z, g.cy + ((p.clientY + q.clientY) / 2 - g.my) / z), "center", "center");
+      g.target.setCoords();
+      if (snapped && !feel.current.v) haptic("snap");
+      feel.current.v = snapped;
+      moving(g.target);
+      canvas.current!.requestRenderAll();
+    } else {
+      const zoomTo = Math.min(3, Math.max(1, g.z0 * ratio));
+      const atMin = zoomTo <= 1.0001;
+      if (atMin && !g.minHit) haptic("snap"); // 틀에 꼭 맞는 크기(더 줄이면 빈 곳이 생김)
+      g.minHit = atMin;
+      applyCrop({ ...cropRef.current, zoom: zoomTo });
+    }
+  }
+  function pinchEnd() {
+    const c = canvas.current;
+    if (!pinch.current || !c) return;
+    pinch.current = null;
+    for (const o of c.getObjects()) o.set({ lockMovementX: false, lockMovementY: false });
+    endMove();
+    snapshot();
+  }
+  // 캔버스 이벤트에서 늘 최신 함수를 부르도록
+  const live = useRef({ moving, endMove, pinchStart, pinchMove, pinchEnd });
+  live.current = { moving, endMove, pinchStart, pinchMove, pinchEnd };
+  useEffect(() => {
+    const el = canvas.current?.upperCanvasEl;
+    if (!ready || !el) return;
+    const start = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        live.current.pinchStart(e.touches);
+      }
+    };
+    const move = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinch.current) {
+        e.preventDefault();
+        live.current.pinchMove(e.touches);
+      }
+    };
+    const end = (e: TouchEvent) => {
+      if (e.touches.length < 2) live.current.pinchEnd();
+    };
+    el.addEventListener("touchstart", start, { passive: false });
+    el.addEventListener("touchmove", move, { passive: false });
+    el.addEventListener("touchend", end);
+    el.addEventListener("touchcancel", end);
+    return () => {
+      el.removeEventListener("touchstart", start);
+      el.removeEventListener("touchmove", move);
+      el.removeEventListener("touchend", end);
+      el.removeEventListener("touchcancel", end);
+    };
+  }, [ready]);
+
+  // 글자·스티커를 누르면 그에 맞는 도구 탭으로 (그리기 중엔 그대로)
+  useEffect(() => {
+    if (!selected || SPECIAL.has(selected.name ?? "") || tab === "draw") return;
+    const want: Tab = isText(selected) ? "text" : "sticker";
+    if (tab !== want && TABS.some((x) => x.key === want)) setTab(want);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   // ── 저장 ───────────────────────────────────────────────────
   // ── 동영상 꾸미기: 재생 위치에 맞춰 보이기 · 재생 · 타임라인 ─────────────────
@@ -1586,7 +1765,16 @@ export function ImageEditor({
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div ref={holder} className="relative flex min-h-0 flex-1 items-center justify-center">
+          {/* 휴대폰: 도구 칸이 길어져도 사진 크기가 줄지 않게 높이를 고정하고 도구 칸만 스크롤.
+              바깥은 체크무늬, 캔버스(인스타에 올라갈 틀)에는 테두리 — 검은 사진과 빈 곳이 헷갈리지 않게 */}
+          <div
+            ref={holder}
+            className={cx(
+              "relative flex min-h-0 flex-1 items-center justify-center bg-[repeating-conic-gradient(#18181b_0_25%,#111113_0_50%)] bg-[length:18px_18px] [&_.canvas-container]:outline [&_.canvas-container]:outline-1 [&_.canvas-container]:outline-white/35",
+              clip ? "max-lg:h-[42dvh]" : "max-lg:h-[54dvh]",
+              "max-lg:flex-none",
+            )}
+          >
             {clip && (
               // 바탕 영상 (캔버스는 투명해서 그 위에 글자·스티커가 겹쳐 보임)
               <video
@@ -1607,7 +1795,14 @@ export function ImageEditor({
               />
             )}
             <canvas ref={canvasEl} />
-            {ready && guides && preview && view.w > 0 && <SizeGuides kind={preview.kind} w={view.w} h={view.h} />}
+            {ready && (guides || snap.warn) && preview && view.w > 0 && <SizeGuides kind={preview.kind} w={view.w} h={view.h} warn={snap.warn} />}
+            {/* 가운데에 맞았을 때 선 (인스타 스토리처럼) */}
+            {(snap.v || snap.h) && view.w > 0 && (
+              <svg aria-hidden width={view.w} height={view.h} className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                {snap.v && <line x1={view.w / 2} x2={view.w / 2} y1={0} y2={view.h} stroke="#ff2d87" strokeWidth={1.5} />}
+                {snap.h && <line x1={0} x2={view.w} y1={view.h / 2} y2={view.h / 2} stroke="#ff2d87" strokeWidth={1.5} />}
+              </svg>
+            )}
             {ready && preview && (
               <button
                 type="button"
@@ -1757,8 +1952,8 @@ export function ImageEditor({
           {error && <p className="bg-[#ff3b5c]/15 px-4 py-2 text-[13px] text-[#ffb3c0]">{error}</p>}
 
           {/* 도구 패널 */}
-          <div className="border-t border-white/10 bg-[#141416] px-3 pt-3">
-            <div className="min-h-[104px] text-[13px]">
+          <div className="flex flex-col border-t border-white/10 bg-[#141416] px-3 pt-3 max-lg:min-h-0 max-lg:flex-1">
+            <div className="min-h-[104px] text-[13px] max-lg:min-h-0 max-lg:flex-1 max-lg:overflow-y-auto">
               {tab === "text" && (
                 <div className="space-y-2.5">
                   <div>
@@ -2236,7 +2431,7 @@ export function ImageEditor({
             </div>
 
             <nav
-              className="mt-2 grid border-t border-white/10 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+              className="mt-2 grid shrink-0 border-t border-white/10 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
               style={{ gridTemplateColumns: `repeat(${TABS.length}, minmax(0, 1fr))` }}
               aria-label={t("editor.title")}
             >
@@ -2275,6 +2470,24 @@ export function ImageEditor({
   );
 }
 
+/** 인스타그램에서 실제로 보이는 영역 (캔버스 좌표). 피드는 4:5·1.91:1 밖이 잘리고, 스토리는 위아래 띠가 화면 요소에 가려짐 */
+function visibleArea(kind: "feed" | "story" | undefined, w: number, h: number) {
+  const a = w / h;
+  if (kind === "feed" && (a < 0.8 - 0.005 || a > 1.91 + 0.005)) {
+    const r = a < 0.8 ? 0.8 : 1.91;
+    const [bw, bh] = a > r ? [h * r, h] : [w, w / r];
+    return { x: (w - bw) / 2, y: (h - bh) / 2, w: bw, h: bh };
+  }
+  if (kind === "story") {
+    const frameH = a > 9 / 16 ? w / (9 / 16) : h;
+    const offset = (frameH - h) / 2;
+    const top = Math.max(0, frameH * 0.14 - offset);
+    const bottom = Math.max(0, frameH * 0.2 - offset);
+    return { x: 0, y: top, w, h: Math.max(1, h - top - bottom) };
+  }
+  return { x: 0, y: 0, w, h };
+}
+
 function hexAlpha(hex: string, a: number) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
@@ -2283,7 +2496,7 @@ function hexAlpha(hex: string, a: number) {
 /** 인스타그램에 실제로 보이는 영역 점선 (화면에만).
  *  피드: 4:5보다 길면 4:5만, 1.91:1보다 넓으면 그만큼만 올라가고, 프로필 그리드는 가운데 3:4.
  *  스토리: 9:16 화면 위쪽(계정·진행 바)·아래쪽(답장 칸)은 화면 요소에 가려질 수 있음. */
-function SizeGuides({ kind, w, h }: { kind: "feed" | "story"; w: number; h: number }) {
+function SizeGuides({ kind, w, h, warn }: { kind: "feed" | "story"; w: number; h: number; warn?: boolean }) {
   const t = useT();
   const a = w / h;
   const box = (ratio: number) => (a > ratio ? { bw: h * ratio, bh: h } : { bw: w, bh: w / ratio });
@@ -2317,8 +2530,8 @@ function SizeGuides({ kind, w, h }: { kind: "feed" | "story"; w: number; h: numb
     >
       {bands.map((b) => (
         <g key={b.label}>
-          <rect x={0} y={b.y} width={w} height={b.bh} fill="rgba(0,0,0,0.28)" />
-          <line x1={0} x2={w} y1={b.y === 0 ? b.bh : b.y} y2={b.y === 0 ? b.bh : b.y} stroke="#fff" strokeWidth={1.5} strokeDasharray="5 5" />
+          <rect x={0} y={b.y} width={w} height={b.bh} fill={warn ? "rgba(255,45,85,0.22)" : "rgba(0,0,0,0.28)"} />
+          <line x1={0} x2={w} y1={b.y === 0 ? b.bh : b.y} y2={b.y === 0 ? b.bh : b.y} stroke={warn ? "#ff2d55" : "#fff"} strokeWidth={warn ? 2.5 : 1.5} strokeDasharray="5 5" />
           <text x={8} y={b.y === 0 ? b.bh - 6 : b.y + 14} fill="#fff" fontSize={11} style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.6)", strokeWidth: 3 }}>
             {b.label}
           </text>
@@ -2332,7 +2545,7 @@ function SizeGuides({ kind, w, h }: { kind: "feed" | "story"; w: number; h: numb
             width={r.bw - 1.5}
             height={r.bh - 1.5}
             fill="none"
-            stroke={r.strong ? "#fff" : "rgba(255,255,255,0.6)"}
+            stroke={warn && r.strong ? "#ff2d55" : r.strong ? "#fff" : "rgba(255,255,255,0.6)"}
             strokeWidth={r.strong ? 1.5 : 1}
             strokeDasharray={r.strong ? "6 5" : "2 4"}
           />
