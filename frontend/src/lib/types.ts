@@ -110,11 +110,20 @@ export type VideoEdit = {
   mute: boolean;
   cover_at: number | null;
   duration: number;
-  /** 꾸미기: 영상 전체에 겹친 글자·스티커·그림 (투명 PNG) + 다시 꾸밀 때 불러올 편집기 상태 */
+  /** 원본 소리 크기 (0~1, 0 이면 끔) */
+  volume?: number;
+  /** 꾸미기: 보이는 시간이 같은 것끼리 묶은 투명 PNG 들 (시간은 원본 영상 기준 초, null 은 처음/끝) + 다시 꾸밀 때 불러올 편집기 상태 */
+  overlays?: { id: string; url: string; start: number | null; end: number | null }[];
+  overlay_layers?: string;
+  /** (예전 방식) 영상 전체에 겹친 한 장 */
   overlay_id?: string;
   overlay_url?: string;
-  overlay_layers?: string;
+  /** 덧붙인 음악 */
+  audio?: VideoAudio | null;
 };
+
+/** 동영상에 덧붙인 소리: 원본 영상 at 초부터, 소리 파일의 offset 초 지점부터 */
+export type VideoAudio = { id: string; url: string; name: string; duration: number; at: number; offset: number; volume: number };
 
 export type Quota = { used: number; total: number; remaining: number };
 

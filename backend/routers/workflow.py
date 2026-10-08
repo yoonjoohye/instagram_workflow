@@ -145,7 +145,7 @@ def delete_job(
     db: Session = Depends(get_db),
 ) -> Response:
     job = _get_job(db, account, job_id)
-    from .video import discard_renders  # 순환 import 를 피해 여기서
+    from .video import discard_assets, discard_renders, edit_assets  # 순환 import 를 피해 여기서
 
     # 올린 동영상은 Blob 에 있어 따로 지웁니다 (다른 작업이 같은 영상을 쓰지 않을 때만).
     video_urls = [_video_source(a) for a in (job.assets or []) if a.get("type") == "video"]
@@ -161,12 +161,9 @@ def delete_job(
             db.delete(blob)
     # 동영상 편집으로 만든 영상
     discard_renders(db, account, [a.get("url", "") for a in (job.assets or []) if (a.get("meta") or {}).get("video_edit")])
-    # 동영상 꾸미기 그림(투명 PNG)도 함께
+    # 동영상 꾸미기 그림(투명 PNG)·덧붙인 소리 파일도 함께
     for a in job.assets or []:
-        oid = ((a.get("meta") or {}).get("video_edit") or {}).get("overlay_id")
-        o = db.get(MediaBlob, oid) if oid else None
-        if o is not None and o.account_id == account.id and o.kind == "overlay":
-            db.delete(o)
+        discard_assets(db, account, edit_assets((a.get("meta") or {}).get("video_edit") or {}))
     # 스토리용으로 9:16 에 맞춘 사본
     for fitted_id in [*((job.plan or {}).get("story_fit") or {}).values(), *((job.plan or {}).get("feed_fit") or {}).values()]:
         blob = db.get(MediaBlob, fitted_id)

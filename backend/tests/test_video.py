@@ -98,7 +98,8 @@ def test_video_overlay_drawn_on_whole_video_and_kept_on_trim(client, login, acco
     r = client.post(f"/studio/{job.id}/videos/0/overlay", files={"file": ("o.png", buf.getvalue(), "image/png")}, data={"layers": '{"v":1}'})
     assert r.status_code == 200, r.text
     edit = r.json()["asset"]["meta"]["video_edit"]
-    assert edit["overlay_id"] and edit["overlay_layers"] == '{"v":1}' and edit["overlay_url"].endswith(".png")
+    assert len(edit["overlays"]) == 1 and edit["overlay_layers"] == '{"v":1}' and edit["overlays"][0]["url"].endswith(".png")
+    overlay_id = edit["overlays"][0]["id"]
 
     def center_and_corner(asset):
         frame = Image.open(io.BytesIO(client.get(asset["thumbnail_url"].replace("https://testserver/api/py", "")).content)).convert("RGB")
@@ -110,7 +111,7 @@ def test_video_overlay_drawn_on_whole_video_and_kept_on_trim(client, login, acco
 
     # 자르기를 바꿔도 꾸미기는 그대로 (파란 구간에서도 노란 네모)
     trimmed = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 3.5}).json()["asset"]
-    assert trimmed["meta"]["video_edit"]["overlay_id"] == edit["overlay_id"]
+    assert trimmed["meta"]["video_edit"]["overlays"][0]["id"] == overlay_id
     (cr, cg, cb), (kr, kg, kb) = center_and_corner(trimmed)
     assert cr > 200 and cg > 180 and kb > 150
 
@@ -118,9 +119,81 @@ def test_video_overlay_drawn_on_whole_video_and_kept_on_trim(client, login, acco
     empty = io.BytesIO()
     Image.new("RGBA", (216, 384), (0, 0, 0, 0)).save(empty, "PNG")
     cleared = client.post(f"/studio/{job.id}/videos/0/overlay", files={"file": ("e.png", empty.getvalue(), "image/png")}).json()["asset"]
-    assert cleared["meta"]["video_edit"]["overlay_id"] == ""
+    assert cleared["meta"]["video_edit"]["overlays"] == []
     db.expire_all()
-    assert db.get(MediaBlob, edit["overlay_id"]) is None
+    assert db.get(MediaBlob, overlay_id) is None
+
+
+def _frame_at(client, asset_url: str, at: float) -> tuple[int, int, int]:
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as f:
+        f.write(client.get(asset_url.replace("https://testserver/api/py", "")).content)
+        f.flush()
+        im = Image.open(io.BytesIO(vid.frame_at(Path(f.name), at))).convert("RGB")
+        return im.getpixel((im.width // 2, im.height // 2))
+
+
+def _png(color) -> bytes:
+    ov = Image.new("RGBA", (108, 192), (0, 0, 0, 0))
+    ov.paste(color, (34, 76, 74, 116))
+    buf = io.BytesIO()
+    ov.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_video_timed_overlays_and_music(client, login, account, db):
+    """꾸미기마다 보이는 시간 (원본 기준 초 → 자른 영상 기준), 음악 덧붙이기·빼기, 지우면 파일도 정리."""
+    login(account)
+    src = blob(db, account, clip(), "video", "video/mp4")
+    cover = blob(db, account, b"x", "upload", "image/jpeg")
+    job = GenerationJob(
+        account_id=account.id, prompt="p", media_kind="REELS", status="ready", provider="studio", caption="", hashtags=[],
+        assets=[{"type": "video", "url": url(src), "thumbnail_url": url(cover), "meta": {}}], plan={"slides": [{}]},
+    )
+    db.add(job)
+    db.commit()
+    # 1초에서 시작하도록 자름 → 원본 1~2초 노랑, 원본 4초~끝 초록
+    client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 1})
+    r = client.post(
+        f"/studio/{job.id}/videos/0/overlay",
+        files=[("files", ("a.png", _png((255, 230, 0, 255)), "image/png")), ("files", ("b.png", _png((0, 220, 0, 255)), "image/png"))],
+        data={"timings": "[[1, 2], [4, null]]", "layers": "{}"},
+    )
+    assert r.status_code == 200, r.text
+    edit = r.json()["asset"]["meta"]["video_edit"]
+    assert [(o["start"], o["end"]) for o in edit["overlays"]] == [(1, 2), (4, None)]
+    out = r.json()["asset"]["url"]
+    y = _frame_at(client, out, 0.5)  # 원본 1.5초 → 노랑
+    assert y[0] > 200 and y[1] > 180 and y[2] < 90
+    red = _frame_at(client, out, 1.6)  # 원본 2.6초 → 아무것도 없음 (빨강)
+    assert red[0] > 150 and red[1] < 90
+    g = _frame_at(client, out, 4.0)  # 원본 5초 → 초록 (파란 영상 위)
+    assert g[1] > 150 and g[0] < 90
+
+    # 음악: 소리 없는 영상으로 만들고(mute) 음악만 넣어도 소리가 생김
+    with tempfile.TemporaryDirectory() as tmp:
+        mp3 = Path(tmp) / "m.mp3"
+        subprocess.run([vid.ffmpeg(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=880:duration=20", str(mp3)], check=True)
+        up = client.post(f"/studio/{job.id}/videos/0/audio", files={"file": ("song.mp3", mp3.read_bytes(), "audio/mpeg")}, data={"name": "song.mp3"})
+    assert up.status_code == 201, up.text
+    audio = up.json()
+    assert audio["name"] == "song.mp3" and abs(audio["duration"] - 20) < 0.5
+    bad = client.post(f"/studio/{job.id}/videos/0/audio", files={"file": ("x.mp3", b"nope", "audio/mpeg")})
+    assert bad.status_code == 400
+
+    r = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 1, "mute": True, "audio": {"id": audio["id"], "at": 2, "offset": 3, "volume": 0.8}})
+    assert r.status_code == 200, r.text
+    edit = r.json()["asset"]["meta"]["video_edit"]
+    assert edit["audio"]["id"] == audio["id"] and edit["audio"]["name"] == "song.mp3" and len(edit["overlays"]) == 2
+    got = info(client, r.json()["asset"]["url"])
+    assert got["has_audio"] and abs(got["duration"] - 5) < 0.3  # 음악이 길어도 영상 길이에서 끝남
+
+    # 자르기만 바꾸면(audio 를 보내지 않으면) 음악은 그대로, null 이면 빼고 파일도 정리
+    kept = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 0, "mute": True}).json()["asset"]
+    assert kept["meta"]["video_edit"]["audio"]["id"] == audio["id"]
+    removed = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 0, "mute": True, "audio": None}).json()["asset"]
+    assert removed["meta"]["video_edit"]["audio"] is None and not info(client, removed["url"])["has_audio"]
+    db.expire_all()
+    assert db.get(MediaBlob, audio["id"]) is None
 
 
 def test_fit_frame_keeps_whole_photo_on_other_ratio():

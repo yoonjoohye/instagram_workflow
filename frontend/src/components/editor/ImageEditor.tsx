@@ -20,6 +20,7 @@ import { haptic } from "@/lib/haptics";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
+import { fmtTime, Timeline, useFrames, type Track } from "@/components/studio/Timeline";
 import { Button, cx, Spinner } from "@/components/ui";
 import { useT } from "@/i18n/client";
 import { api, toApiError, useApi } from "@/lib/api";
@@ -75,10 +76,10 @@ type Adjust = Record<HslKey, number> & {
 };
 type Crop = { zoom: number; turns: number; straighten: number; flip: boolean };
 type FontItem = { key: string; label: string; preview: string };
-type Named = F.FabricObject & { name?: string; isEditing?: boolean; orig?: string };
+type Named = F.FabricObject & { name?: string; isEditing?: boolean; orig?: string; tStart?: number; tEnd?: number };
 type Sticker = { id: string; url: string; width: number; height: number };
 // 편집 기록·저장에 함께 남길 우리 속성 (orig: 배경을 바꾸기 전 원본 사진 주소)
-const KEEP = ["name", "selectable", "evented", "link", "orig"];
+const KEEP = ["name", "selectable", "evented", "link", "orig", "tStart", "tEnd"];
 // 편집기 복사·붙여넣기 (다른 사진 편집기를 열어도 남음 — 같은 페이지 안에서)
 let clipboard: F.FabricObject | null = null;
 let pasteCount = 0;
@@ -266,9 +267,19 @@ function loadFont(key: string): Promise<void> {
 const blobIdOf = (url: string) => url.split("/media/").pop()!.replace(/\.jpg$/, "");
 const SPECIAL = new Set(["base", "vignette"]);
 
-/** 동영상 꾸미기 모드: 영상의 한 장면(baseUrl)을 바탕으로 글자·스티커·그리기만 하고,
- *  저장하면 꾸민 것만 그린 투명 PNG(아무것도 없으면 null)와 편집기 상태를 넘깁니다. 바탕 장면은 내보내지 않음. */
-export type OverlayMode = { title: string; baseUrl: string; layers?: string; onSubmit: (png: Blob | null, layers: string) => Promise<void> };
+/** 동영상 꾸미기 모드: 영상을 바탕으로 글자·스티커·그리기만 하고, 하나하나 보이는 시간(tStart~tEnd, 원본 영상 기준 초)을 정합니다.
+ *  저장하면 보이는 시간이 같은 것끼리 묶어 꾸민 것만 그린 투명 PNG 들과 편집기 상태를 넘깁니다. 바탕 장면은 내보내지 않음.
+ *  video 가 있으면 바탕에 영상을 재생하고 아래에 타임라인을, 없으면 한 장면(baseUrl)만. */
+export type OverlayPart = { png: Blob; start: number | null; end: number | null };
+export type OverlayMode = {
+  title: string;
+  baseUrl: string;
+  layers?: string;
+  video?: { src: string; start: number; end: number };
+  onSubmit: (parts: OverlayPart[], layers: string) => Promise<void>;
+};
+const DEFAULT_SPAN = 3; // 새로 넣은 글자·스티커가 보이는 시간 (초)
+const round1 = (x: number) => Math.round(x * 10) / 10;
 
 export function ImageEditor({
   jobId,
@@ -302,6 +313,16 @@ export function ImageEditor({
   const [error, setError] = useState<string>();
   const [tab, setTab] = useState<Tab>("text");
   const [selected, setSelected] = useState<Named | null>(null);
+  // 동영상 꾸미기: 바탕 영상·재생 위치
+  const clip = overlay?.video;
+  const videoEl = useRef<HTMLVideoElement>(null);
+  const [vt, setVt] = useState(clip?.start ?? 0);
+  const vtRef = useRef(vt);
+  vtRef.current = vt;
+  const [playing, setPlaying] = useState(false);
+  const [videoOk, setVideoOk] = useState(false);
+  const readyRef = useRef(false);
+  const frames = useFrames(clip ? mediaSrc(clip.src) : "", 12);
   const [, force] = useState(0);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -462,8 +483,20 @@ export function ImageEditor({
         c.on("selection:cleared", () => setSelected(null));
         c.on("after:render", ({ ctx }) => postProcess(ctx));
         c.on("after:render", refreshPreview);
+        // 동영상 꾸미기: 새로 넣은 것은 지금 재생 위치부터 몇 초 동안 보이게
+        if (clip) {
+          c.on("object:added", ({ target }) => {
+            const o = target as Named;
+            if (!readyRef.current || history.current.restoring || SPECIAL.has(o.name ?? "") || o.tStart !== undefined) return;
+            const s0 = Math.min(vtRef.current, Math.max(clip.start, clip.end - DEFAULT_SPAN));
+            o.tStart = round1(s0);
+            o.tEnd = round1(Math.min(clip.end, s0 + DEFAULT_SPAN));
+          });
+          base()?.set({ visible: true }); // 영상을 못 불러오면 장면 사진이 바탕
+        }
         for (const ev of ["object:added", "object:modified", "object:removed", "path:created", "text:changed"] as const) c.on(ev, () => snapshot());
         snapshot();
+        readyRef.current = true;
         setReady(true);
       } catch {
         if (!disposed) setError(t("editor.loadFailed"));
@@ -1327,6 +1360,85 @@ export function ImageEditor({
   }
 
   // ── 저장 ───────────────────────────────────────────────────
+  // ── 동영상 꾸미기: 재생 위치에 맞춰 보이기 · 재생 · 타임라인 ─────────────────
+  const timed = () => ((canvas.current?.getObjects() ?? []) as Named[]).filter((o) => !SPECIAL.has(o.name ?? ""));
+  // 지금 재생 위치에 보일 것만 보이게 (고른 것은 시간 밖이어도 보여서 고칠 수 있게)
+  useEffect(() => {
+    const c = canvas.current;
+    if (!clip || !c || !ready) return;
+    const active = new Set(c.getActiveObjects());
+    let changed = false;
+    for (const o of timed()) {
+      const show = o.tStart === undefined || (vt >= o.tStart - 0.01 && vt <= (o.tEnd ?? Infinity) + 0.01) || active.has(o);
+      if (o.visible !== show) {
+        o.visible = show;
+        changed = true;
+      }
+    }
+    if (changed) c.requestRenderAll();
+  });
+  // 이미 불러온 뒤에 이벤트를 붙인 경우 (빠른 캐시) 대비
+  useEffect(() => {
+    if (clip && ready && (videoEl.current?.readyState ?? 0) >= 2) setVideoOk(true);
+  }, [clip, ready]);
+  // 영상이 바탕: 장면 사진은 숨기고 캔버스는 투명하게 (영상을 못 불러오면 장면 사진 그대로)
+  useEffect(() => {
+    const c = canvas.current;
+    if (!clip || !c || !ready) return;
+    base()?.set({ visible: !videoOk });
+    c.backgroundColor = videoOk ? "" : "#000";
+    c.requestRenderAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoOk, ready, history.current.at]);
+  // 재생 중엔 재생 위치를 따라감 (화면이 너무 자주 다시 그려지지 않게 0.05초 단위로)
+  useEffect(() => {
+    if (!clip || !playing) return;
+    let raf = 0;
+    const tick = () => {
+      const v = videoEl.current;
+      if (v) {
+        if (v.currentTime >= clip.end - 0.03 || v.currentTime < clip.start - 0.3) v.currentTime = clip.start; // 자른 구간만 반복
+        if (Math.abs(v.currentTime - vtRef.current) >= 0.05) setVt(v.currentTime);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [clip, playing]);
+  const seekTo = (s0: number) => {
+    if (!clip) return;
+    const x = Math.min(clip.end, Math.max(clip.start, s0));
+    if (videoEl.current) videoEl.current.currentTime = x;
+    setVt(x);
+  };
+  const togglePlay = () => {
+    const v = videoEl.current;
+    if (!v || !clip) return;
+    if (v.paused) {
+      if (v.currentTime >= clip.end - 0.05) v.currentTime = clip.start;
+      void v.play();
+      setPlaying(true);
+    } else {
+      v.pause();
+      setPlaying(false);
+    }
+  };
+  function setTiming(o: Named, s0: number, e0: number, commit = true) {
+    if (!clip) return;
+    const a = Math.max(clip.start, Math.min(s0, clip.end - 0.3));
+    o.tStart = round1(a);
+    o.tEnd = round1(Math.min(clip.end, Math.max(e0, a + 0.3)));
+    force((n) => n + 1);
+    if (commit) snapshot();
+  }
+  const trackOf = (o: Named): Pick<Track, "label" | "icon" | "color"> => {
+    if (isText(o)) return { label: (o.text ?? "").split("\n")[0].slice(0, 16) || t("editor.tabText"), icon: "Aa", color: "#7c3aed" };
+    // 붓으로 그린 선은 채우기가 없음(null), 스티커 탭의 도형(하트·별·화살표…)은 채우기 값이 있음
+    if (o.type === "path" && o.fill == null) return { label: t("editor.tabDraw"), icon: "✏️", color: "#059669" };
+    if (o.type === "image") return { label: t("editor.tabSticker"), icon: "🖼", color: "#db2777" };
+    return { label: t("editor.shape"), icon: "◆", color: "#d97706" };
+  };
+
   async function save() {
     const c = canvas.current;
     if (!c) return;
@@ -1337,19 +1449,31 @@ export function ImageEditor({
       c.isDrawingMode = false;
       c.requestRenderAll();
       if (overlay) {
-        // 꾸민 것만: 바탕 장면을 숨기고 투명 배경으로 내보냄
+        // 꾸민 것만: 바탕 장면을 숨기고 투명 배경으로, 보이는 시간이 같은 것끼리 한 장씩 내보냄
         const b = base();
         const bg = c.backgroundColor;
         b?.set({ visible: false });
         c.backgroundColor = "";
-        c.renderAll();
-        const drawn = c.getObjects().some((o) => o.visible !== false && !SPECIAL.has((o as Named).name ?? ""));
-        const png = drawn ? await (await fetch(c.toDataURL({ format: "png", multiplier: 1 / zoom.current }))).blob() : null;
+        const objs = timed();
+        const groups = new Map<string, Named[]>();
+        for (const o of objs) {
+          const k = clip && o.tStart !== undefined ? `${o.tStart}|${o.tEnd}` : "all";
+          groups.set(k, [...(groups.get(k) ?? []), o]);
+        }
+        const parts: OverlayPart[] = [];
+        for (const group of groups.values()) {
+          for (const o of objs) o.visible = group.includes(o);
+          c.renderAll();
+          const png = await (await fetch(c.toDataURL({ format: "png", multiplier: 1 / zoom.current }))).blob();
+          const o0 = group[0];
+          parts.push({ png, start: clip ? (o0.tStart ?? null) : null, end: clip ? (o0.tEnd ?? null) : null });
+        }
+        for (const o of objs) o.visible = true;
         b?.set({ visible: true });
         c.backgroundColor = bg;
         c.renderAll();
         const layers: Layers = { v: 1, w: size.current.w, h: size.current.h, canvas: c.toObject(KEEP), adjust: adjustRef.current, crop: cropRef.current };
-        await overlay.onSubmit(png, JSON.stringify(layers));
+        await overlay.onSubmit(parts, JSON.stringify(layers));
         await onSaved();
         onClose();
         return;
@@ -1389,6 +1513,7 @@ export function ImageEditor({
   // ── 화면 ───────────────────────────────────────────────────
   const h = history.current;
   const textSel = isText(selected) ? selected : null;
+  const shapeOrTextSel = clip && selected && !SPECIAL.has(selected.name ?? "") ? selected : null;
   // 고른 도형·그림의 지금 색 (색 고르기 칸에 표시)
   const shapeSel = selected && !textSel && !SPECIAL.has(selected.name ?? "") ? selected : null;
   const paintColor = (() => {
@@ -1446,6 +1571,25 @@ export function ImageEditor({
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
           <div ref={holder} className="relative flex min-h-0 flex-1 items-center justify-center">
+            {clip && (
+              // 바탕 영상 (캔버스는 투명해서 그 위에 글자·스티커가 겹쳐 보임)
+              <video
+                ref={videoEl}
+                src={mediaSrc(clip.src)}
+                crossOrigin="anonymous"
+                playsInline
+                preload="auto"
+                onLoadedData={(e) => {
+                  e.currentTarget.currentTime = vtRef.current;
+                  setVideoOk(true);
+                }}
+                onCanPlay={() => setVideoOk(true)}
+                onError={() => setVideoOk(false)}
+                onPause={() => setPlaying(false)}
+                className={cx("absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black object-cover", !videoOk && "invisible")}
+                style={{ width: view.w, height: view.h }}
+              />
+            )}
             <canvas ref={canvasEl} />
             {ready && guides && preview && view.w > 0 && <SizeGuides kind={preview.kind} w={view.w} h={view.h} />}
             {ready && preview && (
@@ -1530,6 +1674,64 @@ export function ImageEditor({
               </div>
             )}
           </div>
+
+          {clip && ready && (
+            <div className="space-y-2 border-t border-white/10 px-4 pt-3 pb-2">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={togglePlay}
+                  disabled={!videoOk}
+                  aria-label={playing ? t("media.pause") : t("media.play")}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-full bg-white text-[13px] text-black disabled:opacity-40"
+                >
+                  {playing ? "❚❚" : "▶"}
+                </button>
+                <span className="tnum text-[12px] text-white/70">
+                  {fmtTime(vt - clip.start)} / {fmtTime(clip.end - clip.start)}
+                </span>
+                {shapeOrTextSel && (
+                  <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 text-[11px]">
+                    <span className="tnum text-white/55">
+                      {fmtTime((shapeOrTextSel.tStart ?? clip.start) - clip.start)}–{fmtTime((shapeOrTextSel.tEnd ?? clip.end) - clip.start)}
+                    </span>
+                    <Chip onClick={() => setTiming(shapeOrTextSel, vt, Math.max(shapeOrTextSel.tEnd ?? clip.end, vt + 0.3))}>▸ {t("media.fromHere")}</Chip>
+                    <Chip onClick={() => setTiming(shapeOrTextSel, Math.min(shapeOrTextSel.tStart ?? clip.start, vt - 0.3), vt)}>{t("media.toHere")} ◂</Chip>
+                    <Chip onClick={() => setTiming(shapeOrTextSel, clip.start, clip.end)}>{t("media.wholeClip")}</Chip>
+                  </div>
+                )}
+              </div>
+              <Timeline
+                min={clip.start}
+                max={clip.end}
+                time={vt}
+                onSeek={seekTo}
+                frames={frames}
+                tracks={timed()
+                  .map((o, i) => ({
+                    id: String(i),
+                    ...trackOf(o),
+                    start: o.tStart ?? clip.start,
+                    end: o.tEnd ?? clip.end,
+                    selected: (canvas.current?.getActiveObjects() ?? []).includes(o),
+                  }))
+                  .reverse()}
+                onTrack={(id, a, b, done) => {
+                  const o = timed()[Number(id)];
+                  if (o) setTiming(o, a, b, done);
+                }}
+                onSelect={(id) => {
+                  const o = timed()[Number(id)];
+                  const c = canvas.current;
+                  if (!o || !c) return;
+                  c.setActiveObject(o);
+                  setSelected(o);
+                  c.requestRenderAll();
+                }}
+              />
+              {timed().length === 0 && <p className="text-[11px] text-white/45">{t("media.timelineHint")}</p>}
+            </div>
+          )}
 
           {error && <p className="bg-[#ff3b5c]/15 px-4 py-2 text-[13px] text-[#ffb3c0]">{error}</p>}
 

@@ -1,6 +1,6 @@
 """동영상 편집 (ffmpeg).
 
-- edit_video  올린 동영상 자르기·소리 끄기·꾸미기(글자·스티커·그림을 그린 투명 PNG 를 영상 전체에 겹침)
+- edit_video  올린 동영상 자르기·소리 크기·꾸미기(글자·스티커·그림을 그린 투명 PNG 를 정해 둔 시간 동안 겹침)·배경 음악
 - frame_at    동영상의 한 장면을 대표 화면(JPEG)으로
 - fit_frame   사진을 다른 비율의 화면에 흐린 배경으로 맞추기 (스토리 9:16)
 
@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -86,17 +87,43 @@ def fit_frame(photo: bytes, size: tuple[int, int]) -> bytes:
     return buf.getvalue()
 
 
-def edit_video(src: Path, *, start: float = 0.0, end: float | None = None, mute: bool = False, overlay: Path | None = None) -> bytes:
-    """자르기·소리 끄기·꾸미기. 자르거나 꾸밀 때는 다시 압축해 정확한 위치에서 시작하고,
-    (꾸미기 없이) 자르기만 시간 안에 끝나지 않으면 가까운 장면 위치에서 자르는 빠른 방식으로 대신합니다.
-    overlay: 영상과 같은 비율의 투명 PNG — 영상 크기에 맞춰 늘려 처음부터 끝까지 겹칩니다."""
+@dataclass
+class Layer:
+    """꾸민 그림 한 장과 보이는 시간 (만든 영상 기준 초, None 이면 처음부터/끝까지)"""
+    path: Path
+    start: float | None = None
+    end: float | None = None
+
+
+@dataclass
+class Music:
+    """덧붙이는 소리: 만든 영상의 at 초부터, 소리 파일의 offset 초 지점부터 재생"""
+    path: Path
+    at: float = 0.0
+    offset: float = 0.0
+    volume: float = 1.0
+
+
+def edit_video(
+    src: Path, *, start: float = 0.0, end: float | None = None, mute: bool = False, overlay: Path | None = None,
+    layers: list[Layer] | None = None, music: Music | None = None, volume: float = 1.0,
+) -> bytes:
+    """자르기·소리 크기·꾸미기·배경 음악. 자르거나 꾸밀 때는 다시 압축해 정확한 위치에서 시작하고,
+    (꾸미기·음악 없이) 자르기만 시간 안에 끝나지 않으면 가까운 장면 위치에서 자르는 빠른 방식으로 대신합니다.
+    layers: 영상과 같은 비율의 투명 PNG 들 — 영상 크기에 맞춰 늘려 각자 정한 시간 동안만 겹칩니다.
+    overlay: (예전 방식) 처음부터 끝까지 겹칠 그림 한 장."""
     info = probe(src)
     duration = info["duration"] or 0.0
     start = max(0.0, min(start, max(duration - 0.5, 0.0)))
     end = duration if end is None or end <= start or (duration and end > duration) else end
     length = (end - start) if end else None
-    keep_sound = info["has_audio"] and not mute
+    volume = 0.0 if mute else max(0.0, min(volume, 2.0))
+    keep_sound = info["has_audio"] and volume > 0
     trimmed = start > 0.05 or (duration and end < duration - 0.05)
+    layers = [*(layers or []), *([Layer(overlay)] if overlay is not None else [])]
+    if length:  # 영상 밖에 놓인 꾸미기는 뺌
+        layers = [l for l in layers if (l.start or 0) < length - 0.02 and (l.end is None or l.end > 0.02)]
+    complex_ = bool(layers) or music is not None or (keep_sound and abs(volume - 1) > 0.01)
 
     with tempfile.TemporaryDirectory(prefix="iaw-edit-") as tmp:
         dst = Path(tmp) / "out.mp4"
@@ -104,30 +131,66 @@ def edit_video(src: Path, *, start: float = 0.0, end: float | None = None, mute:
         # 인스타그램 권장: H.264, 긴 변 1920 이하, 30fps
         fit = "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))',fps=30,format=yuv420p"
         x264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]
+        aac = ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"]
+
+        def graph() -> tuple[list[str], list[str], bool]:
+            """filter_complex 로 꾸미기(시간별)·소리 섞기. (입력, 출력 옵션, 소리 있음)"""
+            inputs: list[str] = []
+            parts: list[str] = []
+            vw, vh = info["width"] or 1080, info["height"] or 1920
+            cur = "[0:v]"
+            for i, layer in enumerate(layers, start=1):
+                # 그림은 한 장이라 overlay 의 기본 동작대로 마지막 장면이 계속 유지되고, enable 로 보이는 시간만 정함
+                inputs += ["-i", str(layer.path)]
+                when = ""
+                if layer.start is not None or layer.end is not None:
+                    s0 = max(0.0, layer.start or 0.0)
+                    e0 = layer.end if layer.end is not None else 1e6
+                    when = f":enable='between(t,{s0:.2f},{e0:.2f})'"
+                parts.append(f"[{i}:v]scale={vw}:{vh}[o{i}];{cur}[o{i}]overlay=0:0:format=auto{when}[v{i}]")
+                cur = f"[v{i}]"
+            parts.append(f"{cur}{fit}[v]")
+            sounds: list[str] = []
+            if keep_sound:
+                parts.append(f"[0:a]aformat=sample_rates=44100:channel_layouts=stereo,volume={volume:.2f}[a0]")
+                sounds.append("[a0]")
+            if music is not None:
+                m = len(layers) + 1
+                inputs += ["-ss", f"{max(0.0, music.offset):.2f}", "-i", str(music.path)]
+                delay = int(max(0.0, music.at) * 1000)
+                parts.append(
+                    f"[{m}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume={max(0.0, min(music.volume, 2.0)):.2f},"
+                    f"adelay={delay}:all=1[a1]"
+                )
+                sounds.append("[a1]")
+            if len(sounds) == 2:
+                parts.append("[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]")
+            elif sounds:
+                parts.append(f"{sounds[0]}anull[a]")
+            out = ["-filter_complex", ";".join(parts), "-map", "[v]", *(["-map", "[a]"] if sounds else []), *x264]
+            return inputs, out, bool(sounds)
 
         def build(reencode: bool) -> list[str]:
             seek = ["-ss", f"{start:.2f}"] if start > 0.05 else []
             inputs = [*seek, "-i", str(src)]
             sound = ["-map", "0:a:0"] if keep_sound else []
-            if overlay is not None:
-                # 꾸민 그림을 영상 크기에 맞춰 늘린 뒤 겹치고, 그다음 크기·fps 맞춤
-                inputs += ["-i", str(overlay)]
-                # (그림은 한 장이라 overlay 의 기본 동작대로 끝까지 마지막 장면이 유지됨)
-                vw, vh = info["width"] or 1080, info["height"] or 1920
-                v = ["-filter_complex", f"[1:v]scale={vw}:{vh}[ov];[0:v][ov]overlay=0:0:format=auto,{fit}[v]",
-                     "-map", "[v]", *sound, *x264]
+            has_sound = keep_sound
+            if complex_:
+                extra, v, has_sound = graph()
+                inputs += extra
             elif reencode:
                 v = ["-map", "0:v:0", *sound, "-vf", fit, *x264]
             else:
                 v = ["-map", "0:v:0", *sound, "-c:v", "copy"]
-            a = ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"] if keep_sound else ["-an"]
-            out = ["-t", f"{length:.2f}"] if length and trimmed else []
+            a = aac if has_sound else ["-an"]
+            # 음악이 영상보다 길어도 영상 길이에서 끝냄
+            out = ["-t", f"{length:.2f}"] if length and (trimmed or music is not None) else []
             return [*inputs, *v, *a, *out, "-movflags", "+faststart", str(dst)]
 
         try:
             _run(build(reencode=bool(trimmed)))
         except TimeoutError:
-            if not trimmed or overlay is not None:
+            if not trimmed or complex_:
                 raise VideoError("영상이 너무 길어 시간 안에 처리하지 못했습니다.") from None
             _run(build(reencode=False), timeout=15)
         return dst.read_bytes()
