@@ -11,8 +11,8 @@ import { Logo } from "@/components/Logo";
 import { Button, cx, inputClass, Notice } from "@/components/ui";
 import { useT } from "@/i18n/client";
 import { rich } from "@/i18n/rich";
-import { api, toApiError } from "@/lib/api";
-import type { Session } from "@/lib/types";
+import { api, toApiError, useApi } from "@/lib/api";
+import type { Health, Session } from "@/lib/types";
 
 /** 로그인 후 돌아갈 곳 (우리 사이트 안의 주소만) */
 function useNext(fallback = "/admin") {
@@ -270,9 +270,16 @@ export function SignupForm() {
   return <SimpleSignup footer={footer} onDone={(s) => router.replace(landing(s, next))} />;
 }
 
-/** 회원가입: 이름 · 생년월일 · 전화번호 · 이메일(입력하는 대로 중복 확인) · 비밀번호 */
+/** 회원가입: 이름 · 생년월일 · 전화번호 · 이메일(입력하는 대로 중복 확인) · 비밀번호.
+ *  서버에서 이메일 인증을 켜면(SIGNUP_EMAIL_VERIFY) 이메일 옆 '인증번호 받기' → 번호 입력이 함께 나옵니다. */
 function SimpleSignup({ footer, onDone }: { footer: ReactNode; onDone: (s: Session) => void }) {
   const t = useT();
+  const verify = Boolean(useApi<Health>("/health").data?.signup_email_verify);
+  const [code, setCode] = useState("");
+  const [sentTo, setSentTo] = useState<string>();
+  const [devCode, setDevCode] = useState<string>();
+  const [sending, setSending] = useState(false);
+  const [left, setLeft] = useCountdown();
   const [name, setName] = useState("");
   const [birth, setBirth] = useState("");
   const [phone, setPhone] = useState("");
@@ -302,14 +309,30 @@ function SimpleSignup({ footer, onDone }: { footer: ReactNode; onDone: (s: Sessi
     setBusy(true);
     setError(undefined);
     try {
-      onDone(await api<Session>("/auth/signup", { method: "POST", json: { email, password, name, birth_date: birth, phone } }));
+      onDone(await api<Session>("/auth/signup", { method: "POST", json: { email, password, name, birth_date: birth, phone, code } }));
     } catch (err) {
       setError(toApiError(err).message);
       setBusy(false);
     }
   }
 
+  async function sendCode() {
+    setSending(true);
+    setError(undefined);
+    try {
+      const r = await api<CodeSent>("/auth/signup/code", { method: "POST", json: { email } });
+      setSentTo(email.trim().toLowerCase());
+      setDevCode(r.dev_code);
+      setLeft(60);
+    } catch (err) {
+      setError(toApiError(err).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
   const hint = taken && taken.email === email.trim() ? (taken.available ? t("auth.emailAvailable") : t("auth.emailTaken")) : undefined;
+  const codeReady = !verify || (sentTo === email.trim().toLowerCase() && code.length === 6);
   return (
     <AuthCard title={t("auth.signupTitle")} subtitle={t("auth.signupSubtitle")} footer={footer}>
       <form onSubmit={submit} className="space-y-3">
@@ -328,17 +351,47 @@ function SimpleSignup({ footer, onDone }: { footer: ReactNode; onDone: (s: Sessi
         />
         <label className="block">
           <span className="mb-1.5 block text-[13px] font-medium text-fg-2">{t("auth.email")}</span>
-          <input
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            aria-invalid={taken?.available === false || undefined}
-            className={cx(inputClass, "h-10", taken?.available === false && "border-bad")}
-          />
+          <div className="flex gap-2">
+            <input
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={taken?.available === false || undefined}
+              className={cx(inputClass, "h-10 min-w-0 flex-1", taken?.available === false && "border-bad")}
+            />
+            {verify && (
+              <Button
+                type="button"
+                onClick={sendCode}
+                loading={sending}
+                disabled={!taken?.available || taken.email !== email.trim() || left > 0}
+                className="h-10 shrink-0"
+              >
+                {left > 0 ? t("auth.resendIn", { s: left }) : sentTo ? t("auth.resendCode") : t("auth.sendCode")}
+              </Button>
+            )}
+          </div>
           {hint && <span className={cx("mt-1 block text-[12px]", taken?.available ? "text-good" : "text-bad")}>{hint}</span>}
         </label>
+        {verify && sentTo && (
+          <div className="space-y-2">
+            <p className="text-[12px] text-fg-3">{t("auth.codeSent", { email: sentTo })}</p>
+            {devCode && <Notice tone="warn">{t("auth.devCode", { code: devCode })}</Notice>}
+            <Input
+              label={t("auth.code")}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="\d{6}"
+              maxLength={6}
+              required
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              className="tnum tracking-[0.3em]"
+            />
+          </div>
+        )}
         <Input
           label={t("auth.password")}
           hint={t("auth.passwordHint")}
@@ -351,7 +404,7 @@ function SimpleSignup({ footer, onDone }: { footer: ReactNode; onDone: (s: Sessi
         />
         <Input label={t("auth.passwordConfirm")} type="password" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
         {error && <Notice tone="bad">{error}</Notice>}
-        <Button type="submit" variant="primary" loading={busy} disabled={taken?.available === false} className="h-11 w-full">
+        <Button type="submit" variant="primary" loading={busy} disabled={taken?.available === false || !codeReady} className="h-11 w-full">
           {t("auth.signupButton")}
         </Button>
       </form>
