@@ -1,13 +1,13 @@
 "use client";
 
-/** 동영상 편집기 (아이폰 사진 앱·iMovie 처럼): 타임라인에서 자르기 · 원본 소리 크기 · 음악 넣기 · 대표 화면 ·
- *  꾸미기(글자·스티커·그리기 — 하나하나 보이는 시간을 정함).
- *  화면에서는 원본을 재생하며 바로 확인하고(꾸민 것은 그 시간에만 겹쳐 보이고 음악도 같이 들림),
- *  '저장'하면 서버가 원본에서 새로 만듭니다 (원본은 그대로 남음). */
+/** 동영상 편집기 (아이폰 사진 앱·iMovie 처럼): 타임라인에서 자르기 · 원본 소리 크기 · 음악 여러 개(곡의 원하는 구간만) ·
+ *  대표 화면(장면을 보고 고름) · 꾸미기(글자·스티커·그리기 — 하나하나 보이는 시간을 정함).
+ *  편집하는 동안은 화면에만 두고(서버·DB 에 저장하지 않음), '적용하기'를 누르면 모두 한 번에 보내 원본에서 새로 만듭니다.
+ *  음악 파일만은 빨리 적용되도록 고르자마자 미리 올려 둡니다. */
 
 import { upload as blobUpload } from "@vercel/blob/client";
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EditorPreview, OverlayPart } from "@/components/editor/ImageEditor";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
@@ -21,10 +21,18 @@ import type { Asset, Job, VideoAudio, VideoEdit } from "@/lib/types";
 const ImageEditor = dynamic(() => import("@/components/editor/ImageEditor").then((m) => m.ImageEditor), { ssr: false });
 
 const MIN_SECONDS = 3; // 인스타그램 동영상 최소 길이
+const MIN_AUDIO = 0.5; // 음악 구간 최소 길이
+const MAX_AUDIOS = 8;
 const DIRECT_AUDIO_BYTES = 4 * 1024 * 1024; // 이보다 크면 Blob 저장소에 바로 올림 (Vercel 함수 4.5MB 제한)
-const fmt = (s: number) => (Math.round(s * 10) / 10).toFixed(1);
-const sameAudio = (a: VideoAudio | null, b: VideoAudio | null) =>
-  a === b || (!!a && !!b && a.id === b.id && a.at === b.at && a.offset === b.offset && a.volume === b.volume);
+const AUDIO_COLORS = ["#0891b2", "#0d9488", "#2563eb", "#4f46e5"];
+const r1 = (x: number) => Math.round(x * 10) / 10;
+const fmt = (s: number) => r1(s).toFixed(1);
+/** 음악이 실제로 나오는 길이 (구간을 정하지 않았으면 곡 끝까지) */
+const audioLen = (a: VideoAudio) => a.length ?? Math.max(0, a.duration - a.offset);
+const audioKey = (list: VideoAudio[]) => JSON.stringify(list.map((a) => [a.id, a.at, a.offset, a.length, a.volume]));
+
+/** 꾸미기 화면에서 만든 것 (적용하기 전까지 화면에만) */
+type Deco = { parts: OverlayPart[]; layers: string; urls: string[] };
 
 export function VideoEditor({
   jobId,
@@ -45,11 +53,18 @@ export function VideoEditor({
   const edit = asset.meta?.video_edit as VideoEdit | undefined;
   const source = edit?.source ?? { url: asset.url, thumbnail_url: asset.thumbnail_url };
   // 예전 방식(영상 전체에 한 장)도 '처음부터 끝까지 보이는 꾸미기 하나'로
-  const overlays = edit?.overlays ?? (edit?.overlay_url ? [{ id: edit.overlay_id ?? "", url: edit.overlay_url, start: null, end: null }] : []);
-  const savedAudio = edit?.audio ?? null;
+  const savedOverlays = useMemo(
+    () => edit?.overlays ?? (edit?.overlay_url ? [{ id: edit.overlay_id ?? "", url: edit.overlay_url, start: null, end: null }] : []),
+    [edit],
+  );
+  const savedAudios = useMemo(
+    () => (edit?.audios ?? (edit?.audio ? [edit.audio] : [])).map((a) => ({ ...a, length: a.length ?? null, volume: a.volume ?? 1 })),
+    [edit],
+  );
   const savedVolume = edit?.mute ? 0 : (edit?.volume ?? 1);
+  const savedCover = edit?.cover_at != null ? (edit.start ?? 0) + edit.cover_at : null;
   const video = useRef<HTMLVideoElement>(null);
-  const music = useRef<HTMLAudioElement>(null);
+  const music = useRef(new Map<string, HTMLAudioElement>());
   const file = useRef<HTMLInputElement>(null);
   const [duration, setDuration] = useState(0);
   const [time, setTime] = useState(edit?.start ?? 0);
@@ -57,10 +72,13 @@ export function VideoEditor({
   const [start, setStart] = useState(edit?.start ?? 0);
   const [end, setEnd] = useState<number | null>(edit?.end ?? null);
   const [volume, setVolume] = useState(savedVolume);
-  const [audio, setAudio] = useState<VideoAudio | null>(savedAudio);
+  const [audios, setAudios] = useState<VideoAudio[]>(savedAudios);
+  const [deco, setDeco] = useState<Deco | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [cover, setCover] = useState<number | null>(edit?.cover_at != null ? (edit.start ?? 0) + edit.cover_at : null);
+  const [cover, setCover] = useState<number | null>(savedCover);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [busy, setBusy] = useState<"save" | "reset" | "audio">();
+  const [applied, setApplied] = useState(false);
   const [uploadPct, setUploadPct] = useState<number>();
   const [error, setError] = useState<string>();
   const [showPreview, setShowPreview] = useState(false);
@@ -68,9 +86,11 @@ export function VideoEditor({
   const frames = useFrames(mediaSrc(source.url), 12);
   const stop = end ?? duration;
   const length = Math.max(0, stop - start);
+  const coverFrames = useFrames(mediaSrc(source.url), 8, coverOpen && duration ? { from: start, to: stop } : null);
+  const overlays = deco ? deco.parts.map((p, i) => ({ id: `new${i}`, url: deco.urls[i], start: p.start, end: p.end })) : savedOverlays;
   const dirty =
-    start !== (edit?.start ?? 0) || end !== (edit?.end ?? null) || volume !== savedVolume || !sameAudio(audio, savedAudio) ||
-    cover !== (edit?.cover_at != null ? (edit.start ?? 0) + edit.cover_at : null);
+    start !== (edit?.start ?? 0) || end !== (edit?.end ?? null) || volume !== savedVolume || cover !== savedCover ||
+    audioKey(audios) !== audioKey(savedAudios) || deco !== null;
 
   // 화면을 연 동안 뒤 페이지가 스크롤되지 않게, Esc 로 닫기, 스페이스로 재생
   useEffect(() => {
@@ -91,25 +111,32 @@ export function VideoEditor({
       window.removeEventListener("keydown", onKey);
     };
   });
+  // 꾸미기 미리보기 그림 주소는 바뀌거나 닫을 때 정리
+  useEffect(() => () => deco?.urls.forEach((u) => URL.revokeObjectURL(u)), [deco]);
 
   useEffect(() => {
     if (video.current) video.current.volume = Math.min(1, volume);
-    if (music.current) music.current.volume = Math.min(1, audio?.volume ?? 1);
-  }, [volume, audio?.volume]);
-
-  /** 음악을 영상 위치에 맞춰 재생·멈춤 (영상 at 초 = 음악 offset 초) */
-  const syncMusic = (vt: number, play: boolean) => {
-    const m = music.current;
-    if (!m || !audio) return;
-    const pos = audio.offset + (vt - audio.at);
-    const inside = vt >= audio.at && pos < audio.duration;
-    if (!play || !inside) {
-      if (!m.paused) m.pause();
-      if (!play && inside) m.currentTime = pos;
-      return;
+    for (const a of audios) {
+      const el = music.current.get(a.id);
+      if (el) el.volume = Math.min(1, a.volume);
     }
-    if (Math.abs(m.currentTime - pos) > 0.25) m.currentTime = pos;
-    if (m.paused) void m.play().catch(() => undefined);
+  }, [volume, audios]);
+
+  /** 음악들을 영상 위치에 맞춰 재생·멈춤 (영상 at 초 = 곡 offset 초, length 초 동안) */
+  const syncMusic = (vt: number, play: boolean) => {
+    for (const a of audios) {
+      const m = music.current.get(a.id);
+      if (!m) continue;
+      const pos = a.offset + (vt - a.at);
+      const inside = vt >= a.at && pos < a.offset + audioLen(a);
+      if (!play || !inside) {
+        if (!m.paused) m.pause();
+        if (!play && inside) m.currentTime = pos;
+        continue;
+      }
+      if (Math.abs(m.currentTime - pos) > 0.25) m.currentTime = pos;
+      if (m.paused) void m.play().catch(() => undefined);
+    }
   };
 
   // 재생 중: 재생 위치를 따라가고, 자른 구간만 반복하고, 음악을 맞춤
@@ -128,7 +155,7 @@ export function VideoEditor({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, start, stop, audio]);
+  }, [playing, start, stop, audios]);
 
   const seek = (s: number) => {
     const x = Math.min(duration || s, Math.max(0, s));
@@ -149,61 +176,63 @@ export function VideoEditor({
       syncMusic(v.currentTime, false);
     }
   }
+  const pause = () => {
+    video.current?.pause();
+    setPlaying(false);
+    syncMusic(time, false);
+  };
 
   function close() {
     if (busy) return;
-    if (dirty && !window.confirm(t("editor.discardConfirm"))) return;
+    if (dirty && !window.confirm(t("media.unappliedConfirm"))) return;
     onClose();
   }
 
-  async function save(closeAfter = true) {
+  /** 적용하기: 편집한 것을 모두 한 번에 보내 원본에서 영상을 만듦 */
+  async function apply() {
     if (duration && length < MIN_SECONDS) return setError(t("media.tooShort"));
     setBusy("save");
     setError(undefined);
-    video.current?.pause();
+    setApplied(false);
+    pause();
     try {
-      const r = await api<{ job: Job }>(`/studio/${jobId}/videos/${index}/edit`, {
-        method: "POST",
-        json: {
+      const body = new FormData();
+      body.append(
+        "state",
+        JSON.stringify({
           start: start > 0.05 ? start : 0,
           end: end !== null && end < duration - 0.05 ? end : null,
-          mute: volume === 0,
           volume,
-          audio: audio && { id: audio.id, at: audio.at, offset: audio.offset, volume: audio.volume },
+          audios: audios.map((a) => ({ id: a.id, at: a.at, offset: a.offset, length: a.length, volume: a.volume })),
           cover_at: cover === null ? null : Math.max(0, cover - start),
-        },
-      });
-      onSaved(r.job);
-      if (closeAfter) onClose();
-      return true;
+          overlays_changed: deco !== null,
+        }),
+      );
+      if (deco) {
+        deco.parts.forEach((p, i) => body.append("files", p.png, `overlay${i}.png`));
+        body.append("timings", JSON.stringify(deco.parts.map((p) => [p.start, p.end])));
+        body.append("layers", deco.layers);
+      }
+      const res = await fetch(`/api/py/studio/${jobId}/videos/${index}/apply`, { method: "POST", body, credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || res.status);
+      setDeco(null);
+      onSaved(data.job);
+      setApplied(true);
     } catch (e) {
-      setError(toApiError(e).message);
-      return false;
+      setError(e instanceof Error ? e.message : toApiError(e).message);
     } finally {
       setBusy(undefined);
     }
   }
 
-  /** 꾸미기: 바꾼 게 있으면 먼저 저장하고 꾸미기 화면(사진 편집기의 꾸미기 모드)을 엶 */
-  async function decorate() {
-    if (dirty && !(await save(false))) return;
-    video.current?.pause();
-    setDecorating(true);
-  }
-
-  async function submitOverlay(parts: OverlayPart[], layers: string) {
-    const body = new FormData();
-    parts.forEach((p, i) => body.append("files", p.png, `overlay${i}.png`));
-    body.append("timings", JSON.stringify(parts.map((p) => [p.start, p.end])));
-    body.append("layers", layers);
-    setBusy("save");
-    try {
-      const res = await fetch(`/api/py/studio/${jobId}/videos/${index}/overlay`, { method: "POST", body, credentials: "include" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.detail || res.status);
-      onSaved(data.job);
-    } finally {
-      setBusy(undefined);
+  /** 꾸미기 화면에서 '완료': 화면에만 담아 둠 (적용하기 때 함께 보냄). 거기서 바꾼 자르기도 반영 */
+  async function keepDecoration(parts: OverlayPart[], layers: string, cut?: { start: number; end: number }) {
+    setDeco({ parts, layers, urls: parts.map((p) => URL.createObjectURL(p.png)) });
+    setApplied(false);
+    if (cut) {
+      setStart(cut.start > 0.05 ? r1(cut.start) : 0);
+      setEnd(duration && cut.end < duration - 0.05 ? r1(cut.end) : null);
     }
   }
 
@@ -230,15 +259,32 @@ export function VideoEditor({
       const res = await fetch(`/api/py/studio/${jobId}/videos/${index}/audio`, { method: "POST", body, credentials: "include" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.detail || res.status);
-      const at = Math.min(Math.max(time, start), Math.max(start, stop - 0.5));
-      setAudio({ id: data.id, url: data.url, name: data.name || f.name, duration: data.duration, at: Math.round(at * 10) / 10, offset: 0, volume: 1 });
-      setSelected("audio");
+      const at = Math.min(Math.max(time, start), Math.max(start, stop - MIN_AUDIO));
+      setAudios((list) => [...list, { id: data.id, url: data.url, name: data.name || f.name, duration: data.duration, at: r1(at), offset: 0, length: null, volume: 1 }]);
+      setSelected(`a:${data.id}`);
+      setApplied(false);
     } catch (e) {
       setError(t("media.audioFailed", { e: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(undefined);
       setUploadPct(undefined);
     }
+  }
+  const updateAudio = (id: string, patch: Partial<VideoAudio>) => {
+    setAudios((list) => list.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+    setApplied(false);
+  };
+
+  /** 타임라인에서 음악 막대를 끌 때: 가운데 = 위치 옮기기, 왼쪽 끝 = 곡의 시작 지점, 오른쪽 끝 = 끝나는 지점 */
+  function dragAudio(a: VideoAudio, s: number, e: number, how: "move" | "left" | "right") {
+    if (how === "move") return updateAudio(a.id, { at: r1(Math.max(0, s)) });
+    if (how === "left") {
+      // 왼쪽 끝을 끌면 곡의 더 앞/뒤에서 시작 (곡 처음보다 앞으로는 못 감)
+      const d = Math.max(-a.offset, Math.min(s - a.at, audioLen(a) - MIN_AUDIO));
+      return updateAudio(a.id, { at: r1(a.at + d), offset: r1(a.offset + d), length: r1(audioLen(a) - d) });
+    }
+    const len = Math.min(a.duration - a.offset, Math.max(MIN_AUDIO, e - a.at));
+    updateAudio(a.id, { length: r1(len) });
   }
 
   async function reset() {
@@ -256,8 +302,7 @@ export function VideoEditor({
     }
   }
 
-  // 타임라인 줄: 꾸민 것(누르면 꾸미기 화면) + 음악(끌어서 옮김)
-  const audioEnd = audio ? Math.min(stop || Infinity, audio.at + (audio.duration - audio.offset)) : 0;
+  // 타임라인 줄: 꾸민 것(꾸미기 화면에서 시간 조절) + 음악들(끌어서 옮기고 양 끝으로 구간 조절)
   const tracks: Track[] = [
     ...overlays.map((o, i) => ({
       id: `o${i}`,
@@ -269,7 +314,15 @@ export function VideoEditor({
       selected: selected === `o${i}`,
       moveOnly: true,
     })),
-    ...(audio ? [{ id: "audio", label: audio.name, icon: "🎵", start: audio.at, end: audioEnd, color: "#0891b2", selected: selected === "audio", moveOnly: true }] : []),
+    ...audios.map((a, i) => ({
+      id: `a:${a.id}`,
+      label: a.offset > 0.05 ? `${a.name} · ${fmtTime(a.offset)}~` : a.name,
+      icon: "🎵",
+      start: a.at,
+      end: Math.min(duration || Infinity, a.at + audioLen(a)),
+      color: AUDIO_COLORS[i % AUDIO_COLORS.length],
+      selected: selected === `a:${a.id}`,
+    })),
   ];
 
   const row = (label: string, value: number, max: number, set: (n: number) => void, display: string, step = 0.01) => (
@@ -308,7 +361,7 @@ export function VideoEditor({
     <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0b0c] text-white" role="dialog" aria-modal="true" aria-label={t("media.videoTitle")}>
       <header className="flex items-center gap-2 border-b border-white/10 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <button type="button" onClick={close} className="rounded-md px-2 py-1.5 text-[14px] text-white/80 hover:bg-white/10">
-          {t("editor.cancel")}
+          {t("media.close")}
         </button>
         <span className="flex-1 text-center text-[14px] font-semibold">{t("media.videoTitle")}</span>
         {edit && (
@@ -321,8 +374,8 @@ export function VideoEditor({
             {t("editor.preview")}
           </button>
         )}
-        <Button variant="primary" size="sm" onClick={() => save()} loading={busy === "save"} disabled={!!busy || !duration}>
-          {busy === "save" ? t("editor.saving") : t("editor.save")}
+        <Button variant="primary" size="sm" onClick={apply} loading={busy === "save"} disabled={!!busy || !duration || !dirty}>
+          {busy === "save" ? t("media.applyingShort") : t("media.apply")}
         </Button>
       </header>
 
@@ -336,7 +389,7 @@ export function VideoEditor({
                 src={mediaSrc(source.url)}
                 poster={mediaSrc(source.thumbnail_url) || undefined}
                 playsInline
-                preload="metadata"
+                preload="auto"
                 onLoadedMetadata={(e) => {
                   setDuration(e.currentTarget.duration);
                   e.currentTarget.currentTime = start;
@@ -345,11 +398,11 @@ export function VideoEditor({
                 className="absolute inset-0 h-full w-full rounded-lg bg-black object-contain"
               />
               {overlays.map(
-                (o, i) =>
+                (o) =>
                   (o.start == null || time >= o.start) &&
                   (o.end == null || time <= o.end) && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img key={i} src={mediaSrc(o.url)} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
+                    <img key={o.id + o.url} src={mediaSrc(o.url)} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
                   ),
               )}
               {!playing && duration > 0 && (
@@ -358,7 +411,17 @@ export function VideoEditor({
                 </span>
               )}
             </div>
-            {audio && <audio ref={music} src={mediaSrc(audio.url)} preload="auto" />}
+            {audios.map((a) => (
+              <audio
+                key={a.id}
+                ref={(el) => {
+                  if (el) music.current.set(a.id, el);
+                  else music.current.delete(a.id);
+                }}
+                src={mediaSrc(a.url)}
+                preload="auto"
+              />
+            ))}
             {(busy === "save" || busy === "audio") && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-[13px]">
                 {busy === "audio" ? t("media.audioUploading", { pct: uploadPct ?? 0 }) : t("media.applying")}
@@ -367,6 +430,16 @@ export function VideoEditor({
           </div>
 
           <div className="max-h-[52dvh] space-y-3 overflow-y-auto border-t border-white/10 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            {dirty && !busy ? (
+              <div className="flex items-center gap-2 rounded-lg bg-[#8b5cf6]/15 px-3 py-2 text-[12px] text-[#d8ccff]">
+                <span className="flex-1">{t("media.unappliedHint")}</span>
+                <button type="button" onClick={apply} disabled={!duration} className="shrink-0 rounded-md bg-[#8b5cf6] px-2.5 py-1 font-semibold text-white">
+                  {t("media.apply")}
+                </button>
+              </div>
+            ) : (
+              applied && !busy && <p className="rounded-lg bg-emerald-500/15 px-3 py-2 text-[12px] text-emerald-200">✓ {t("media.appliedHint")}</p>
+            )}
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -390,22 +463,27 @@ export function VideoEditor({
               frames={frames}
               trim={{ start, end: stop }}
               onTrim={(a, b) => {
-                setStart(Math.round(a * 10) / 10);
-                setEnd(Math.round(b * 10) / 10);
+                setStart(r1(a));
+                setEnd(r1(b));
+                setApplied(false);
               }}
               tracks={tracks}
               onSelect={setSelected}
-              onTrack={(id, a) => {
-                if (id === "audio" && audio) setAudio({ ...audio, at: Math.round(Math.max(0, a) * 10) / 10 });
+              onTrack={(id, s, e, _done, how) => {
+                const a = audios.find((x) => `a:${x.id}` === id);
+                if (a) dragAudio(a, s, e, how);
               }}
               disabled={!duration || !!busy}
             />
 
-            {/* 꾸미기 */}
+            {/* 꾸미기 · 음악 추가 */}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={decorate}
+                onClick={() => {
+                  pause();
+                  setDecorating(true);
+                }}
                 disabled={!!busy || !duration}
                 className="rounded-lg bg-white px-3 py-1.5 text-[13px] font-semibold text-black disabled:opacity-50"
               >
@@ -414,10 +492,10 @@ export function VideoEditor({
               <button
                 type="button"
                 onClick={() => file.current?.click()}
-                disabled={!!busy || !duration}
+                disabled={!!busy || !duration || audios.length >= MAX_AUDIOS}
                 className="rounded-lg border border-white/25 px-3 py-1.5 text-[13px] font-semibold disabled:opacity-50"
               >
-                🎵 {audio ? t("media.audioChange") : t("media.audioAdd")}
+                🎵 {t("media.audioAdd")}
               </button>
               <input
                 ref={file}
@@ -433,7 +511,7 @@ export function VideoEditor({
               {overlays.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => window.confirm(t("media.decorateRemoveConfirm")) && submitOverlay([], "").catch((e) => setError(toApiError(e).message))}
+                  onClick={() => window.confirm(t("media.decorateRemoveConfirm")) && setDeco({ parts: [], layers: "", urls: [] })}
                   disabled={!!busy}
                   className="rounded-md px-2 py-1 text-[12px] text-white/70 hover:bg-white/10 disabled:opacity-50"
                 >
@@ -445,15 +523,31 @@ export function VideoEditor({
 
             {/* 소리 */}
             <section className="space-y-2 rounded-lg bg-white/[0.04] p-3">
-              {row(`🔊 ${t("media.originalSound")}`, volume, 1, setVolume, volume === 0 ? t("media.off") : `${Math.round(volume * 100)}%`)}
-              {audio && (
-                <>
+              {row(
+                `🔊 ${t("media.originalSound")}`,
+                volume,
+                1,
+                (n) => {
+                  setVolume(n);
+                  setApplied(false);
+                },
+                volume === 0 ? t("media.off") : `${Math.round(volume * 100)}%`,
+              )}
+              {audios.map((a, i) => (
+                <div
+                  key={a.id}
+                  className={cx("space-y-1.5 rounded-md border px-2.5 py-2", selected === `a:${a.id}` ? "border-white/40" : "border-white/10")}
+                  onClick={() => setSelected(`a:${a.id}`)}
+                >
                   <div className="flex items-center gap-2 text-[12px]">
-                    <span className="truncate font-medium">🎵 {audio.name}</span>
-                    <span className="tnum shrink-0 text-white/50">{fmtTime(audio.duration)}</span>
+                    <span className="size-2.5 shrink-0 rounded-full" style={{ background: AUDIO_COLORS[i % AUDIO_COLORS.length] }} />
+                    <span className="truncate font-medium">🎵 {a.name}</span>
+                    <span className="tnum shrink-0 text-white/50">
+                      {fmtTime(a.offset)}–{fmtTime(a.offset + audioLen(a))} / {fmtTime(a.duration)}
+                    </span>
                     <button
                       type="button"
-                      onClick={() => setAudio({ ...audio, at: Math.round(Math.max(start, time) * 10) / 10 })}
+                      onClick={() => updateAudio(a.id, { at: r1(Math.max(start, time)) })}
                       disabled={!!busy}
                       className="ml-auto shrink-0 rounded-md border border-white/20 px-2 py-0.5 text-[11px] hover:bg-white/10"
                     >
@@ -462,8 +556,9 @@ export function VideoEditor({
                     <button
                       type="button"
                       onClick={() => {
-                        music.current?.pause();
-                        setAudio(null);
+                        music.current.get(a.id)?.pause();
+                        setAudios((list) => list.filter((x) => x.id !== a.id));
+                        setApplied(false);
                       }}
                       disabled={!!busy}
                       className="shrink-0 rounded-md px-2 py-0.5 text-[11px] text-[#ff8fa3] hover:bg-white/10"
@@ -471,38 +566,79 @@ export function VideoEditor({
                       {t("media.audioRemove")}
                     </button>
                   </div>
-                  {row(`🎵 ${t("media.audioVolume")}`, audio.volume, 1, (n) => setAudio({ ...audio, volume: n }), `${Math.round(audio.volume * 100)}%`)}
+                  {row(t("media.audioVolume"), a.volume, 1, (n) => updateAudio(a.id, { volume: n }), `${Math.round(a.volume * 100)}%`)}
                   {row(
                     t("media.audioOffset"),
-                    audio.offset,
-                    Math.max(0, audio.duration - 1),
-                    (n) => {
-                      setAudio({ ...audio, offset: Math.round(n * 10) / 10 });
-                      if (music.current && !playing) music.current.currentTime = n;
-                    },
-                    `${fmt(audio.offset)}s`,
+                    a.offset,
+                    Math.max(0, a.duration - MIN_AUDIO),
+                    (n) => updateAudio(a.id, { offset: r1(n), length: a.length === null ? null : r1(Math.min(a.length, a.duration - n)) }),
+                    fmtTime(a.offset),
                     0.1,
                   )}
-                  <p className="text-[11px] text-white/45">{t("media.audioHint")}</p>
-                </>
-              )}
+                </div>
+              ))}
+              {audios.length > 0 && <p className="text-[11px] text-white/45">{t("media.audioHint")}</p>}
             </section>
 
-            {/* 대표 화면 */}
-            <div className="flex flex-wrap items-center gap-2 text-[13px]">
-              <span className="text-white/85">🖼️ {t("media.cover")}</span>
-              <button
-                type="button"
-                onClick={() => setCover(Math.min(Math.max(time, start), stop))}
-                disabled={!duration || !!busy}
-                className="rounded-md border border-white/20 px-2 py-1 text-[12px] hover:bg-white/10 disabled:opacity-50"
-              >
-                {t("media.useThisFrame")}
-              </button>
-              <button type="button" onClick={() => cover !== null && seek(cover)} className="tnum text-[12px] text-white/60 underline-offset-2 hover:underline">
-                {cover === null ? t("media.coverDefault") : t("media.coverAt", { s: fmt(cover - start) })}
-              </button>
-            </div>
+            {/* 대표 화면: 장면을 보고 고름 */}
+            <section className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="text-white/85">🖼️ {t("media.cover")}</span>
+                <span className="tnum text-[12px] text-white/60">
+                  {cover === null ? t("media.coverDefault") : t("media.coverAt", { s: fmt(cover - start) })}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCoverOpen((v) => !v)}
+                  disabled={!duration || !!busy}
+                  className="rounded-md border border-white/20 px-2 py-1 text-[12px] hover:bg-white/10 disabled:opacity-50"
+                >
+                  {coverOpen ? t("media.coverClose") : t("media.coverPick")}
+                </button>
+              </div>
+              {coverOpen && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8">
+                    {Array.from({ length: 8 }, (_, i) => {
+                      const at = r1(start + ((i + 0.5) / 8) * length);
+                      const on = cover !== null && Math.abs(cover - at) < 0.06;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            setCover(at);
+                            seek(at);
+                            setApplied(false);
+                          }}
+                          className={cx("relative aspect-[9/16] overflow-hidden rounded-md bg-white/10", on ? "ring-2 ring-[#ffd60a]" : "opacity-80 hover:opacity-100")}
+                        >
+                          {coverFrames[i] && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={coverFrames[i]} alt="" className="h-full w-full object-cover" />
+                          )}
+                          <span className="tnum absolute right-0.5 bottom-0.5 rounded bg-black/60 px-1 text-[10px]">{fmt(at - start)}s</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCover(r1(Math.min(Math.max(time, start), stop)));
+                        setApplied(false);
+                      }}
+                      disabled={!duration || !!busy}
+                      className="rounded-md border border-white/20 px-2 py-1 hover:bg-white/10 disabled:opacity-50"
+                    >
+                      {t("media.useThisFrame")}
+                    </button>
+                    <span className="text-white/45">{t("media.coverHint")}</span>
+                  </div>
+                </div>
+              )}
+            </section>
             {error && <p className="rounded-md bg-red-500/15 px-2 py-1.5 text-[12px] text-red-300">{error}</p>}
           </div>
         </div>
@@ -526,9 +662,9 @@ export function VideoEditor({
             title: t("media.decorateTitle"),
             // 꾸미지 않은 원본의 장면을 바탕으로 (꾸민 결과 장면엔 이미 글자가 들어 있어서)
             baseUrl: source.thumbnail_url,
-            layers: edit?.overlay_layers || undefined,
-            video: { src: source.url, start, end: stop },
-            onSubmit: submitOverlay,
+            layers: (deco ? deco.layers : edit?.overlay_layers) || undefined,
+            video: { src: source.url, start, end: stop, duration },
+            onSubmit: keepDecoration,
           }}
           onClose={() => setDecorating(false)}
           onSaved={() => undefined}

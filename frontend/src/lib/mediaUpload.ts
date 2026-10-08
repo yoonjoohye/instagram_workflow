@@ -1,10 +1,12 @@
 /** 사진·동영상 올리기 (만들기 화면·작업 공간 공통).
  *  - 사진: 줄여서 서버(/media/uploads)로
- *  - 동영상: 대표 화면은 사진처럼, 원본은 Blob 저장소에 직접 올린 뒤 서버에 등록 (Vercel 함수 4.5MB 제한을 피하려고) */
+ *  - 동영상: 대표 화면은 사진처럼, 영상은 인스타그램 크기로 줄인 뒤(shrinkVideo) Blob 저장소에 직접 올리고 서버에 등록
+ *    (Vercel 함수 4.5MB 제한을 피하려고) */
 
 import { upload as blobUpload } from "@vercel/blob/client";
 import type { T } from "@/i18n/core";
 import { api } from "@/lib/api";
+import { shrinkVideo } from "@/lib/shrinkVideo";
 import { captureCover, uploadImageBlob, uploadPhoto } from "@/lib/uploads";
 
 export const MAX_VIDEO_MB = 300;
@@ -14,10 +16,12 @@ export type UploadStep = { label: string; done: number; total: number; pct?: num
 export const isMedia = (f: File) => f.type.startsWith("image/") || f.type.startsWith("video/");
 export const tooBig = (f: File) => f.type.startsWith("video/") && f.size > MAX_VIDEO_MB * 1024 * 1024;
 
-async function uploadVideo(file: File, t: T, onStep: (s: UploadStep) => void, index: number, total: number): Promise<string> {
+async function uploadVideo(original: File, t: T, onStep: (s: UploadStep) => void, index: number, total: number): Promise<string> {
   onStep({ label: t("studio.stepCover"), done: index, total });
-  const cover = await captureCover(file, t);
-  const coverId = await uploadImageBlob(cover.image, file.name, t);
+  const cover = await captureCover(original, t);
+  const coverId = await uploadImageBlob(cover.image, original.name, t);
+  // 큰 영상은 인스타그램 크기로 줄여서 올림 (올리는 시간이 몇 배 짧아짐)
+  const file = await shrinkVideo(original, (pct) => onStep({ label: t("studio.stepShrinkVideo", { pct }), done: index, total, pct }));
   let url: string;
   try {
     const ext = file.name.split(".").pop()?.toLowerCase() || "mp4";

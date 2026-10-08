@@ -1,6 +1,9 @@
-"""올린 동영상 편집: POST /studio/{job}/videos/{i}/edit → 자르기·소리 크기·배경 음악·대표 화면,
-POST /studio/{job}/videos/{i}/overlay → 꾸미기(글자·스티커·그림을 그린 투명 PNG 들을 각자 정한 시간 동안 겹침),
-POST /studio/{job}/videos/{i}/audio → 덧붙일 소리 파일 올리기 (적용은 edit 에서).
+"""올린 동영상 편집.
+- POST /studio/{job}/videos/{i}/apply → '적용하기': 자르기·소리 크기·음악(여러 개)·대표 화면·꾸미기를 한 번에 받아 영상을 만듦
+  (편집하는 동안은 화면에만 두고 서버·DB 에 저장하지 않음)
+- POST /studio/{job}/videos/{i}/audio → 덧붙일 소리 파일 올리기 (빨리 적용되게 고르자마자 미리 올려 둠)
+- POST /studio/{job}/videos/{i}/edit → 원래대로(reset) · 예전 화면 호환
+- POST /studio/{job}/videos/{i}/overlay → (예전 방식) 꾸미기만
 
 원본은 meta.video_edit.source 에 남겨 두고 언제나 원본에서 다시 만들므로, 몇 번을 고쳐도 화질이 떨어지지 않고
 '원래대로'(reset)도 됩니다. 만든 영상은 Vercel Blob 에 두고 MediaBlob(kind="render") 로 기록합니다.
@@ -86,7 +89,11 @@ class AudioIn(BaseModel):
     id: str = Field(max_length=40)  # /audio 로 올린 소리 파일
     at: float = Field(default=0.0, ge=0, le=3600)  # 원본 영상 기준 몇 초부터 들릴지
     offset: float = Field(default=0.0, ge=0, le=3600)  # 소리 파일의 몇 초 지점부터
+    length: float | None = Field(default=None, gt=0, le=3600)  # 몇 초 동안 (없으면 소리 파일 끝까지)
     volume: float = Field(default=1.0, ge=0, le=2)
+
+
+MAX_AUDIOS = 8
 
 
 class VideoEditIn(BaseModel):
@@ -94,7 +101,7 @@ class VideoEditIn(BaseModel):
     end: float | None = Field(default=None, ge=0, le=3600)  # None = 끝까지
     mute: bool = False  # 소리 끄기
     volume: float | None = Field(default=None, ge=0, le=2)  # 원본 소리 크기 (보내지 않으면 그대로)
-    audio: AudioIn | None = None  # 덧붙인 소리 (필드를 보내지 않으면 그대로, null 이면 빼기)
+    audios: list[AudioIn] | None = Field(default=None, max_length=MAX_AUDIOS)  # 덧붙인 소리들 (보내지 않으면 그대로)
     cover_at: float | None = Field(default=None, ge=0, le=3600)  # 대표 화면 위치 (자른 영상 기준 초)
     reset: bool = False  # 원래대로
 
@@ -108,7 +115,9 @@ def _state(edit: dict) -> dict:
         "start": edit.get("start", 0.0), "end": edit.get("end"), "mute": edit.get("mute", False),
         "volume": edit.get("volume", 1.0), "cover_at": edit.get("cover_at"),
         "overlays": [{"id": o["id"], "start": o.get("start"), "end": o.get("end")} for o in layers],
-        "overlay_layers": edit.get("overlay_layers", ""), "audio": edit.get("audio"),
+        "overlay_layers": edit.get("overlay_layers", ""),
+        # 예전 저장본은 소리 하나(audio)
+        "audios": [{k: a.get(k) for k in ("id", "at", "offset", "length", "volume")} for a in (edit.get("audios") or ([edit["audio"]] if edit.get("audio") else []))],
     }
 
 
@@ -145,9 +154,9 @@ def _apply(
     previous_cover = asset.get("thumbnail_url", "") if edit.get("cover_id") else ""
     previous = _state(edit)
     start, end, mute, volume = state["start"], state["end"], state["mute"], state["volume"]
-    overlays, audio = ([], None) if reset else (state["overlays"], state["audio"])
+    overlays, audios = ([], []) if reset else (state["overlays"], state["audios"])
     overlay_blobs = [_own(db, account, o["id"], "overlay") for o in overlays]
-    audio_blob = _own(db, account, audio["id"], "audio") if audio else None
+    audio_blobs = [_own(db, account, a["id"], "audio") for a in audios]
 
     if reset:
         meta.pop("video_edit", None)
@@ -155,7 +164,7 @@ def _apply(
     else:
         with tempfile.TemporaryDirectory(prefix="iaw-ve-") as tmp:
             src = _local_copy(_source_blob(db, account, source["url"]), Path(tmp) / "src")
-            plain = not (start > 0 or end or mute or overlays or audio or abs(volume - 1) > 0.01)
+            plain = not (start > 0 or end or mute or overlays or audios or abs(volume - 1) > 0.01)
             url, cover_url, cover_id = source["url"], source["thumbnail_url"], ""
             out = src
             if not plain:
@@ -166,11 +175,17 @@ def _apply(
                     path = Path(tmp) / f"overlay{i}.png"
                     path.write_bytes(blob.data)
                     layers.append(vid.Layer(path, rel(o.get("start")), rel(o.get("end"))))
-                music = None
-                if audio and audio_blob is not None:
-                    at = audio.get("at", 0.0) - start
-                    offset = audio.get("offset", 0.0) + max(0.0, -at)  # 자른 앞부분에서 시작하던 소리는 그만큼 건너뜀
-                    music = vid.Music(_local_copy(audio_blob, Path(tmp) / "music"), max(0.0, at), offset, audio.get("volume", 1.0))
+                music = []
+                for k, (a, blob) in enumerate(zip(audios, audio_blobs)):
+                    at = (a.get("at") or 0.0) - start
+                    skip = max(0.0, -at)  # 자른 앞부분에서 시작하던 소리는 그만큼 건너뜀
+                    length = a.get("length")
+                    if length is not None:
+                        length -= skip
+                        if length <= 0.05:
+                            continue
+                    path = _local_copy(blob, Path(tmp) / f"music{k}")
+                    music.append(vid.Music(path, max(0.0, at), (a.get("offset") or 0.0) + skip, a.get("volume", 1.0), length))
                 data = _encode(vid.edit_video, src, start=start, end=end, mute=mute, layers=layers, music=music, volume=volume)
                 out = Path(tmp) / "out.mp4"
                 out.write_bytes(data)
@@ -186,8 +201,10 @@ def _apply(
             "cover_at": state["cover_at"], "cover_id": cover_id, "duration": round(duration, 2),
             "overlays": [{**o, "url": overlay_url(o["id"])} for o in overlays],
             "overlay_layers": state["overlay_layers"] if overlays else "",
-            "audio": {**audio, "url": audio_blob.url or _media_url(audio["id"]), "name": audio_blob.cover_id or "", "duration": audio_blob.width / 1000}
-            if audio and audio_blob is not None else None,
+            "audios": [
+                {**a, "url": blob.url or _media_url(a["id"]), "name": blob.cover_id or "", "duration": blob.width / 1000}
+                for a, blob in zip(audios, audio_blobs)
+            ],
         }
         new = {**asset, "url": url, "thumbnail_url": cover_url, "meta": meta}
 
@@ -198,8 +215,8 @@ def _apply(
         if old is not None and old.account_id == account.id and old.kind == "slide":
             db.delete(old)
     # 더는 쓰지 않는 꾸민 그림·소리 파일 지우기
-    keep = {o["id"] for o in overlays} | ({audio["id"]} if audio else set())
-    stale = [o["id"] for o in previous["overlays"]] + ([previous["audio"]["id"]] if previous["audio"] else [])
+    keep = {o["id"] for o in overlays} | {a["id"] for a in audios}
+    stale = [o["id"] for o in previous["overlays"]] + [a["id"] for a in previous["audios"]]
     discard_assets(db, account, [i for i in stale if i not in keep])
     assets[index] = new
     job.assets = assets
@@ -222,7 +239,7 @@ def discard_assets(db: Session, account: Account, ids: list[str]) -> None:
 def edit_assets(edit: dict) -> list[str]:
     """편집 상태가 쓰는 꾸민 그림·소리 파일 id 들 (게시물을 지울 때 함께 지우려고)"""
     st = _state(edit)
-    return [o["id"] for o in st["overlays"]] + ([st["audio"]["id"]] if st["audio"] else [])
+    return [o["id"] for o in st["overlays"]] + [a["id"] for a in st["audios"]]
 
 
 def overlay_url(blob_id: str) -> str:
@@ -246,8 +263,8 @@ def edit_video(
     state.update(start=body.start, end=body.end, mute=body.mute, cover_at=body.cover_at)
     if body.volume is not None:
         state["volume"] = body.volume
-    if "audio" in body.model_fields_set:
-        state["audio"] = body.audio.model_dump() if body.audio else None
+    if body.audios is not None:
+        state["audios"] = [a.model_dump() for a in body.audios]
     return _apply(db, account, job, assets, index, state, reset=body.reset)
 
 
@@ -291,29 +308,74 @@ async def overlay_video(
     file: UploadFile | None = File(default=None),  # (예전 방식) 영상 전체에 겹칠 한 장
     timings: str = Form(default="", max_length=20_000),  # [[시작, 끝], ...] 원본 영상 기준 초, null 은 처음/끝
     layers: str = Form(default="", max_length=2_000_000),  # 다시 꾸밀 때 불러올 편집기 상태
+    start: float | None = Form(default=None, ge=0, le=3600),  # 꾸미기 화면에서 자르기도 바꿨으면 (보내면 end 가 없을 때 끝까지)
+    end: float | None = Form(default=None, ge=0, le=3600),
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ) -> dict:
     job, assets, asset = _video_job(db, account, job_id, index)
     state = _state((asset.get("meta") or {}).get("video_edit") or {})
-    uploads = [*files, *([file] if file is not None else [])]
+    if start is not None:
+        state.update(start=start, end=end)
+    overlays = await _new_overlays(db, account, [*files, *([file] if file is not None else [])], timings)
+    state.update(overlays=overlays, overlay_layers=layers if overlays else "")
+    return _apply(db, account, job, assets, index, state)
+
+
+async def _new_overlays(db: Session, account: Account, uploads: list[UploadFile], timings: str) -> list[dict]:
+    """꾸민 그림 PNG 들을 저장하고 [{id, start, end}] 를 돌려줌 (빈 그림은 뺌)"""
     if len(uploads) > MAX_OVERLAYS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "꾸미기는 30개까지 넣을 수 있습니다.")
-    times = _parse_timings(timings, len(uploads))
     overlays = []
-    for up, (s, e) in zip(uploads, times):
+    for up, (s, e) in zip(uploads, _parse_timings(timings, len(uploads))):
         img = _read_overlay(await up.read())
         if img is None:
             continue
         buf = io.BytesIO()
-        img.save(buf, "PNG", optimize=True)
+        img.save(buf, "PNG", compress_level=3)  # 빠르게 (optimize 는 느림)
         blob = MediaBlob(id=secrets.token_urlsafe(18), account_id=account.id, kind="overlay", data=buf.getvalue(),
                          content_type="image/png", width=img.width, height=img.height)
         db.add(blob)
-        db.commit()
         overlays.append({"id": blob.id, "start": s, "end": e})
-    state.update(overlays=overlays, overlay_layers=layers if overlays else "")
-    return _apply(db, account, job, assets, index, state)
+    db.commit()
+    return overlays
+
+
+class ApplyIn(BaseModel):
+    start: float = Field(default=0.0, ge=0, le=3600)
+    end: float | None = Field(default=None, ge=0, le=3600)
+    volume: float = Field(default=1.0, ge=0, le=2)  # 원본 소리 (0 이면 끔)
+    audios: list[AudioIn] = Field(default_factory=list, max_length=MAX_AUDIOS)
+    cover_at: float | None = Field(default=None, ge=0, le=3600)  # 자른 영상 기준 초
+    overlays_changed: bool = False  # 꾸미기를 고쳤으면 files·timings·layers 로 새로, 아니면 지금 꾸미기 그대로
+
+
+@router.post("/studio/{job_id}/videos/{index}/apply")
+async def apply_video(
+    job_id: int,
+    index: int,
+    state: str = Form(max_length=20_000),  # ApplyIn (JSON)
+    files: list[UploadFile] = File(default=[]),
+    timings: str = Form(default="", max_length=20_000),
+    layers: str = Form(default="", max_length=2_000_000),
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+) -> dict:
+    """'적용하기': 편집한 것을 모두 한 번에 받아 원본에서 영상을 만듭니다."""
+    try:
+        body = ApplyIn.model_validate_json(state)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "편집 내용이 올바르지 않습니다.") from exc
+    job, assets, asset = _video_job(db, account, job_id, index)
+    current = _state((asset.get("meta") or {}).get("video_edit") or {})
+    new = {
+        **current, "start": body.start, "end": body.end, "mute": body.volume == 0, "volume": body.volume,
+        "cover_at": body.cover_at, "audios": [a.model_dump() for a in body.audios],
+    }
+    if body.overlays_changed:
+        overlays = await _new_overlays(db, account, files, timings)
+        new.update(overlays=overlays, overlay_layers=layers if overlays else "")
+    return _apply(db, account, job, assets, index, new)
 
 
 MAX_AUDIO_BYTES = 60 * 1024 * 1024

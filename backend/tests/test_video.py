@@ -161,6 +161,7 @@ def test_video_timed_overlays_and_music(client, login, account, db):
     assert r.status_code == 200, r.text
     edit = r.json()["asset"]["meta"]["video_edit"]
     assert [(o["start"], o["end"]) for o in edit["overlays"]] == [(1, 2), (4, None)]
+    assert edit["start"] == 1  # 자르기를 보내지 않으면 그대로
     out = r.json()["asset"]["url"]
     y = _frame_at(client, out, 0.5)  # 원본 1.5초 → 노랑
     assert y[0] > 200 and y[1] > 180 and y[2] < 90
@@ -168,6 +169,15 @@ def test_video_timed_overlays_and_music(client, login, account, db):
     assert red[0] > 150 and red[1] < 90
     g = _frame_at(client, out, 4.0)  # 원본 5초 → 초록 (파란 영상 위)
     assert g[1] > 150 and g[0] < 90
+
+    # 꾸미기 화면에서 자르기도 함께 바꿈 (end 없으면 끝까지)
+    cut = client.post(f"/studio/{job.id}/videos/0/overlay", files=[("files", ("a.png", _png((255, 230, 0, 255)), "image/png"))],
+                      data={"timings": "[[1, 2]]", "start": "0.5", "end": "5"}).json()["asset"]["meta"]["video_edit"]
+    assert cut["start"] == 0.5 and cut["end"] == 5 and abs(cut["duration"] - 4.5) < 0.3
+    r = client.post(f"/studio/{job.id}/videos/0/overlay",
+                    files=[("files", ("a.png", _png((255, 230, 0, 255)), "image/png")), ("files", ("b.png", _png((0, 220, 0, 255)), "image/png"))],
+                    data={"timings": "[[1, 2], [4, null]]", "start": "1"})
+    assert r.json()["asset"]["meta"]["video_edit"]["end"] is None
 
     # 음악: 소리 없는 영상으로 만들고(mute) 음악만 넣어도 소리가 생김
     with tempfile.TemporaryDirectory() as tmp:
@@ -180,20 +190,66 @@ def test_video_timed_overlays_and_music(client, login, account, db):
     bad = client.post(f"/studio/{job.id}/videos/0/audio", files={"file": ("x.mp3", b"nope", "audio/mpeg")})
     assert bad.status_code == 400
 
-    r = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 1, "mute": True, "audio": {"id": audio["id"], "at": 2, "offset": 3, "volume": 0.8}})
+    r = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 1, "mute": True, "audios": [{"id": audio["id"], "at": 2, "offset": 3, "volume": 0.8}]})
     assert r.status_code == 200, r.text
     edit = r.json()["asset"]["meta"]["video_edit"]
-    assert edit["audio"]["id"] == audio["id"] and edit["audio"]["name"] == "song.mp3" and len(edit["overlays"]) == 2
+    assert edit["audios"][0]["id"] == audio["id"] and edit["audios"][0]["name"] == "song.mp3" and len(edit["overlays"]) == 2
     got = info(client, r.json()["asset"]["url"])
     assert got["has_audio"] and abs(got["duration"] - 5) < 0.3  # 음악이 길어도 영상 길이에서 끝남
 
-    # 자르기만 바꾸면(audio 를 보내지 않으면) 음악은 그대로, null 이면 빼고 파일도 정리
+    # 자르기만 바꾸면(audios 를 보내지 않으면) 음악은 그대로, 빈 목록이면 빼고 파일도 정리
     kept = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 0, "mute": True}).json()["asset"]
-    assert kept["meta"]["video_edit"]["audio"]["id"] == audio["id"]
-    removed = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 0, "mute": True, "audio": None}).json()["asset"]
-    assert removed["meta"]["video_edit"]["audio"] is None and not info(client, removed["url"])["has_audio"]
+    assert kept["meta"]["video_edit"]["audios"][0]["id"] == audio["id"]
+    removed = client.post(f"/studio/{job.id}/videos/0/edit", json={"start": 0, "mute": True, "audios": []}).json()["asset"]
+    assert removed["meta"]["video_edit"]["audios"] == [] and not info(client, removed["url"])["has_audio"]
     db.expire_all()
     assert db.get(MediaBlob, audio["id"]) is None
+
+
+def _song(client, job_id: int, name: str, seconds: int) -> dict:
+    with tempfile.TemporaryDirectory() as tmp:
+        mp3 = Path(tmp) / "m.mp3"
+        subprocess.run([vid.ffmpeg(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"sine=frequency=660:duration={seconds}", str(mp3)], check=True)
+        r = client.post(f"/studio/{job_id}/videos/0/audio", files={"file": (name, mp3.read_bytes(), "audio/mpeg")}, data={"name": name})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_video_apply_everything_at_once(client, login, account, db):
+    """적용하기: 자르기·원본 소리·음악 여러 개(구간 자르기 포함)·꾸미기를 한 번에 받아 한 번만 만듦.
+    꾸미기를 고치지 않았으면(overlays_changed=false) 지금 꾸미기를 그대로 씀."""
+    import json as _json
+    login(account)
+    src = blob(db, account, clip(), "video", "video/mp4")
+    cover = blob(db, account, b"x", "upload", "image/jpeg")
+    job = GenerationJob(
+        account_id=account.id, prompt="p", media_kind="REELS", status="ready", provider="studio", caption="", hashtags=[],
+        assets=[{"type": "video", "url": url(src), "thumbnail_url": url(cover), "meta": {}}], plan={"slides": [{}]},
+    )
+    db.add(job)
+    db.commit()
+    a1, a2 = _song(client, job.id, "a.mp3", 10), _song(client, job.id, "b.mp3", 10)
+    state = {"start": 1, "volume": 0, "cover_at": 1,
+             "audios": [{"id": a1["id"], "at": 1, "offset": 4, "length": 1.5}, {"id": a2["id"], "at": 3, "volume": 0.5}],
+             "overlays_changed": True}
+    r = client.post(f"/studio/{job.id}/videos/0/apply", data={"state": _json.dumps(state), "timings": "[[1, 2]]", "layers": "{}"},
+                    files=[("files", ("a.png", _png((255, 230, 0, 255)), "image/png"))])
+    assert r.status_code == 200, r.text
+    edit = r.json()["asset"]["meta"]["video_edit"]
+    assert edit["start"] == 1 and edit["mute"] and [a["id"] for a in edit["audios"]] == [a1["id"], a2["id"]]
+    assert edit["audios"][0]["length"] == 1.5 and len(edit["overlays"]) == 1
+    got = info(client, r.json()["asset"]["url"])
+    assert got["has_audio"] and abs(got["duration"] - 5) < 0.3
+
+    # 꾸미기는 그대로, 음악 하나 빼기 → 빠진 파일은 정리
+    state.update(audios=[{"id": a2["id"], "at": 3}], overlays_changed=False)
+    r = client.post(f"/studio/{job.id}/videos/0/apply", data={"state": _json.dumps(state)})
+    edit = r.json()["asset"]["meta"]["video_edit"]
+    assert len(edit["overlays"]) == 1 and [a["id"] for a in edit["audios"]] == [a2["id"]]
+    db.expire_all()
+    assert db.get(MediaBlob, a1["id"]) is None
+    bad = client.post(f"/studio/{job.id}/videos/0/apply", data={"state": "{nope"})
+    assert bad.status_code == 422
 
 
 def test_fit_frame_keeps_whole_photo_on_other_ratio():

@@ -118,12 +118,14 @@ export type VideoEdit = {
   /** (예전 방식) 영상 전체에 겹친 한 장 */
   overlay_id?: string;
   overlay_url?: string;
-  /** 덧붙인 음악 */
+  /** 덧붙인 음악들 */
+  audios?: VideoAudio[];
+  /** (예전 저장본) 음악 하나 */
   audio?: VideoAudio | null;
 };
 
-/** 동영상에 덧붙인 소리: 원본 영상 at 초부터, 소리 파일의 offset 초 지점부터 */
-export type VideoAudio = { id: string; url: string; name: string; duration: number; at: number; offset: number; volume: number };
+/** 동영상에 덧붙인 소리: 원본 영상 at 초부터, 소리 파일의 offset 초 지점부터 length 초 동안 (null 이면 파일 끝까지) */
+export type VideoAudio = { id: string; url: string; name: string; duration: number; at: number; offset: number; length: number | null; volume: number };
 
 export type Quota = { used: number; total: number; remaining: number };
 

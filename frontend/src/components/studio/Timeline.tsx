@@ -28,11 +28,15 @@ export const fmtTime = (s: number) => {
 };
 
 /** 영상에서 장면 n 개를 뽑아 작은 그림으로 (다른 주소라 못 읽으면 빈 목록 — 띠는 단색으로) */
-export function useFrames(src: string, count = 10) {
+export function useFrames(src: string, count = 10, range?: { from: number; to: number } | null) {
+  const from = range?.from;
+  const to = range?.to;
+  const off = range === null;
   const [frames, setFrames] = useState<string[]>([]);
   useEffect(() => {
-    if (!src) return;
+    if (!src || off) return; // null: 아직 필요 없음 (예: 대표 화면 고르기를 열기 전)
     let alive = true;
+    setFrames([]);
     const v = document.createElement("video");
     v.crossOrigin = "anonymous";
     v.muted = true;
@@ -56,7 +60,9 @@ export function useFrames(src: string, count = 10) {
             resolve();
           };
           v.addEventListener("seeked", done);
-          v.currentTime = Math.min(d - 0.05, ((i + 0.5) / count) * d);
+          const a = from ?? 0;
+          const b = Math.min(d, to ?? d);
+          v.currentTime = Math.min(d - 0.05, a + ((i + 0.5) / count) * (b - a));
         });
         try {
           ctx.drawImage(v, 0, 0, w, h);
@@ -73,7 +79,7 @@ export function useFrames(src: string, count = 10) {
       v.removeAttribute("src");
       v.load();
     };
-  }, [src, count]);
+  }, [src, count, from, to, off]);
   return frames;
 }
 
@@ -102,7 +108,8 @@ export function Timeline({
   trim?: { start: number; end: number };
   onTrim?: (start: number, end: number) => void;
   tracks?: Track[];
-  onTrack?: (id: string, start: number, end: number, done: boolean) => void;
+  /** how: 막대 가운데를 끌었는지(move), 왼쪽 끝(left)·오른쪽 끝(right)을 끌었는지 */
+  onTrack?: (id: string, start: number, end: number, done: boolean, how: "move" | "left" | "right") => void;
   onSelect?: (id: string) => void;
   disabled?: boolean;
 }) {
@@ -146,11 +153,11 @@ export function Timeline({
       let en = d.e0;
       if (d.kind === "move") {
         const len = d.e0 - d.s0;
-        s = Math.min(Math.max(min, d.s0 + dt), Math.max(min, max - len));
+        s = Math.min(Math.max(min, d.s0 + dt), Math.max(min, max - Math.min(len, MIN_LEN * 2)));
         en = s + len;
       } else if (d.kind === "left") s = Math.min(Math.max(min, d.s0 + dt), d.e0 - MIN_LEN);
       else en = Math.max(Math.min(max, d.e0 + dt), d.s0 + MIN_LEN);
-      onTrack(d.id, s, en, done);
+      onTrack(d.id, s, en, done, d.kind);
       onSeek(d.kind === "right" ? en - 0.01 : s);
     }
   };

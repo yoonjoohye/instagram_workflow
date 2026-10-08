@@ -275,8 +275,9 @@ export type OverlayMode = {
   title: string;
   baseUrl: string;
   layers?: string;
-  video?: { src: string; start: number; end: number };
-  onSubmit: (parts: OverlayPart[], layers: string) => Promise<void>;
+  /** start·end: 지금 자른 구간, duration: 원본 길이 (꾸미면서 자르기도 바꿀 수 있음) */
+  video?: { src: string; start: number; end: number; duration: number };
+  onSubmit: (parts: OverlayPart[], layers: string, cut?: { start: number; end: number }) => Promise<void>;
 };
 const DEFAULT_SPAN = 3; // 새로 넣은 글자·스티커가 보이는 시간 (초)
 const round1 = (x: number) => Math.round(x * 10) / 10;
@@ -317,6 +318,10 @@ export function ImageEditor({
   const clip = overlay?.video;
   const videoEl = useRef<HTMLVideoElement>(null);
   const [vt, setVt] = useState(clip?.start ?? 0);
+  // 자른 구간 (꾸미기 화면에서도 노란 틀로 바꿀 수 있음)
+  const [clipCut, setClipCut] = useState({ start: clip?.start ?? 0, end: clip?.end ?? 0 });
+  const cutRef = useRef(clipCut);
+  cutRef.current = clipCut;
   const vtRef = useRef(vt);
   vtRef.current = vt;
   const [playing, setPlaying] = useState(false);
@@ -488,9 +493,10 @@ export function ImageEditor({
           c.on("object:added", ({ target }) => {
             const o = target as Named;
             if (!readyRef.current || history.current.restoring || SPECIAL.has(o.name ?? "") || o.tStart !== undefined) return;
-            const s0 = Math.min(vtRef.current, Math.max(clip.start, clip.end - DEFAULT_SPAN));
+            const k = cutRef.current;
+            const s0 = Math.min(vtRef.current, Math.max(k.start, k.end - DEFAULT_SPAN));
             o.tStart = round1(s0);
-            o.tEnd = round1(Math.min(clip.end, s0 + DEFAULT_SPAN));
+            o.tEnd = round1(Math.min(k.end, s0 + DEFAULT_SPAN));
           });
           base()?.set({ visible: true }); // 영상을 못 불러오면 장면 사진이 바탕
         }
@@ -731,15 +737,24 @@ export function ImageEditor({
     const f = fab.current!;
     const o = selected;
     if (!isText(o)) return;
-    const color = typeof o.fill === "string" && o.fill !== "#ffffff" ? o.fill : "#ff3b5c";
+    const was = glowOf(o);
+    if (was === glow) return;
+    // 네온: 글자는 흰 심지, 고른 색은 바깥 빛으로. 네온을 끄면 그 빛 색을 다시 글자 색으로
+    const fill = typeof o.fill === "string" ? o.fill : "#ffffff";
+    const neonColor = was === "neon" ? String((o.shadow as F.Shadow).color) : fill.toLowerCase() !== "#ffffff" ? fill : "#ff3b5c";
     await setTextProp({
       shadow:
         glow === "none"
           ? null
           : glow === "neon"
-            ? new f.Shadow({ color, blur: 22, offsetX: 0, offsetY: 0 })
+            ? new f.Shadow({ color: neonColor, blur: 22, offsetX: 0, offsetY: 0 })
             : new f.Shadow({ color: "rgba(0,0,0,0.45)", blur: 12, offsetX: 0, offsetY: 3 }),
+      ...(glow === "neon" ? { fill: "#ffffff" } : was === "neon" ? { fill: neonColor } : {}),
     } as Partial<F.IText>);
+  }
+  /** 네온 빛 색 (글자 색과 따로 고름) */
+  function pickGlowColor(c: string) {
+    return setTextProp({ shadow: new fab.current!.Shadow({ color: c, blur: 22, offsetX: 0, offsetY: 0 }) } as Partial<F.IText>);
   }
   /** 외곽선 켜고 끄기 (글자 뒤에 칠해서 글자 모양이 가늘어지지 않게) */
   function textOutline() {
@@ -1397,7 +1412,8 @@ export function ImageEditor({
     const tick = () => {
       const v = videoEl.current;
       if (v) {
-        if (v.currentTime >= clip.end - 0.03 || v.currentTime < clip.start - 0.3) v.currentTime = clip.start; // 자른 구간만 반복
+        const k = cutRef.current;
+        if (v.currentTime >= k.end - 0.03 || v.currentTime < k.start - 0.3) v.currentTime = k.start; // 자른 구간만 반복
         if (Math.abs(v.currentTime - vtRef.current) >= 0.05) setVt(v.currentTime);
       }
       raf = requestAnimationFrame(tick);
@@ -1407,7 +1423,7 @@ export function ImageEditor({
   }, [clip, playing]);
   const seekTo = (s0: number) => {
     if (!clip) return;
-    const x = Math.min(clip.end, Math.max(clip.start, s0));
+    const x = Math.min(clip.duration || clipCut.end, Math.max(0, s0)); // 자르기 틀을 끄는 중에도 그 위치를 보여 줌
     if (videoEl.current) videoEl.current.currentTime = x;
     setVt(x);
   };
@@ -1415,7 +1431,7 @@ export function ImageEditor({
     const v = videoEl.current;
     if (!v || !clip) return;
     if (v.paused) {
-      if (v.currentTime >= clip.end - 0.05) v.currentTime = clip.start;
+      if (v.currentTime >= clipCut.end - 0.05) v.currentTime = clipCut.start;
       void v.play();
       setPlaying(true);
     } else {
@@ -1425,9 +1441,9 @@ export function ImageEditor({
   };
   function setTiming(o: Named, s0: number, e0: number, commit = true) {
     if (!clip) return;
-    const a = Math.max(clip.start, Math.min(s0, clip.end - 0.3));
+    const a = Math.max(clipCut.start, Math.min(s0, clipCut.end - 0.3));
     o.tStart = round1(a);
-    o.tEnd = round1(Math.min(clip.end, Math.max(e0, a + 0.3)));
+    o.tEnd = round1(Math.min(clipCut.end, Math.max(e0, a + 0.3)));
     force((n) => n + 1);
     if (commit) snapshot();
   }
@@ -1473,7 +1489,7 @@ export function ImageEditor({
         c.backgroundColor = bg;
         c.renderAll();
         const layers: Layers = { v: 1, w: size.current.w, h: size.current.h, canvas: c.toObject(KEEP), adjust: adjustRef.current, crop: cropRef.current };
-        await overlay.onSubmit(parts, JSON.stringify(layers));
+        await overlay.onSubmit(parts, JSON.stringify(layers), clip ? clipCut : undefined);
         await onSaved();
         onClose();
         return;
@@ -1549,7 +1565,7 @@ export function ImageEditor({
     <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0b0c] text-white" role="dialog" aria-modal="true" aria-label={overlay?.title ?? t("editor.title")}>
       <header className="flex items-center gap-2 border-b border-white/10 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <button type="button" onClick={close} className="rounded-md px-2 py-1.5 text-[14px] text-white/80 hover:bg-white/10">
-          {t("editor.cancel")}
+          {clip ? `← ${t("editor.back")}` : t("editor.cancel")}
         </button>
         <span className="flex-1 text-center text-[14px] font-semibold">{overlay?.title ?? t("editor.title")}</span>
         <button type="button" disabled={h.at <= 0} onClick={() => restore(h.at - 1)} aria-label={t("editor.undo")} className="rounded-md px-2 py-1.5 text-lg disabled:opacity-30">
@@ -1564,7 +1580,7 @@ export function ImageEditor({
           </button>
         )}
         <Button variant="primary" size="sm" onClick={save} loading={saving} disabled={!ready}>
-          {saving ? t("editor.saving") : t("editor.save")}
+          {saving ? t("editor.saving") : clip ? t("editor.done") : t("editor.save")}
         </Button>
       </header>
 
@@ -1688,22 +1704,27 @@ export function ImageEditor({
                   {playing ? "❚❚" : "▶"}
                 </button>
                 <span className="tnum text-[12px] text-white/70">
-                  {fmtTime(vt - clip.start)} / {fmtTime(clip.end - clip.start)}
+                  {fmtTime(vt - clipCut.start)} / {fmtTime(clipCut.end - clipCut.start)}
                 </span>
                 {shapeOrTextSel && (
                   <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 text-[11px]">
                     <span className="tnum text-white/55">
-                      {fmtTime((shapeOrTextSel.tStart ?? clip.start) - clip.start)}–{fmtTime((shapeOrTextSel.tEnd ?? clip.end) - clip.start)}
+                      {fmtTime((shapeOrTextSel.tStart ?? clipCut.start) - clipCut.start)}–{fmtTime((shapeOrTextSel.tEnd ?? clipCut.end) - clipCut.start)}
                     </span>
-                    <Chip onClick={() => setTiming(shapeOrTextSel, vt, Math.max(shapeOrTextSel.tEnd ?? clip.end, vt + 0.3))}>▸ {t("media.fromHere")}</Chip>
-                    <Chip onClick={() => setTiming(shapeOrTextSel, Math.min(shapeOrTextSel.tStart ?? clip.start, vt - 0.3), vt)}>{t("media.toHere")} ◂</Chip>
-                    <Chip onClick={() => setTiming(shapeOrTextSel, clip.start, clip.end)}>{t("media.wholeClip")}</Chip>
+                    <Chip onClick={() => setTiming(shapeOrTextSel, vt, Math.max(shapeOrTextSel.tEnd ?? clipCut.end, vt + 0.3))}>▸ {t("media.fromHere")}</Chip>
+                    <Chip onClick={() => setTiming(shapeOrTextSel, Math.min(shapeOrTextSel.tStart ?? clipCut.start, vt - 0.3), vt)}>{t("media.toHere")} ◂</Chip>
+                    <Chip onClick={() => setTiming(shapeOrTextSel, clipCut.start, clipCut.end)}>{t("media.wholeClip")}</Chip>
                   </div>
                 )}
               </div>
               <Timeline
-                min={clip.start}
-                max={clip.end}
+                min={0}
+                max={clip.duration || clipCut.end}
+                trim={clipCut}
+                onTrim={(a, b) => {
+                  setClipCut({ start: round1(a), end: round1(b) });
+                  setDirty(true);
+                }}
                 time={vt}
                 onSeek={seekTo}
                 frames={frames}
@@ -1711,8 +1732,8 @@ export function ImageEditor({
                   .map((o, i) => ({
                     id: String(i),
                     ...trackOf(o),
-                    start: o.tStart ?? clip.start,
-                    end: o.tEnd ?? clip.end,
+                    start: o.tStart ?? clipCut.start,
+                    end: o.tEnd ?? clipCut.end,
                     selected: (canvas.current?.getActiveObjects() ?? []).includes(o),
                   }))
                   .reverse()}
@@ -1818,7 +1839,15 @@ export function ImageEditor({
                           setCharStyle({ fontSize: v });
                         }}
                       />
+                      {/* 네온이면 글자 색과 빛 색을 따로 */}
+                      {glowOf(textSel) === "neon" && <span className="block text-[11px] text-white/45">{t("editor.textColor")}</span>}
                       <Swatches value={String(charStyleValue("fill") ?? textSel.fill)} onPick={(c) => setCharStyle({ fill: c })} customLabel={t("editor.customColor")} />
+                      {glowOf(textSel) === "neon" && (
+                        <>
+                          <span className="block text-[11px] text-white/45">{t("editor.glowColor")}</span>
+                          <Swatches value={String((textSel.shadow as F.Shadow).color)} onPick={pickGlowColor} customLabel={t("editor.customColor")} />
+                        </>
+                      )}
                       <Row>
                         <span className="shrink-0 text-[11px] text-white/45">{t("editor.font")}</span>
                         {(fonts.data?.data ?? []).map((fo) => (

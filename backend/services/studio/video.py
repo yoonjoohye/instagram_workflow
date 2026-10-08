@@ -97,16 +97,17 @@ class Layer:
 
 @dataclass
 class Music:
-    """덧붙이는 소리: 만든 영상의 at 초부터, 소리 파일의 offset 초 지점부터 재생"""
+    """덧붙이는 소리: 만든 영상의 at 초부터, 소리 파일의 offset 초 지점부터 length 초 동안(None 이면 끝까지) 재생"""
     path: Path
     at: float = 0.0
     offset: float = 0.0
     volume: float = 1.0
+    length: float | None = None
 
 
 def edit_video(
     src: Path, *, start: float = 0.0, end: float | None = None, mute: bool = False, overlay: Path | None = None,
-    layers: list[Layer] | None = None, music: Music | None = None, volume: float = 1.0,
+    layers: list[Layer] | None = None, music: list[Music] | None = None, volume: float = 1.0,
 ) -> bytes:
     """자르기·소리 크기·꾸미기·배경 음악. 자르거나 꾸밀 때는 다시 압축해 정확한 위치에서 시작하고,
     (꾸미기·음악 없이) 자르기만 시간 안에 끝나지 않으면 가까운 장면 위치에서 자르는 빠른 방식으로 대신합니다.
@@ -123,14 +124,18 @@ def edit_video(
     layers = [*(layers or []), *([Layer(overlay)] if overlay is not None else [])]
     if length:  # 영상 밖에 놓인 꾸미기는 뺌
         layers = [l for l in layers if (l.start or 0) < length - 0.02 and (l.end is None or l.end > 0.02)]
-    complex_ = bool(layers) or music is not None or (keep_sound and abs(volume - 1) > 0.01)
+    music = [m for m in (music or []) if m.length is None or m.length > 0.05]
+    if length:  # 영상이 끝난 뒤에 시작하는 소리는 뺌
+        music = [m for m in music if m.at < length - 0.05]
+    complex_ = bool(layers) or bool(music) or (keep_sound and abs(volume - 1) > 0.01)
 
     with tempfile.TemporaryDirectory(prefix="iaw-edit-") as tmp:
         dst = Path(tmp) / "out.mp4"
 
         # 인스타그램 권장: H.264, 긴 변 1920 이하, 30fps
         fit = "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))',fps=30,format=yuv420p"
-        x264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]
+        # 빠르게: superfast + 조금 낮은 crf 로 화질을 맞춤 (인스타그램이 어차피 다시 압축)
+        x264 = ["-c:v", "libx264", "-preset", "superfast", "-crf", "20"]
         aac = ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"]
 
         def graph() -> tuple[list[str], list[str], bool]:
@@ -154,17 +159,18 @@ def edit_video(
             if keep_sound:
                 parts.append(f"[0:a]aformat=sample_rates=44100:channel_layouts=stereo,volume={volume:.2f}[a0]")
                 sounds.append("[a0]")
-            if music is not None:
-                m = len(layers) + 1
-                inputs += ["-ss", f"{max(0.0, music.offset):.2f}", "-i", str(music.path)]
-                delay = int(max(0.0, music.at) * 1000)
+            for k, mu in enumerate(music, start=1):
+                m = len(layers) + k
+                cut = ["-t", f"{mu.length:.2f}"] if mu.length else []
+                inputs += ["-ss", f"{max(0.0, mu.offset):.2f}", *cut, "-i", str(mu.path)]
+                delay = int(max(0.0, mu.at) * 1000)
                 parts.append(
-                    f"[{m}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume={max(0.0, min(music.volume, 2.0)):.2f},"
-                    f"adelay={delay}:all=1[a1]"
+                    f"[{m}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume={max(0.0, min(mu.volume, 2.0)):.2f},"
+                    f"adelay={delay}:all=1[m{k}]"
                 )
-                sounds.append("[a1]")
-            if len(sounds) == 2:
-                parts.append("[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]")
+                sounds.append(f"[m{k}]")
+            if len(sounds) > 1:
+                parts.append(f"{''.join(sounds)}amix=inputs={len(sounds)}:duration=longest:dropout_transition=0:normalize=0[a]")
             elif sounds:
                 parts.append(f"{sounds[0]}anull[a]")
             out = ["-filter_complex", ";".join(parts), "-map", "[v]", *(["-map", "[a]"] if sounds else []), *x264]
@@ -184,7 +190,7 @@ def edit_video(
                 v = ["-map", "0:v:0", *sound, "-c:v", "copy"]
             a = aac if has_sound else ["-an"]
             # 음악이 영상보다 길어도 영상 길이에서 끝냄
-            out = ["-t", f"{length:.2f}"] if length and (trimmed or music is not None) else []
+            out = ["-t", f"{length:.2f}"] if length and (trimmed or music) else []
             return [*inputs, *v, *a, *out, "-movflags", "+faststart", str(dst)]
 
         try:
