@@ -59,7 +59,15 @@ async def graph_error_handler(request: Request, exc: GraphError) -> JSONResponse
 
 
 @app.get("/health")
-def health(request: Request) -> dict:
+def health(request: Request, warm: bool = False) -> dict:
+    if warm:
+        # 화면을 열자마자 불러 서버와 DB(Neon 은 쉬면 잠듦)를 미리 깨워 둠 — 사진·영상을 고를 때 기다리지 않게
+        from sqlalchemy import text
+
+        from .db import engine
+
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
     return {
         "ok": True,
         "meta_configured": settings.meta_configured,

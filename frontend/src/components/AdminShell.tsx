@@ -1,5 +1,6 @@
 "use client";
 
+import { pendingUploads, useUploads } from "@/lib/localMedia";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useEffect, useState, type ReactNode } from "react";
@@ -47,6 +48,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const session = useApi<Session>("/auth/session");
   const unauthorized = session.error?.status === 401;
+  // 서버와 DB 를 미리 깨워 둠 (쉬고 있던 서버는 처음 깨어나는 데 몇 초 걸려서, 사진·영상을 고를 때 기다리지 않게)
+  useEffect(() => {
+    void fetch("/api/py/health?warm=1", { cache: "no-store" }).catch(() => undefined);
+  }, []);
 
   // 로그인하지 않았으면 로그인 화면으로 (끝나면 이 화면으로 돌아옴)
   useEffect(() => {
@@ -84,7 +89,32 @@ export function AdminShell({ children }: { children: ReactNode }) {
   return (
     <SessionContext.Provider value={{ session: s, refresh: session.reload }}>
       {s.account ? <MeContext.Provider value={{ me: s.account, refreshMe: session.reload }}>{page}</MeContext.Provider> : page}
+      <UploadToast />
     </SessionContext.Provider>
+  );
+}
+
+/** 뒤에서 올리는 중인 동영상 (편집은 바로 할 수 있고, 적용·게시 때만 기다림) */
+function UploadToast() {
+  const t = useT();
+  useUploads();
+  const list = pendingUploads();
+  if (!list.length) return null;
+  const failed = list.find((u) => u.error);
+  const pct = Math.round(list.reduce((n, u) => n + u.pct, 0) / list.length);
+  return (
+    <div className="fixed right-4 bottom-4 z-[80] flex items-center gap-2 rounded-full bg-black/85 px-3.5 py-2 text-[12px] text-white shadow-lg" role="status">
+      {failed ? (
+        <span className="text-[#ff8fa3]">{t("studio.videoUploadFailed", { e: failed.error ?? "" })}</span>
+      ) : (
+        <>
+          <span className="h-1.5 w-20 overflow-hidden rounded-full bg-white/20">
+            <span className="block h-full bg-[#8b5cf6] transition-[width]" style={{ width: `${pct}%` }} />
+          </span>
+          {t("studio.bgUploading", { n: list.length, pct })}
+        </>
+      )}
+    </div>
   );
 }
 

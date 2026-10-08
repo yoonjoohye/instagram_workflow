@@ -1,15 +1,15 @@
 """SQLAlchemy 엔진/세션.
 
 로컬은 SQLite, Vercel 배포는 Postgres(Neon) — DATABASE_URL 만 바꾸면 됩니다.
-서버리스에서는 커넥션을 재사용하면 안 되므로 Postgres 일 때 NullPool 을 씁니다.
+Postgres 일 때는 작은 커넥션 풀을 다시 써서 요청마다 연결을 새로 맺는 시간(수백 ms)을 아낍니다.
 """
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterator
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import NullPool
 
 from .config import settings
 from .models import Base
@@ -27,11 +27,13 @@ def _normalize(url: str) -> str:
 _url = _normalize(settings.database_url)
 _is_sqlite = _url.startswith("sqlite")
 
+# 연결을 매번 새로 맺으면(Neon 까지 TLS·인증) 요청마다 수백 ms 가 더 걸려서, 작은 풀로 다시 씁니다.
+# 서버리스 인스턴스가 잠들었다 깨면 끊긴 연결이 남을 수 있어 꺼내기 전에 확인(pre_ping)하고, Neon 이 닫기 전에 갈아 줍니다(recycle).
 engine = create_engine(
     _url,
     future=True,
     pool_pre_ping=not _is_sqlite,
-    poolclass=None if _is_sqlite else NullPool,
+    **({} if _is_sqlite else {"pool_size": 2, "max_overflow": 4, "pool_recycle": 240, "pool_timeout": 10}),
     connect_args={"check_same_thread": False} if _is_sqlite else {},
 )
 
@@ -77,8 +79,31 @@ _BACKFILL = {
 }
 
 
+def _schema_fingerprint() -> str:
+    """테이블·컬럼 정의가 바뀌었는지 알아보는 값"""
+    parts = [f"{t.name}:{','.join(sorted(c.name for c in t.columns))}" for t in sorted(Base.metadata.tables.values(), key=lambda t: t.name)]
+    parts += [f"{t}+{','.join(sorted(cols))}" for t, cols in sorted(_ADDED_COLUMNS.items())]
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
+
+
 def init_db() -> None:
-    """마이그레이션 도구 없이 쓸 수 있도록 기동 시 테이블을 보장합니다."""
+    """마이그레이션 도구 없이 쓸 수 있도록 기동 시 테이블을 보장합니다.
+    콜드 스타트마다 모든 테이블을 하나하나 확인하면 몇 초씩 걸려서, 정의가 그대로면 한 번의 조회로 끝냅니다."""
+    fp = _schema_fingerprint()
+    try:
+        with engine.connect() as conn:
+            if conn.execute(text("SELECT v FROM schema_meta WHERE k = 'fp'")).scalar() == fp:
+                return
+    except Exception:  # noqa: BLE001 - 처음(표가 없음)이면 아래에서 만듦
+        pass
+    _migrate()
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE IF NOT EXISTS schema_meta (k VARCHAR(16) PRIMARY KEY, v VARCHAR(64) NOT NULL)"))
+        conn.execute(text("DELETE FROM schema_meta WHERE k = 'fp'"))
+        conn.execute(text("INSERT INTO schema_meta (k, v) VALUES ('fp', :v)"), {"v": fp})
+
+
+def _migrate() -> None:
     Base.metadata.create_all(engine)
     inspector = inspect(engine)
     with engine.begin() as conn:

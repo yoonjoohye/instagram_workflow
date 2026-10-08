@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
  *  짧게 쓰는 업로드 토큰만 여기서 발급합니다. 로그인한 사용자에게만. */
 const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 60 * 1024 * 1024;
+const RESERVED = /^videos\/v-[A-Za-z0-9]{30,}\.(mp4|mov|m4v)$/;
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json()) as HandleUploadBody;
@@ -12,7 +13,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const result = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (pathname) => {
+      onBeforeGenerateToken: async (pathname, clientPayload) => {
         // 백엔드 세션 확인 (같은 쿠키로 /auth/me 호출)
         const me = await fetch(new URL("/api/py/auth/me", request.url), {
           headers: { cookie: request.headers.get("cookie") ?? "" },
@@ -27,7 +28,9 @@ export async function POST(request: Request): Promise<NextResponse> {
             ? ["audio/mpeg", "audio/mp3", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/wav", "audio/x-wav", "audio/wave", "audio/ogg", "audio/webm", "audio/flac"]
             : ["video/mp4", "video/quicktime", "video/x-m4v"],
           maximumSizeInBytes: audio ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES,
-          addRandomSuffix: true, // 주소를 추측할 수 없게
+          // 주소를 추측할 수 없게: 보통은 뒤에 무작위 글자를 붙이고,
+          // 미리 정해 둔 주소(/media/videos/reserve — 이미 추측할 수 없는 이름)로 올릴 때는 그 이름 그대로
+          addRandomSuffix: !(clientPayload === "reserved" && RESERVED.test(pathname)),
           tokenPayload: JSON.stringify({ accountId: account.id }),
         };
       },

@@ -1,3 +1,4 @@
+import { localSrc } from "@/lib/localMedia";
 import { DEFAULT_LOCALE, INTL_LOCALE, type Locale } from "@/i18n/config";
 import { translate, type MessageKey, type Vars } from "@/i18n/core";
 import type { IgPost, JobStatus, MediaKind, MetricKey } from "./types";
@@ -103,9 +104,12 @@ export function fmtDuration(value: number | null | undefined, unit: "s" | "ms" =
   return tf("format.hourMin", { h: Math.floor(m / 60), m: m % 60 });
 }
 
-/** 우리 서버가 제공하는 이미지(/api/py/media/…)는 접속 도메인과 무관하게 보이도록 상대 주소로 바꿉니다. */
+/** 우리 서버가 제공하는 이미지(/api/py/media/…)는 접속 도메인과 무관하게 보이도록 상대 주소로 바꿉니다.
+ *  아직 뒤에서 올리는 중인 동영상은 기기 안의 파일로 (바로 재생·편집). */
 export function mediaSrc(url: string | undefined | null) {
   if (!url) return "";
+  const local = localSrc(url);
+  if (local) return local;
   const i = url.indexOf("/api/py/media/");
   return i >= 0 ? url.slice(i) : url;
 }

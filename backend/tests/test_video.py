@@ -257,3 +257,23 @@ def test_fit_frame_keeps_whole_photo_on_other_ratio():
     Image.new("RGB", (200, 100), "red").save(buf, "JPEG")
     out = Image.open(io.BytesIO(vid.fit_frame(buf.getvalue(), (90, 160))))
     assert out.size == (90, 160) and out.getpixel((45, 80))[0] > 200
+
+
+def test_reserve_video_address_before_upload(client, login, account, db, monkeypatch):
+    """동영상 주소를 먼저 정해 등록 (브라우저는 바로 편집하고 뒤에서 그 주소로 올림). 저장소가 없으면 503."""
+    from backend.services import blobstore
+
+    login(account)
+    cover = blob(db, account, b"x", "upload", "image/jpeg")
+    assert client.post("/media/videos/reserve", json={"cover_id": cover.id}).status_code == 503
+    monkeypatch.setattr(blobstore, "enabled", lambda: True)
+    monkeypatch.setattr(blobstore, "store_id", lambda: "AbC123")
+    r = client.post("/media/videos/reserve", json={"cover_id": cover.id, "width": 1080, "height": 1920, "ext": "mov"})
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["url"] == f"https://abc123.public.blob.vercel-storage.com/{data['pathname']}"
+    assert data["pathname"].startswith("videos/v-") and data["pathname"].endswith(".mov") and len(data["pathname"]) > 40
+    saved = db.get(MediaBlob, data["id"])
+    assert saved.kind == "video" and saved.url == data["url"] and saved.content_type == "video/quicktime"
+    assert client.post("/media/videos/reserve", json={"cover_id": "nope"}).status_code == 404
+    assert client.post("/media/videos/reserve", json={"cover_id": cover.id, "ext": "exe"}).status_code == 422

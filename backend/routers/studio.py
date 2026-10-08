@@ -105,6 +105,31 @@ def register_video(body: VideoIn, account: Account = Depends(current_account), d
     return {"id": blob.id, "url": body.url, "thumbnail_url": _media_url(body.cover_id)}
 
 
+class VideoReserveIn(BaseModel):
+    cover_id: str = Field(max_length=40)  # 브라우저가 뽑아 먼저 올린 대표 화면
+    width: int = Field(default=0, ge=0, le=10000)
+    height: int = Field(default=0, ge=0, le=10000)
+    ext: str = Field(default="mp4", pattern=r"^(mp4|mov|m4v)$")
+
+
+@router.post("/media/videos/reserve", status_code=status.HTTP_201_CREATED)
+def reserve_video(body: VideoReserveIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """동영상을 다 올리기 전에 주소를 먼저 정해 등록합니다 — 브라우저는 바로 편집을 시작하고, 그 주소로 뒤에서 올립니다.
+    (주소는 추측할 수 없는 이름, 실제 파일은 브라우저가 올린 뒤에 생김)"""
+    if not blobstore.enabled():
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "동영상 저장소가 설정되지 않았습니다.")
+    _blobs(db, account, [body.cover_id])  # 대표 화면이 내 사진인지 확인
+    pathname = f"videos/v-{secrets.token_urlsafe(24).replace('_', 'x').replace('-', 'y')}.{body.ext}"
+    url = f"https://{blobstore.store_id().lower()}.public.blob.vercel-storage.com/{pathname}"
+    blob = MediaBlob(
+        id=secrets.token_urlsafe(18), account_id=account.id, kind="video", data=b"", url=url, cover_id=body.cover_id,
+        content_type="video/quicktime" if body.ext == "mov" else "video/mp4", width=body.width, height=body.height,
+    )
+    db.add(blob)
+    db.commit()
+    return {"id": blob.id, "url": url, "pathname": pathname, "thumbnail_url": _media_url(body.cover_id)}
+
+
 @router.get("/media/{blob_id}.png")  # 스티커(투명 PNG) — 저장된 형식(content_type) 그대로 내려줌
 @router.get("/media/{blob_id}.jpg")
 def serve_media(blob_id: str, db: Session = Depends(get_db)) -> Response:

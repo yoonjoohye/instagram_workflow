@@ -6,6 +6,7 @@
 import { upload as blobUpload } from "@vercel/blob/client";
 import type { T } from "@/i18n/core";
 import { api } from "@/lib/api";
+import { startBackgroundUpload } from "@/lib/localMedia";
 import { shrinkVideo } from "@/lib/shrinkVideo";
 import { captureCover, uploadImageBlob, uploadPhoto } from "@/lib/uploads";
 
@@ -20,6 +21,28 @@ async function uploadVideo(original: File, t: T, onStep: (s: UploadStep) => void
   onStep({ label: t("studio.stepCover"), done: index, total });
   const cover = await captureCover(original, t);
   const coverId = await uploadImageBlob(cover.image, original.name, t);
+  // 빠른 길: 주소를 먼저 정해 등록하고 바로 돌아감 (편집은 기기 안의 파일로 바로), 줄이기·올리기는 뒤에서
+  const ext = original.name.split(".").pop()?.toLowerCase();
+  try {
+    const r = await api<{ id: string; url: string; pathname: string }>("/media/videos/reserve", {
+      method: "POST",
+      json: { cover_id: coverId, width: cover.width, height: cover.height, ext: ext === "mov" || ext === "m4v" ? ext : "mp4" },
+    });
+    startBackgroundUpload(r.url, original, async (onPct) => {
+      const file = await shrinkVideo(original, (pct) => onPct(Math.round(pct * 0.3)));
+      await blobUpload(r.pathname, file, {
+        access: "public",
+        handleUploadUrl: "/api/blob/upload",
+        clientPayload: "reserved",
+        contentType: file.type || "video/mp4",
+        multipart: file.size > 20 * 1024 * 1024,
+        onUploadProgress: ({ percentage }) => onPct(30 + Math.round(percentage * 0.7)),
+      });
+    });
+    return r.id;
+  } catch {
+    // 저장소 설정이 없는 곳(로컬 등)은 예전처럼 다 올린 뒤에
+  }
   // 큰 영상은 인스타그램 크기로 줄여서 올림 (올리는 시간이 몇 배 짧아짐)
   const file = await shrinkVideo(original, (pct) => onStep({ label: t("studio.stepShrinkVideo", { pct }), done: index, total, pct }));
   let url: string;

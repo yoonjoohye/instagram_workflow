@@ -71,7 +71,15 @@ function useCountdown() {
 
 type CodeSent = { sent: boolean; dev_code?: string };
 
+/** 로그인·가입 화면을 열면 서버와 DB 를 미리 깨워 둠 (첫 요청이 몇 초씩 걸리지 않게) */
+function useWarmUp() {
+  useEffect(() => {
+    void fetch("/api/py/health?warm=1", { cache: "no-store" }).catch(() => undefined);
+  }, []);
+}
+
 export function LoginForm() {
+  useWarmUp();
   const t = useT();
   const router = useRouter();
   const next = useNext();
@@ -252,6 +260,7 @@ function CodeFlow({
 }
 
 export function SignupForm() {
+  useWarmUp();
   const t = useT();
   const router = useRouter();
   const next = useNext();

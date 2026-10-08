@@ -3,6 +3,7 @@
 /** 작업 공간: 왼쪽에서 사진·동영상(직접 편집 / AI로 수정)·음악·캡션·자동 응답을 고치고,
  *  오른쪽에 고정된 미리보기로 올라갈 모습을 바로 확인한 뒤 임시저장 / 게시합니다. */
 
+import { waitForUploads } from "@/lib/localMedia";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
@@ -131,6 +132,8 @@ export function Review({
     setPublishing(true);
     setError(undefined);
     try {
+      // 뒤에서 아직 올리는 중인 동영상이 있으면 다 올라간 뒤에 게시 (인스타그램이 그 주소에서 가져가서)
+      await waitForUploads(job!.assets.map((a) => a.url));
       let published = await api<Job>("/workflow/publish", { method: "POST", json: { job_id: job!.id, share_to_feed: shareToFeed } });
       onChange(published);
       // 스토리는 한 번에 다 못 올리면(서버 시간 제한) 이어서 요청합니다.

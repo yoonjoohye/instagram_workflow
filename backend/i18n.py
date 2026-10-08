@@ -175,6 +175,7 @@ CATALOG: dict[str, tuple[str, str]] = {
     # 회원 (routers/members.py) · 연동 (routers/auth.py) · 메일 (services/mailer.py)
     "이미지가 너무 큽니다 (최대 8MB).": ("The image is too large (max 8MB).", "画像が大きすぎます(最大8MB)。"),
     "꾸민 그림을 찾을 수 없습니다.": ("Decoration image not found.", "装飾の画像が見つかりません。"),
+    "동영상 저장소가 설정되지 않았습니다.": ("Video storage isn't configured.", "動画ストレージが設定されていません。"),
     "편집 내용이 올바르지 않습니다.": ("The edit details are invalid.", "編集内容が正しくありません。"),
     "꾸미기 시간이 올바르지 않습니다.": ("The decoration timing is invalid.", "デコの表示時間が正しくありません。"),
     "꾸미기는 30개까지 넣을 수 있습니다.": ("You can add up to 30 decorations.", "デコは30個まで入れられます。"),

@@ -16,6 +16,7 @@ import { Button, cx } from "@/components/ui";
 import { useT } from "@/i18n/client";
 import { api, toApiError } from "@/lib/api";
 import { mediaSrc } from "@/lib/format";
+import { pendingUploads, useUploads, waitForUploads } from "@/lib/localMedia";
 import type { Asset, Job, VideoAudio, VideoEdit } from "@/lib/types";
 
 const ImageEditor = dynamic(() => import("@/components/editor/ImageEditor").then((m) => m.ImageEditor), { ssr: false });
@@ -83,6 +84,8 @@ export function VideoEditor({
   const [error, setError] = useState<string>();
   const [showPreview, setShowPreview] = useState(false);
   const [decorating, setDecorating] = useState(false);
+  useUploads(); // 뒤에서 올리는 중인 원본 영상 진행률을 다시 그림
+  const sourceUpload = pendingUploads().find((u) => u.url === source.url);
   const frames = useFrames(mediaSrc(source.url), 12);
   const stop = end ?? duration;
   const length = Math.max(0, stop - start);
@@ -196,6 +199,8 @@ export function VideoEditor({
     setApplied(false);
     pause();
     try {
+      // 원본 영상이 아직 올라가는 중이면 다 올라갈 때까지 (서버가 그 파일로 만들어서)
+      await waitForUploads([source.url]);
       const body = new FormData();
       body.append(
         "state",
@@ -424,7 +429,11 @@ export function VideoEditor({
             ))}
             {(busy === "save" || busy === "audio") && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-[13px]">
-                {busy === "audio" ? t("media.audioUploading", { pct: uploadPct ?? 0 }) : t("media.applying")}
+                {busy === "audio"
+                  ? t("media.audioUploading", { pct: uploadPct ?? 0 })
+                  : sourceUpload
+                    ? t("studio.stepUploadVideo", { pct: sourceUpload.pct })
+                    : t("media.applying")}
               </div>
             )}
           </div>
