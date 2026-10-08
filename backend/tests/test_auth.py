@@ -320,3 +320,13 @@ def test_allowed_app_redirect(url, ok):
 
 def test_dev_login_is_off_unless_enabled(client):
     assert client.get("/auth/dev-login", follow_redirects=False).status_code == 404
+
+
+def test_link_from_old_host_moves_to_public_host(client, login, account, monkeypatch):
+    """예전 주소에서 연동을 시작하면 대표 주소로 옮겨서 시작 (쿠키·redirect_uri 를 같은 주소로)."""
+    login(account)
+    ticket = client.post("/auth/link-ticket").json()["ticket"]
+    monkeypatch.setattr(auth.settings, "public_base_url", "https://new.example.com")
+    r = client.get(f"/auth/login?provider=instagram&ticket={ticket}", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"].startswith("https://new.example.com/api/py/auth/login?")
+    assert f"ticket={ticket}" in r.headers["location"]

@@ -13,7 +13,7 @@ import datetime as dt
 import os
 import secrets
 from dataclasses import dataclass, field
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -108,6 +108,13 @@ def start_link(
 ) -> RedirectResponse:
     """Instagram 또는 Facebook 로그인 창으로 보냅니다 (로그인한 회원만).
     switch=1: 브라우저에 로그인된 인스타 계정으로 바로 넘어가지 않고 다른 계정을 고르게 합니다."""
+    # 예전 주소(vercel.app 등)에서 시작하면 대표 주소로 먼저 옮김 — 로그인 확인용 쿠키와 돌아오는 주소(redirect_uri)가
+    # 같은 주소여야 하므로. 회원은 티켓으로 확인하니 쿠키가 없어도 됨.
+    public = urlsplit(settings.public_base_url)
+    if ticket and request.url.hostname and public.hostname and request.url.hostname != public.hostname:
+        path = request.headers.get("x-forwarded-uri") or "/api/py/auth/login"
+        target = f"{settings.public_base_url.rstrip('/')}{path.split('?')[0]}?{request.url.query}"
+        return RedirectResponse(target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
     user = None
     if ticket:
         try:
