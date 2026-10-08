@@ -74,7 +74,9 @@ type Adjust = Record<HslKey, number> & {
   glowRadius: number;
   glowSoft: number; // 0 = 스크린, 1 = 소프트 라이트
 };
-type Crop = { zoom: number; turns: number; straighten: number; flip: boolean };
+/** zoom 1 = 틀을 꽉 채움, 1보다 작으면 사진 전체가 보이게 줄임 (빈 곳은 fill: 흐린 사진·흰색·검정) */
+type Fill = "blur" | "white" | "black";
+type Crop = { zoom: number; turns: number; straighten: number; flip: boolean; fill?: Fill };
 type FontItem = { key: string; label: string; preview: string };
 type Named = F.FabricObject & { name?: string; isEditing?: boolean; orig?: string; tStart?: number; tEnd?: number };
 type Sticker = { id: string; url: string; width: number; height: number };
@@ -265,7 +267,7 @@ function loadFont(key: string): Promise<void> {
 }
 
 const blobIdOf = (url: string) => url.split("/media/").pop()!.replace(/\.jpg$/, "");
-const SPECIAL = new Set(["base", "vignette"]);
+const SPECIAL = new Set(["base", "vignette", "backdrop"]);
 
 /** 동영상 꾸미기 모드: 영상을 바탕으로 글자·스티커·그리기만 하고, 하나하나 보이는 시간(tStart~tEnd, 원본 영상 기준 초)을 정합니다.
  *  저장하면 보이는 시간이 같은 것끼리 묶어 꾸민 것만 그린 투명 PNG 들과 편집기 상태를 넘깁니다. 바탕 장면은 내보내지 않음.
@@ -920,7 +922,7 @@ export function ImageEditor({
     else if (dir === "forward") at = Math.min(rest.length, at + 1);
     else at = Math.max(0, at - 1);
     const order = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
-    const base = all.filter((x) => (x as Named).name === "base");
+    const base = [...all.filter((x) => (x as Named).name === "backdrop"), ...all.filter((x) => (x as Named).name === "base")];
     const top = all.filter((x) => (x as Named).name === "vignette");
     [...base, ...order, ...top].forEach((x, i) => c.moveObjectTo(x, i));
     c.requestRenderAll();
@@ -1372,18 +1374,107 @@ export function ImageEditor({
     const cos = Math.abs(Math.cos(rad));
     const sin = Math.abs(Math.sin(rad));
     const cover = Math.max((w * cos + h * sin) / img.width, (w * sin + h * cos) / img.height);
+    next = { ...next, zoom: Math.max(minZoom(next), Math.min(3, next.zoom)) };
+    cropRef.current = next;
+    setCropState(next);
     const s = cover * next.zoom;
     img.set({ angle, flipX: next.flip, scaleX: s, scaleY: s, originX: "center", originY: "center" });
     if (recenter) img.set({ left: w / 2, top: h / 2 });
     img.setCoords();
-    clampBase(img); // 확대를 줄여도 틀 밖(빈 곳)이 드러나지 않게
+    clampBase(img); // 틀 밖으로 밀려나지 않게
+    syncBackdrop(next);
     canvas.current!.requestRenderAll();
     refreshPreview();
+  }
+
+  /** 사진 전체가 (w×h) 안에 들어오는 확대값 (1 = 틀을 꽉 채움) */
+  function containZoom(bw: number, bh: number, cr: Crop = cropRef.current) {
+    const img = base();
+    if (!img) return 1;
+    const { w, h } = size.current;
+    const rad = ((cr.turns * 90 + cr.straighten) * Math.PI) / 180;
+    const cos = Math.abs(Math.cos(rad));
+    const sin = Math.abs(Math.sin(rad));
+    const cover = Math.max((w * cos + h * sin) / img.width, (w * sin + h * cos) / img.height);
+    const contain = Math.min(bw / (img.width * cos + img.height * sin), bh / (img.width * sin + img.height * cos));
+    return Math.min(1, contain / cover);
+  }
+  /** 인스타에서 실제로 보이는 영역(피드 4:5 등)에 사진 전체가 들어오는 크기 */
+  function fitZoom(cr: Crop = cropRef.current) {
+    const { w, h } = size.current;
+    const area = visibleArea(preview?.kind, w, h);
+    return Math.floor(Math.min(containZoom(w, h, cr), containZoom(area.w, area.h, cr)) * 1000) / 1000;
+  }
+  /** 가장 작게 줄일 수 있는 값 (인스타 영역에 맞춘 크기보다 조금 더 작게까지) */
+  function minZoom(cr: Crop = cropRef.current) {
+    return Math.max(0.3, Math.floor(fitZoom(cr) * 0.8 * 100) / 100);
+  }
+
+  /** 줄였을 때 빈 곳: 흐린 사진(같은 사진을 흐리게 깔아 둠)·흰색·검정 */
+  function syncBackdrop(cr: Crop) {
+    const c = canvas.current;
+    const f = fab.current;
+    const img = base() as (F.FabricImage & Named) | undefined;
+    if (!c || !f || !img || overlay) return;
+    const fill = cr.fill ?? "blur";
+    const old = find("backdrop");
+    const need = cr.zoom < 0.999 && fill === "blur";
+    c.backgroundColor = cr.zoom < 0.999 && fill === "white" ? "#ffffff" : "#000";
+    if (!need) {
+      if (old) {
+        history.current.restoring = true;
+        c.remove(old);
+        history.current.restoring = false;
+      }
+      return;
+    }
+    if (old && (old as Named).orig === img.getSrc()) return;
+    // 작게 줄였다 다시 키우면 부드럽게 번짐 (브라우저마다 다른 blur 필터 대신)
+    const el = img.getElement() as HTMLImageElement;
+    const small = document.createElement("canvas");
+    small.width = 36;
+    small.height = Math.max(1, Math.round((36 * el.naturalHeight) / el.naturalWidth || 36));
+    small.getContext("2d")!.drawImage(el, 0, 0, small.width, small.height);
+    const big = document.createElement("canvas");
+    big.width = 360;
+    big.height = Math.round((360 * small.height) / small.width);
+    const bx = big.getContext("2d")!;
+    bx.imageSmoothingQuality = "high";
+    bx.drawImage(small, 0, 0, big.width, big.height);
+    bx.fillStyle = "rgba(0,0,0,0.18)";
+    bx.fillRect(0, 0, big.width, big.height);
+    const { w, h } = size.current;
+    const bd = new f.FabricImage(big, { originX: "center", originY: "center", left: w / 2, top: h / 2, selectable: false, evented: false });
+    bd.scale(Math.max(w / big.width, h / big.height));
+    (bd as Named).name = "backdrop";
+    (bd as Named).orig = img.getSrc();
+    history.current.restoring = true;
+    if (old) c.remove(old);
+    c.add(bd);
+    c.moveObjectTo(bd, 0);
+    history.current.restoring = false;
   }
 
   /** 사진이 늘 틀을 다 덮도록 위치를 당김 (돌려도). 당겼으면 true — 틀 끝에 닿았다는 뜻 */
   function clampBase(img: F.FabricObject): boolean {
     const { w, h } = size.current;
+    if (cropRef.current.zoom < 0.999) {
+      // 줄였을 때: 사진이 틀보다 작은 쪽은 틀 안에, 큰 쪽은 틀을 덮게
+      const a0 = ((img.angle ?? 0) * Math.PI) / 180;
+      const iw = img.width * (img.scaleX ?? 1);
+      const ih = img.height * (img.scaleY ?? 1);
+      const bw = Math.abs(iw * Math.cos(a0)) + Math.abs(ih * Math.sin(a0));
+      const bh = Math.abs(iw * Math.sin(a0)) + Math.abs(ih * Math.cos(a0));
+      const fitIn = (v: number, size: number, b: number) =>
+        b <= size ? Math.min(size - b / 2, Math.max(b / 2, v)) : Math.min(b / 2, Math.max(size - b / 2, v));
+      const x0 = img.left ?? w / 2;
+      const y0 = img.top ?? h / 2;
+      const x = fitIn(x0, w, bw);
+      const y = fitIn(y0, h, bh);
+      img.set({ left: x, top: y });
+      img.setCoords();
+      return Math.abs(x - x0) > 1e-6 || Math.abs(y - y0) > 1e-6;
+    }
     const a = ((img.angle ?? 0) * Math.PI) / 180;
     const cos = Math.cos(a);
     const sin = Math.sin(a);
@@ -1497,10 +1588,14 @@ export function ImageEditor({
       moving(g.target);
       canvas.current!.requestRenderAll();
     } else {
-      const zoomTo = Math.min(3, Math.max(1, g.z0 * ratio));
-      const atMin = zoomTo <= 1.0001;
-      if (atMin && !g.minHit) haptic("snap"); // 틀에 꼭 맞는 크기(더 줄이면 빈 곳이 생김)
-      g.minHit = atMin;
+      const lo = minZoom();
+      let zoomTo = Math.min(3, Math.max(lo, g.z0 * ratio));
+      // 틀을 꽉 채우는 크기(1)·인스타 영역에 사진 전체가 딱 들어오는 크기에 살짝 붙으며 진동
+      const marks = [1, fitZoom()];
+      const near = marks.find((m) => Math.abs(zoomTo - m) < 0.025);
+      if (near !== undefined) zoomTo = near;
+      if (near !== undefined && !g.minHit) haptic("snap");
+      g.minHit = near !== undefined;
       applyCrop({ ...cropRef.current, zoom: zoomTo });
     }
   }
@@ -1513,8 +1608,9 @@ export function ImageEditor({
     snapshot();
   }
   // 캔버스 이벤트에서 늘 최신 함수를 부르도록
-  const live = useRef({ moving, endMove, pinchStart, pinchMove, pinchEnd });
-  live.current = { moving, endMove, pinchStart, pinchMove, pinchEnd };
+  const hasAdjust = () => post.current.filters.length > 0 || post.current.vignette > 0;
+  const live = useRef({ moving, endMove, pinchStart, pinchMove, pinchEnd, compare: (on: boolean) => compare(on), tab, hasAdjust });
+  live.current = { moving, endMove, pinchStart, pinchMove, pinchEnd, compare: (on: boolean) => compare(on), tab, hasAdjust };
   useEffect(() => {
     const el = canvas.current?.upperCanvasEl;
     if (!ready || !el) return;
@@ -1533,11 +1629,45 @@ export function ImageEditor({
     const end = (e: TouchEvent) => {
       if (e.touches.length < 2) live.current.pinchEnd();
     };
+    // 꾹 누르고(0.35초, 움직이지 않고) 있는 동안 보정 전 원본 — 그리기 중엔 안 함
+    let hold: ReturnType<typeof setTimeout> | undefined;
+    let from: { x: number; y: number } | null = null;
+    const pressDown = (e: PointerEvent) => {
+      if (live.current.tab === "draw" || !live.current.hasAdjust()) return;
+      from = { x: e.clientX, y: e.clientY };
+      hold = setTimeout(() => {
+        live.current.compare(true);
+        haptic("tick");
+      }, 350);
+    };
+    const pressMove = (e: PointerEvent) => {
+      if (from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 8) {
+        clearTimeout(hold);
+        from = null;
+      }
+    };
+    const pressUp = () => {
+      clearTimeout(hold);
+      from = null;
+      live.current.compare(false);
+    };
+    el.addEventListener("pointerdown", pressDown);
+    el.addEventListener("pointermove", pressMove);
+    el.addEventListener("pointerup", pressUp);
+    el.addEventListener("pointercancel", pressUp);
+    el.addEventListener("pointerleave", pressUp);
+    el.addEventListener("contextmenu", (e) => e.preventDefault());
     el.addEventListener("touchstart", start, { passive: false });
     el.addEventListener("touchmove", move, { passive: false });
     el.addEventListener("touchend", end);
     el.addEventListener("touchcancel", end);
     return () => {
+      clearTimeout(hold);
+      el.removeEventListener("pointerdown", pressDown);
+      el.removeEventListener("pointermove", pressMove);
+      el.removeEventListener("pointerup", pressUp);
+      el.removeEventListener("pointercancel", pressUp);
+      el.removeEventListener("pointerleave", pressUp);
       el.removeEventListener("touchstart", start);
       el.removeEventListener("touchmove", move);
       el.removeEventListener("touchend", end);
@@ -1822,25 +1952,11 @@ export function ImageEditor({
                 <Spinner className="size-6" />
               </div>
             )}
-            {tab === "adjust" && (post.current.filters.length > 0 || post.current.vignette > 0) && (
-              <button
-                type="button"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  compare(true);
-                }}
-                onPointerUp={() => compare(false)}
-                onPointerLeave={() => compare(false)}
-                onPointerCancel={() => compare(false)}
-                onContextMenu={(e) => e.preventDefault()}
-                title={t("editor.compareHint")}
-                className={cx(
-                  "absolute top-3 left-3 z-10 touch-none rounded-full px-3 py-1.5 text-[12px] select-none",
-                  showOriginal ? "bg-white text-black" : "bg-black/60 text-white",
-                )}
-              >
-                ◐ {showOriginal ? t("editor.showingOriginal") : t("editor.holdOriginal")}
-              </button>
+            {/* 사진을 꾹 누르고 있는 동안 보정 전 원본 */}
+            {showOriginal && (
+              <span className="pointer-events-none absolute top-3 left-3 z-10 rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-black">
+                ◐ {t("editor.showingOriginal")}
+              </span>
             )}
             {aiBusy && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/55">
@@ -2232,6 +2348,7 @@ export function ImageEditor({
 
               {tab === "adjust" && (
                 <div className="space-y-1.5">
+                  <p className="text-[11px] text-white/50">◐ {t("editor.compareHint")}</p>
                   <Row>
                     {Object.keys(PRESETS).map((p) => (
                       <Chip key={p} on={adjust.preset === p} onClick={() => applyAdjust(presetAdjust(p), true)}>
@@ -2419,11 +2536,33 @@ export function ImageEditor({
               {tab === "crop" && (
                 <div className="space-y-2">
                   <p className="text-[11px] text-white/50">{t("editor.cropHint")}</p>
-                  <Slider label={t("editor.zoom")} min={1} max={3} step={0.05} value={crop.zoom} onChange={(v) => applyCrop({ ...crop, zoom: v })} onCommit={snapshot} />
+                  <Slider
+                    label={t("editor.zoom")}
+                    min={minZoom()}
+                    max={3}
+                    step={0.01}
+                    detent={1}
+                    value={crop.zoom}
+                    display={`${Math.round(crop.zoom * 100)}%`}
+                    onChange={(v) => applyCrop({ ...crop, zoom: v })}
+                    onCommit={snapshot}
+                  />
+                  {/* 줄여서 생긴 빈 곳 채우기 */}
+                  {crop.zoom < 0.999 && (
+                    <Row>
+                      <span className="shrink-0 text-[11px] text-white/45">{t("editor.fillEmpty")}</span>
+                      {(["blur", "white", "black"] as const).map((fl) => (
+                        <Chip key={fl} on={(crop.fill ?? "blur") === fl} onClick={() => (applyCrop({ ...crop, fill: fl }), snapshot())}>
+                          {t(fl === "blur" ? "editor.fillBlur" : fl === "white" ? "editor.fillWhite" : "editor.fillBlack")}
+                        </Chip>
+                      ))}
+                    </Row>
+                  )}
                   <Slider label={t("editor.straighten")} min={-30} max={30} step={0.5} value={crop.straighten} onChange={(v) => applyCrop({ ...crop, straighten: v })} onCommit={snapshot} />
                   <Row>
                     <Chip onClick={() => (applyCrop({ ...crop, turns: (crop.turns + 1) % 4, zoom: 1 }, true), snapshot())}>⟳ {t("editor.rotate")}</Chip>
                     <Chip onClick={() => (applyCrop({ ...crop, flip: !crop.flip }), snapshot())}>⇋ {t("editor.flip")}</Chip>
+                    <Chip onClick={() => (applyCrop({ ...crop, zoom: fitZoom() }, true), haptic("snap"), snapshot())}>{t("editor.fitWhole")}</Chip>
                     <Chip onClick={() => (applyCrop(NO_CROP, true), snapshot())}>{t("editor.reset")}</Chip>
                   </Row>
                 </div>
@@ -2610,6 +2749,7 @@ function Slider({
   step,
   display,
   swatch,
+  detent,
 }: {
   label: string;
   /** 이름 앞 색 점 (HSL 색·컬러 그레이딩 색상) */
@@ -2622,10 +2762,12 @@ function Slider({
   step: number;
   /** 오른쪽에 보이는 값 (예: +0.50, -15) */
   display?: string;
+  /** 살짝 붙는 값 (없으면 가운데 0) */
+  detent?: number;
 }) {
   // 움직일 때 '틱' 진동, 가운데(0)를 지나면 0에 살짝 붙으며 '팡'
   const range = max - min;
-  const center = min < 0 && max > 0 ? 0 : null;
+  const center = detent !== undefined ? detent : min < 0 && max > 0 ? 0 : null;
   const last = useRef(value);
   const change = (raw: number) => {
     let v = raw;
