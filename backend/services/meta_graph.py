@@ -135,8 +135,9 @@ class GraphClient:
     def me(self) -> dict[str, Any]:
         return self.get("me", {"fields": "id,name"})
 
-    def my_pages(self) -> list[dict[str, Any]]:
+    def my_pages(self, *, with_instagram_only: bool = True) -> list[dict[str, Any]]:
         """연결된 페이지와 각 페이지의 IG 비즈니스 계정.
+        with_instagram_only=False 면 Instagram 이 없는 페이지도 (연동 안내에 쓰려고).
 
         페이지 토큰은 만료가 없어(장기 사용자 토큰에서 파생) 발행에 유리합니다.
         """
@@ -147,7 +148,8 @@ class GraphClient:
                 "limit": 100,
             },
         )
-        return [p for p in data.get("data", []) if p.get("instagram_business_account")]
+        pages = data.get("data", [])
+        return [p for p in pages if p.get("instagram_business_account")] if with_instagram_only else pages
 
     # ── Instagram 로그인 OAuth ─────────────────────────────────────────
     def ig_exchange_code(self, code: str) -> dict[str, Any]:

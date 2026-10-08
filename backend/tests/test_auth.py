@@ -347,3 +347,35 @@ def test_verify_email_after_signup(client, cleanup, monkeypatch):
     u = client.post("/auth/email/verify", json={"code": code}).json()
     assert u["email_verified"] is True and u["verify_required"] is False
     assert client.post("/auth/email/code").status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("pages", "declined", "expect"),
+    [
+        ([], ["pages_show_list"], "페이지 목록 보기"),
+        ([], [], "페이지를 찾지 못했어요"),
+        ([{"id": "p1", "name": "주스 가게"}], [], "'주스 가게'에 Instagram 계정이 연결되어 있지 않아요"),
+    ],
+)
+def test_facebook_warning_explains_cause(pages, declined, expect):
+    linked = auth._FbLinked(fb_user_id="f", name="n", token="t", expires_at=None, granted="", pages=pages, declined=declined)
+    assert expect in auth.facebook_warning(linked, "ko")
+    assert auth.facebook_warning(linked, "en") != auth.facebook_warning(linked, "ko")  # 영어로도 번역
+
+
+def test_facebook_link_keeps_pages_without_instagram(client, login, account, db, monkeypatch):
+    login(account)
+    pages = [{"id": "p9", "name": "인스타 없는 페이지", "access_token": "pt"}]
+    r = _callback(client, monkeypatch, "facebook", auth._FbLinked(fb_user_id="fbz", name="Kim", token="ut", expires_at=None, granted="x", pages=pages))
+    assert "warning=" in r.headers["location"]
+    fb = client.get("/auth/session").json()["facebook"]
+    assert fb["pages"] == [{"id": "p9", "name": "인스타 없는 페이지", "ig_username": ""}]  # 프로필에 '(Instagram 연결 없음)'으로 보임
+    client.delete("/auth/facebook")
+
+
+def test_facebook_reconnect_rerequests_permissions(client, login, account, monkeypatch):
+    monkeypatch.setattr(auth.settings, "meta_app_id", "m1")
+    monkeypatch.setattr(auth.settings, "meta_app_secret", "s1")
+    login(account)
+    r = client.get("/auth/login?provider=facebook&switch=1", follow_redirects=False)
+    assert "auth_type=rerequest" in r.headers["location"]

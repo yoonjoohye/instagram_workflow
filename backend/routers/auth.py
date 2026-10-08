@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
 import secrets
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from ..services.meta_graph import IG_AUTHORIZE_URL, IG_SCOPES, SCOPES, GraphClie
 from .members import account_dict, set_session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+log = logging.getLogger("iaw.auth")
 
 OAUTH_STATE_COOKIE = "iaw_oauth_state"
 APP_REDIRECT_COOKIE = "iaw_app_redirect"
@@ -149,7 +151,8 @@ def start_link(
                 "state": state,
                 "scope": ",".join(SCOPES),
                 "response_type": "code",
-                **({"auth_type": "reauthenticate"} if switch else {}),
+                # 다시 연동: 거절했던 권한·페이지 선택을 다시 물음
+                **({"auth_type": "rerequest"} if switch else {}),
             }
         )
     resp = RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
@@ -183,7 +186,8 @@ class _FbLinked:
     token: str
     expires_at: dt.datetime | None
     granted: str
-    pages: list[dict] = field(default_factory=list)  # me/accounts (IG 계정이 연결된 페이지만)
+    pages: list[dict] = field(default_factory=list)  # me/accounts (Instagram 이 없는 페이지도 — 안내용)
+    declined: list[str] = field(default_factory=list)  # 사용자가 거절한 권한
 
 
 def _link_instagram(code: str) -> _IgLinked:
@@ -214,10 +218,12 @@ def _link_facebook(code: str) -> _FbLinked:
     token = long_lived["access_token"]
     with GraphClient(token, provider="facebook") as client:
         me = client.me()
-        pages = client.my_pages()
-        granted = ",".join(
-            s["permission"] for s in client.get("me/permissions").get("data", []) if s.get("status") == "granted"
-        )
+        pages = client.my_pages(with_instagram_only=False)
+        perms = client.get("me/permissions").get("data", [])
+    granted = ",".join(p["permission"] for p in perms if p.get("status") == "granted")
+    declined = [p["permission"] for p in perms if p.get("status") == "declined"]
+    log.info("facebook link: %d pages (%d with instagram), declined=%s", len(pages),
+             sum(1 for p in pages if p.get("instagram_business_account")), declined)
     return _FbLinked(
         fb_user_id=str(me.get("id", "")),
         name=me.get("name", ""),
@@ -225,7 +231,36 @@ def _link_facebook(code: str) -> _FbLinked:
         expires_at=_expires_at(long_lived.get("expires_in")),
         granted=granted,
         pages=pages,
+        declined=declined,
     )
+
+
+# Instagram 계정을 가져오는 데 꼭 필요한 Facebook 권한 → 화면에 보일 이름
+_NEEDED = {
+    "pages_show_list": "페이지 목록 보기",
+    "instagram_basic": "Instagram 계정 정보",
+    "pages_read_engagement": "페이지 내용 읽기",
+    "business_management": "비즈니스 관리",
+}
+
+
+def facebook_warning(linked: _FbLinked, lang: str) -> str:
+    """Instagram 계정을 하나도 못 가져왔을 때, 무엇이 막혔는지 짚어 주는 안내."""
+    missing = [_NEEDED[p] for p in linked.declined if p in _NEEDED]
+    if missing:
+        return tr("Facebook 연동 때 '{perms}' 권한을 허용하지 않았어요. 프로필에서 Facebook '다시 연동'을 눌러 모두 허용해 주세요.", lang).replace(
+            "{perms}", ", ".join(missing)
+        )
+    if not linked.pages:
+        return tr(
+            "Facebook 계정에서 관리하는 페이지를 찾지 못했어요. 페이지가 없다면 먼저 만들고, 있다면 '다시 연동' 중 페이지 선택 화면에서 그 페이지를 체크해 주세요.",
+            lang,
+        )
+    names = ", ".join(f"'{p.get('name', '')}'" for p in linked.pages[:5])
+    return tr(
+        "페이지 {names}에 Instagram 계정이 연결되어 있지 않아요. Instagram 앱 → 프로필 편집 → 페이지에서 이 페이지를 연결한 뒤 '다시 연동'해 주세요.",
+        lang,
+    ).replace("{names}", names)
 
 
 class _Taken(Exception):
@@ -287,7 +322,7 @@ def save_facebook(db: Session, user: User, linked: _FbLinked) -> tuple[list[Acco
     ]
 
     accounts, skipped = [], []
-    for page in linked.pages:
+    for page in (p for p in linked.pages if p.get("instagram_business_account")):
         ig = page["instagram_business_account"]
         try:
             account = _owned_or_new(db, user, str(ig["id"]))
@@ -354,16 +389,13 @@ def callback(
             except GraphError:
                 pass
         else:
-            accounts, skipped = save_facebook(db, user, _link_facebook(code))
+            fb = _link_facebook(code)
+            accounts, skipped = save_facebook(db, user, fb)
             account = accounts[0] if accounts else None
             if skipped:
                 params["skipped"] = ",".join(skipped)
             if not accounts and not skipped:
-                params["warning"] = tr(
-                    "Facebook 은 연동했지만 Instagram 프로페셔널 계정이 연결된 페이지를 찾지 못했습니다. "
-                    "Instagram 앱에서 비즈니스/크리에이터 계정으로 전환하고 페이지에 연결해 주세요.",
-                    lang,
-                )
+                params["warning"] = facebook_warning(fb, lang)
     except _Taken:
         return RedirectResponse(_profile_url(error=tr("이미 다른 회원에게 연동된 Instagram 계정입니다. 그 회원에서 연동을 해제한 뒤 다시 시도해 주세요.", lang)))
     except GraphError as exc:
