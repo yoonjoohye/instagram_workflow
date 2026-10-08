@@ -455,6 +455,9 @@ export function ImageEditor({
 
         c.on("selection:created", (e) => setSelected((e.selected?.[0] as Named) ?? null));
         c.on("selection:updated", (e) => setSelected((e.selected?.[0] as Named) ?? null));
+        // 글자 일부를 고르거나 풀면 아래 꾸미기 버튼들의 켜짐 상태를 다시 그림
+        c.on("text:selection:changed", () => force((n) => n + 1));
+        c.on("text:editing:exited", () => force((n) => n + 1));
         c.on("selection:cleared", () => setSelected(null));
         c.on("after:render", ({ ctx }) => postProcess(ctx));
         c.on("after:render", refreshPreview);
@@ -555,6 +558,13 @@ export function ImageEditor({
         else if (!redo && h.at > 0) restore(h.at - 1);
         return;
       }
+      // ⌘/Ctrl + ] 앞으로 · [ 뒤로, Shift 를 함께 누르면 맨 앞/맨 뒤 (포토샵·피그마와 같음)
+      if (mod && (e.code === "BracketRight" || e.code === "BracketLeft") && obj && !SPECIAL.has(obj.name ?? "")) {
+        e.preventDefault();
+        const up = e.code === "BracketRight";
+        arrange(up ? (e.shiftKey ? "front" : "forward") : e.shiftKey ? "back" : "backward");
+        return;
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && obj && !SPECIAL.has(obj.name ?? "")) {
         e.preventDefault();
         removeSelected();
@@ -629,6 +639,53 @@ export function ImageEditor({
     snapshot();
     force((n) => n + 1);
   }
+  // ── 글자 꾸미기: 고른 글자(일부)만, 고르지 않았으면 글자 상자 전체 ──────────────
+  // 버튼을 누르는 순간 글자 고치기가 끝날 수 있어, 누르기 직전의 선택 범위를 기억해 둠
+  const textRange = useRef<{ obj: F.IText; start: number; end: number } | null>(null);
+  const captureRange = () => {
+    const o = selected;
+    if (isText(o) && (o as Named).isEditing && (o.selectionStart ?? 0) < (o.selectionEnd ?? 0)) {
+      textRange.current = { obj: o, start: o.selectionStart!, end: o.selectionEnd! };
+    } else if (!isText(o) || textRange.current?.obj !== o) {
+      textRange.current = null;
+    }
+  };
+  const rangeOf = (o: F.IText) => {
+    if ((o as Named).isEditing && (o.selectionStart ?? 0) < (o.selectionEnd ?? 0)) return { start: o.selectionStart!, end: o.selectionEnd! };
+    const r = textRange.current;
+    return r && r.obj === o && r.end <= (o.text ?? "").length ? { start: r.start, end: r.end } : null;
+  };
+
+  /** 글자 하나하나에 걸 수 있는 꾸미기 (굵기·기울임·밑줄·취소선·색·글꼴·크기) */
+  async function setCharStyle(props: Record<string, unknown>, fontKey?: string) {
+    const o = selected;
+    if (!isText(o)) return;
+    if (fontKey) await loadFont(fontKey);
+    const range = rangeOf(o);
+    if (range) {
+      o.setSelectionStyles(props, range.start, range.end);
+    } else {
+      // 전체에 적용: 글자마다 따로 걸어 둔 같은 꾸미기는 지우고 상자에 한 번에
+      for (const k of Object.keys(props)) o.removeStyle(k as keyof F.TextStyleDeclaration);
+      o.set(props as Partial<F.IText>);
+    }
+    o.initDimensions?.();
+    canvas.current!.requestRenderAll();
+    snapshot();
+    force((n) => n + 1);
+  }
+
+  /** 지금 꾸미기 값 (고른 글자가 있으면 그 글자들이 모두 같을 때만) */
+  function charStyleValue<K extends string>(key: K): unknown {
+    const o = selected;
+    if (!isText(o)) return undefined;
+    const range = rangeOf(o);
+    if (!range) return (o as unknown as Record<string, unknown>)[key];
+    const styles = o.getSelectionStyles(range.start, range.end, true) as Record<string, unknown>[];
+    const first = styles[0]?.[key];
+    return styles.every((st) => st[key] === first) ? first : undefined;
+  }
+
   async function textStyle(style: "classic" | "bold" | "neon" | "hand" | "serif") {
     const f = fab.current!;
     const color = typeof selected?.fill === "string" ? selected.fill : "#ffffff";
@@ -772,11 +829,28 @@ export function ImageEditor({
     c.requestRenderAll();
   }
 
-  function bringFront() {
-    const o = canvas.current?.getActiveObject();
-    if (!o) return;
-    canvas.current!.bringObjectToFront(o);
-    canvas.current!.requestRenderAll();
+  /** 겹친 순서 바꾸기 — 바탕 사진(base)은 늘 맨 아래, 비네팅은 늘 맨 위에 둠 */
+  function arrange(dir: "front" | "forward" | "backward" | "back") {
+    const c = canvas.current;
+    const o = c?.getActiveObject();
+    if (!c || !o) return;
+    const all = c.getObjects();
+    const layers = all.filter((x) => !SPECIAL.has((x as Named).name ?? ""));
+    const moving = (c.getActiveObjects().length ? c.getActiveObjects() : [o]).filter((x) => layers.includes(x));
+    if (!moving.length) return;
+    const rest = layers.filter((x) => !moving.includes(x));
+    const first = layers.indexOf(moving[0]);
+    // 움직이는 묶음이 들어갈 자리 (나머지 레이어 기준)
+    let at = rest.filter((x) => layers.indexOf(x) < first).length;
+    if (dir === "front") at = rest.length;
+    else if (dir === "back") at = 0;
+    else if (dir === "forward") at = Math.min(rest.length, at + 1);
+    else at = Math.max(0, at - 1);
+    const order = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+    const base = all.filter((x) => (x as Named).name === "base");
+    const top = all.filter((x) => (x as Named).name === "vignette");
+    [...base, ...order, ...top].forEach((x, i) => c.moveObjectTo(x, i));
+    c.requestRenderAll();
     snapshot();
   }
 
@@ -1408,9 +1482,18 @@ export function ImageEditor({
                 <button type="button" onClick={duplicateSelected} className="rounded-full bg-black/60 px-3 py-1.5 text-[12px]" title="Ctrl/⌘ + C · V">
                   {t("editor.duplicate")}
                 </button>
-                <button type="button" onClick={bringFront} className="rounded-full bg-black/60 px-3 py-1.5 text-[12px]">
-                  {t("editor.bringFront")}
-                </button>
+                <div className="flex overflow-hidden rounded-full bg-black/60 text-[12px]" role="group" aria-label={t("editor.arrange")}>
+                  {([
+                    ["back", "⤓", "editor.sendBack"],
+                    ["backward", "↓", "editor.sendBackward"],
+                    ["forward", "↑", "editor.bringForward"],
+                    ["front", "⤒", "editor.bringFront"],
+                  ] as const).map(([dir, icon, label]) => (
+                    <button key={dir} type="button" onClick={() => arrange(dir)} className="px-2.5 py-1.5 hover:bg-white/15" title={`${t(label)} (⌘/Ctrl ${dir === "front" ? "⇧ ]" : dir === "forward" ? "]" : dir === "backward" ? "[" : "⇧ ["})`} aria-label={t(label)}>
+                      {icon}
+                    </button>
+                  ))}
+                </div>
                 <button type="button" onClick={removeSelected} className="rounded-full bg-[#ff3b5c] px-3 py-1.5 text-[12px] font-medium">
                   🗑 {t("editor.deleteSelected")}
                 </button>
@@ -1439,8 +1522,20 @@ export function ImageEditor({
                     <p className="mt-1.5 text-[11px] text-white/50">{t("editor.textHint")}</p>
                   </div>
                   {textSel && (
-                    <>
+                    // 누르는 순간 글자 고르기가 풀리지 않게 (슬라이더·색 고르기 칸은 그대로 동작)
+                    <div
+                      className="space-y-2.5"
+                      onMouseDownCapture={(e) => {
+                        captureRange();
+                        if ((e.target as HTMLElement).tagName !== "INPUT") e.preventDefault();
+                      }}
+                      onTouchStartCapture={captureRange}
+                    >
+                      <p className="text-[11px] text-white/50">
+                        {rangeOf(textSel) ? `✂ ${t("editor.textPartSelected")}` : t("editor.textPartHint")}
+                      </p>
                       <Row>
+                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.textPreset")}</span>
                         {(["classic", "bold", "neon", "hand", "serif"] as const).map((st) => (
                           <Chip key={st} onClick={() => textStyle(st)}>
                             {t(`editor.style${st[0].toUpperCase()}${st.slice(1)}` as "editor.styleClassic")}
@@ -1449,20 +1544,59 @@ export function ImageEditor({
                         <Chip on={Boolean(textSel.backgroundColor)} onClick={() => setTextProp({ backgroundColor: textSel.backgroundColor ? "" : "rgba(0,0,0,0.55)" })}>
                           {t("editor.textBox")}
                         </Chip>
-                        {(["left", "center", "right"] as const).map((a) => (
+                      </Row>
+                      <Row>
+                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.fontWeight")}</span>
+                        {([
+                          [300, "editor.weightLight"],
+                          [400, "editor.weightRegular"],
+                          [700, "editor.weightBold"],
+                          [900, "editor.weightBlack"],
+                        ] as const).map(([w, label]) => (
+                          <Chip key={w} on={Number(charStyleValue("fontWeight") ?? 400) === w || (w === 700 && charStyleValue("fontWeight") === "bold")} onClick={() => setCharStyle({ fontWeight: w })}>
+                            {t(label)}
+                          </Chip>
+                        ))}
+                        <span className="mx-1 h-4 w-px shrink-0 bg-white/15" />
+                        {/* 기울임·밑줄·취소선은 각각 켜고 끄기 — 여러 개 함께 */}
+                        <Chip on={charStyleValue("fontStyle") === "italic"} onClick={() => setCharStyle({ fontStyle: charStyleValue("fontStyle") === "italic" ? "normal" : "italic" })}>
+                          <i>{t("editor.italic")}</i>
+                        </Chip>
+                        <Chip on={charStyleValue("underline") === true} onClick={() => setCharStyle({ underline: charStyleValue("underline") !== true })}>
+                          <u>{t("editor.underline")}</u>
+                        </Chip>
+                        <Chip on={charStyleValue("linethrough") === true} onClick={() => setCharStyle({ linethrough: charStyleValue("linethrough") !== true })}>
+                          <s>{t("editor.strike")}</s>
+                        </Chip>
+                      </Row>
+                      <Row>
+                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.align")}</span>
+                        {(["left", "center", "right", "justify"] as const).map((a) => (
                           <Chip key={a} on={textSel.textAlign === a} onClick={() => setTextProp({ textAlign: a })}>
-                            {t(a === "left" ? "editor.alignLeft" : a === "center" ? "editor.alignCenter" : "editor.alignRight")}
+                            {t(a === "left" ? "editor.alignLeft" : a === "center" ? "editor.alignCenter" : a === "right" ? "editor.alignRight" : "editor.alignJustify")}
                           </Chip>
                         ))}
                       </Row>
-                      <Swatches value={String(textSel.fill)} onPick={(c) => setTextProp({ fill: c })} customLabel={t("editor.customColor")} />
+                      <Slider
+                        label={t("editor.fontSize")}
+                        min={12}
+                        max={Math.round(size.current.w * 0.3)}
+                        step={1}
+                        value={Number(charStyleValue("fontSize") ?? textSel.fontSize ?? 48)}
+                        display={String(Math.round(Number(charStyleValue("fontSize") ?? textSel.fontSize ?? 48)))}
+                        onChange={(v) => {
+                          captureRange();
+                          setCharStyle({ fontSize: v });
+                        }}
+                      />
+                      <Swatches value={String(charStyleValue("fill") ?? textSel.fill)} onPick={(c) => setCharStyle({ fill: c })} customLabel={t("editor.customColor")} />
                       <Row>
                         {(fonts.data?.data ?? []).map((fo) => (
                           <button
                             key={fo.key}
                             type="button"
-                            onClick={() => setTextProp({ fontFamily: fontFamily(fo.key) }, fo.key)}
-                            className={cx("shrink-0 rounded-md bg-white px-2 py-1", fontKeyOf(textSel.fontFamily) === fo.key ? "ring-2 ring-[#8b5cf6]" : "opacity-80")}
+                            onClick={() => setCharStyle({ fontFamily: fontFamily(fo.key) }, fo.key)}
+                            className={cx("shrink-0 rounded-md bg-white px-2 py-1", fontKeyOf(String(charStyleValue("fontFamily") ?? textSel.fontFamily)) === fo.key ? "ring-2 ring-[#8b5cf6]" : "opacity-80")}
                             title={fo.label}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1470,7 +1604,7 @@ export function ImageEditor({
                           </button>
                         ))}
                       </Row>
-                    </>
+                    </div>
                   )}
                 </div>
               )}
