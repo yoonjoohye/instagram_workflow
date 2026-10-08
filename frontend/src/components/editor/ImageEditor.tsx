@@ -10,6 +10,7 @@
  *    편집 전 원본(base)은 따로 남아 있어 몇 번을 고쳐도 화질이 떨어지지 않습니다.
  *  - 오른쪽(넓은 화면)·미리보기 버튼(휴대폰)에 올라갈 모습을 편집할 때마다 보여 줍니다.
  */
+import { toBrowserImage } from "@/lib/heic";
 import type * as F from "fabric";
 import { filmFilters } from "./filmFilters";
 import { BAND_SWATCH, colorFilters, HSL_BANDS, type Band } from "./colorFilters";
@@ -1121,7 +1122,7 @@ export function ImageEditor({
     setError(undefined);
     setAiBusy({ label: t("editor.applying") });
     try {
-      const url = await uploadLayer(file);
+      const url = await uploadLayer(file instanceof File ? await toBrowserImage(file) : file);
       const img = await fab.current!.FabricImage.fromURL(mediaSrc(url), { crossOrigin: "anonymous" });
       img.scale((size.current.w * 0.6) / Math.max(img.width, img.height));
       img.set(center());
@@ -1197,7 +1198,7 @@ export function ImageEditor({
   async function stickerFromFile(file: File) {
     setError(undefined);
     try {
-      const png = await cut(file);
+      const png = await cut(await toBrowserImage(file));
       setAiBusy({ label: t("editor.applying") });
       await placeSticker(await saveSticker(png));
     } catch (e) {
@@ -2291,7 +2292,7 @@ export function ImageEditor({
                       <input
                         ref={photoFile}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,.heic,.heif"
                         hidden
                         onChange={(e) => {
                           const file = e.target.files?.[0];
@@ -2302,7 +2303,7 @@ export function ImageEditor({
                       <input
                         ref={stickerFile}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,.heic,.heif"
                         hidden
                         onChange={(e) => {
                           const file = e.target.files?.[0];

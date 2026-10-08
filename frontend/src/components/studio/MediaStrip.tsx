@@ -488,7 +488,7 @@ function AddTile({ onAdd, onGenerate, empty }: { onAdd?: (files: File[], onStep:
           <input
             ref={input}
             type="file"
-            accept="image/*,video/mp4,video/quicktime"
+            accept="image/*,.heic,.heif,video/mp4,video/quicktime"
             multiple
             hidden
             onChange={(e) => {

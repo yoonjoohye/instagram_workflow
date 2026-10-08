@@ -1,10 +1,12 @@
 /** 업로드 준비: 사진은 브라우저에서 줄여 올리고(Vercel 4.5MB 요청 제한), 동영상은 대표 화면을 뽑습니다. */
 
+import { toBrowserImage } from "@/lib/heic";
 import type { T } from "@/i18n/core";
 
 /** 브라우저에서 긴 변 2048px JPEG 로 줄여 올립니다 (Vercel 4.5MB 요청 제한 대비, 업로드도 빨라짐).
  *  인스타는 가로 1080 으로 보여 주므로 9:16 세로 사진도 가로 1080 이상이 남게 2048. 서버는 다시 압축하지 않고 그대로 보관. */
-export async function shrink(file: File, t: T, maxSide = 2048): Promise<Blob> {
+export async function shrink(original: File, t: T, maxSide = 2048): Promise<Blob> {
+  const file = await toBrowserImage(original); // 아이폰 HEIC 는 JPEG 로
   const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" } as ImageBitmapOptions);
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");

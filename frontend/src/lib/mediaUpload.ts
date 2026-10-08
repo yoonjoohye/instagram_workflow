@@ -3,6 +3,7 @@
  *  - 동영상: 대표 화면은 사진처럼, 영상은 인스타그램 크기로 줄인 뒤(shrinkVideo) Blob 저장소에 직접 올리고 서버에 등록
  *    (Vercel 함수 4.5MB 제한을 피하려고) */
 
+import { isHeicFile } from "@/lib/heic";
 import { upload as blobUpload } from "@vercel/blob/client";
 import type { T } from "@/i18n/core";
 import { api } from "@/lib/api";
@@ -14,7 +15,7 @@ export const MAX_VIDEO_MB = 300;
 /** 올리기 진행: pct 는 동영상을 올린 정도(0~100) */
 export type UploadStep = { label: string; done: number; total: number; pct?: number };
 
-export const isMedia = (f: File) => f.type.startsWith("image/") || f.type.startsWith("video/");
+export const isMedia = (f: File) => f.type.startsWith("image/") || f.type.startsWith("video/") || isHeicFile(f);
 export const tooBig = (f: File) => f.type.startsWith("video/") && f.size > MAX_VIDEO_MB * 1024 * 1024;
 
 async function uploadVideo(original: File, t: T, onStep: (s: UploadStep) => void, index: number, total: number): Promise<string> {

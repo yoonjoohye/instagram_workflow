@@ -5,6 +5,7 @@
  *  - 색인: 사진마다 썸네일·촬영 날짜·GPS(EXIF)·CLIP 임베딩을 브라우저 안에서 만들어 저장. 사진은 서버로 가지 않습니다.
  *  - 검색: 서버(Gemini)가 주제를 영어 장면 묘사·장소·날짜로 바꿔 주면, 기기 안에서 점수를 매겨 고릅니다.
  */
+import { toBrowserImage } from "@/lib/heic";
 import exifr from "exifr";
 import { base64ToBlob, callNative, isNativeApp } from "../nativeBridge";
 import { allPhotos, clearPhotos, deletePhotos, getMeta, putPhoto, setMeta, type PhotoRecord } from "./db";
@@ -121,7 +122,7 @@ async function* walk(
 }
 
 async function thumbnail(file: File, side = 256): Promise<Blob> {
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" } as ImageBitmapOptions);
+  const bitmap = await createImageBitmap(await toBrowserImage(file), { imageOrientation: "from-image" } as ImageBitmapOptions);
   const scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
   const canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
   canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
