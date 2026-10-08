@@ -686,24 +686,42 @@ export function ImageEditor({
     return styles.every((st) => st[key] === first) ? first : undefined;
   }
 
-  async function textStyle(style: "classic" | "bold" | "neon" | "hand" | "serif") {
+  /** 글자 효과 — 글꼴은 그대로 두고 그림자·네온 빛만 바꿈 (둘 중 하나 또는 없음) */
+  type Glow = "none" | "shadow" | "neon";
+  const glowOf = (o: F.IText): Glow => {
+    const sh = o.shadow as F.Shadow | null;
+    if (!sh) return "none";
+    return sh.offsetX === 0 && sh.offsetY === 0 && sh.blur >= 18 ? "neon" : "shadow";
+  };
+  async function textGlow(glow: Glow) {
     const f = fab.current!;
-    const color = typeof selected?.fill === "string" ? selected.fill : "#ffffff";
-    const font = { classic: "pretendard", bold: "black_han_sans", neon: "pretendard", hand: "nanum_pen", serif: "nanum_myeongjo" }[style];
-    await setTextProp(
-      {
-        fontFamily: fontFamily(font),
-        shadow:
-          style === "neon"
-            ? new f.Shadow({ color: color === "#ffffff" ? "#ff3b5c" : color, blur: 22 })
+    const o = selected;
+    if (!isText(o)) return;
+    const color = typeof o.fill === "string" && o.fill !== "#ffffff" ? o.fill : "#ff3b5c";
+    await setTextProp({
+      shadow:
+        glow === "none"
+          ? null
+          : glow === "neon"
+            ? new f.Shadow({ color, blur: 22, offsetX: 0, offsetY: 0 })
             : new f.Shadow({ color: "rgba(0,0,0,0.45)", blur: 12, offsetX: 0, offsetY: 3 }),
-        ...(style === "neon" ? { fill: "#ffffff" } : {}),
-      },
-      font,
+    } as Partial<F.IText>);
+  }
+  /** 외곽선 켜고 끄기 (글자 뒤에 칠해서 글자 모양이 가늘어지지 않게) */
+  function textOutline() {
+    const o = selected;
+    if (!isText(o)) return;
+    const on = !!o.stroke && (o.strokeWidth ?? 0) > 0;
+    // 어두운 글자엔 흰 외곽선, 밝은 글자엔 검은 외곽선
+    const hex = typeof o.fill === "string" && /^#[0-9a-f]{6}$/i.test(o.fill) ? o.fill : "#ffffff";
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const dark = 0.299 * r + 0.587 * g + 0.114 * b < 110;
+    setTextProp(
+      on
+        ? ({ stroke: null, strokeWidth: 0 } as Partial<F.IText>)
+        : { stroke: dark ? "#ffffff" : "#000000", strokeWidth: Math.max(2, Math.round((o.fontSize ?? 48) * 0.08)), paintFirst: "stroke", strokeLineJoin: "round" },
     );
   }
-
-
 
   // ── 스토리 링크·게시물 스티커 (모양만 — 누를 수 있는 링크는 게시 후 인스타 앱에서 붙임) ─────────
   type LinkObj = Named & { link?: string };
@@ -1535,12 +1553,16 @@ export function ImageEditor({
                         {rangeOf(textSel) ? `✂ ${t("editor.textPartSelected")}` : t("editor.textPartHint")}
                       </p>
                       <Row>
-                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.textPreset")}</span>
-                        {(["classic", "bold", "neon", "hand", "serif"] as const).map((st) => (
-                          <Chip key={st} onClick={() => textStyle(st)}>
-                            {t(`editor.style${st[0].toUpperCase()}${st.slice(1)}` as "editor.styleClassic")}
+                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.textEffect")}</span>
+                        {(["none", "shadow", "neon"] as const).map((g) => (
+                          <Chip key={g} on={glowOf(textSel) === g} onClick={() => textGlow(g)}>
+                            {t(g === "none" ? "editor.effectNone" : g === "shadow" ? "editor.effectShadow" : "editor.styleNeon")}
                           </Chip>
                         ))}
+                        <span className="mx-1 h-4 w-px shrink-0 bg-white/15" />
+                        <Chip on={!!textSel.stroke && (textSel.strokeWidth ?? 0) > 0} onClick={textOutline}>
+                          {t("editor.effectOutline")}
+                        </Chip>
                         <Chip on={Boolean(textSel.backgroundColor)} onClick={() => setTextProp({ backgroundColor: textSel.backgroundColor ? "" : "rgba(0,0,0,0.55)" })}>
                           {t("editor.textBox")}
                         </Chip>
@@ -1591,6 +1613,7 @@ export function ImageEditor({
                       />
                       <Swatches value={String(charStyleValue("fill") ?? textSel.fill)} onPick={(c) => setCharStyle({ fill: c })} customLabel={t("editor.customColor")} />
                       <Row>
+                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.font")}</span>
                         {(fonts.data?.data ?? []).map((fo) => (
                           <button
                             key={fo.key}
