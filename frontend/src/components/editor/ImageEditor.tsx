@@ -109,27 +109,26 @@ const NO_CROP: Crop = { zoom: 1, turns: 0, straighten: 0, flip: false };
 const PRESETS: Record<string, Partial<Adjust>> = {
   none: {},
   clear: { brightness: 0.06, contrast: 0.12, saturation: 0.25 },
-  // 필름 카메라 감성: 노출 +0.5, 대비 -15, 어두운 영역 +40, 검정 +15, 암부 들어올린 완만한 S자 곡선, 그레인 25
-  film: { exposure: 0.5, contrast: -0.15, shadows: 0.4, blacks: 0.15, lift: 0.3, curve: 0.3, grain: 0.25, warmth: 0.08 },
-  dreamy: { brightness: 0.06, contrast: -0.1, saturation: -0.15, warmth: 0.1, fade: 0.2, glow: 0.4 },
-  fade: { fade: 0.55, saturation: -0.2 },
+  // 필름 카메라 감성: 사진 원래 대비는 지키고 질감(그레인·S자 곡선·살짝 띄운 암부·따뜻함)만 더함
+  film: { exposure: 0.2, shadows: 0.15, lift: 0.1, curve: 0.3, grain: 0.25, warmth: 0.08, fade: 0.1 },
+  dreamy: { brightness: 0.03, saturation: -0.15, warmth: 0.1, fade: 0.1, glow: 0.4 },
+  fade: { fade: 0.4, saturation: -0.2 },
   warm: { warmth: 0.45, saturation: 0.08 },
   cool: { warmth: -0.45 },
   vivid: { saturation: 0.45, contrast: 0.12 },
-  vintage: { sepia: 0.35, fade: 0.2, contrast: -0.05 },
+  vintage: { sepia: 0.35, fade: 0.1 },
   mono: { mono: 1 },
-  drama: { mono: 1, contrast: 0.35 },
   // 2000년대 디카 감성: 대비 -20, 그레인 +22(입자 작게), 따뜻함 +15(살구빛 피부), 페이드 +28, 선명도 -10(옛 렌즈), 하이라이트 -30(플래시 질감)
   // 내추럴 필름 (라이트룸 레시피: 노출 +0.3 · 대비 -8 · 하이라이트 -20 · 그림자 +15 · 활기 +8 · 클래리티 -12 · 그레인 14 …,
   // 그림자는 살짝 차갑게·피부와 빛은 따뜻하게, 주황 밝게·노랑 살짝 주황 쪽으로)
   natural: {
-    exposure: 0.3, contrast: -0.08, highlights: -0.2, shadows: 0.15, whites: -0.05, blacks: 0.08,
-    warmth: 0.055, tint: 0.02, saturation: 0.03, vibrance: 0.08, texture: -0.08, clarity: -0.12, dehaze: -0.02, sharpen: -0.1,
-    grain: 0.14, grainSize: 0.15, fade: 0.045,
+    exposure: 0.15, contrast: -0.04, highlights: -0.2, shadows: 0.08, whites: -0.05,
+    warmth: 0.055, tint: 0.02, saturation: 0.03, vibrance: 0.08, texture: -0.08, clarity: -0.06, sharpen: -0.1,
+    grain: 0.14, grainSize: 0.15, fade: 0.02,
     gradeShadowHue: 210, gradeShadowSat: 0.03, gradeMidHue: 35, gradeMidSat: 0.04, gradeHighHue: 45, gradeHighSat: 0.06, gradeBalance: 0.05,
     hslH_orange: -0.03, hslS_orange: -0.03, hslL_orange: 0.08, hslH_yellow: -0.1, hslS_yellow: -0.05, hslS_green: -0.08, hslS_blue: -0.05,
   },
-  digicam: { contrast: -0.2, grain: 0.22, grainSize: 0.08, grainRough: 0.5, warmth: 0.15, fade: 0.28, sharpen: -0.1, highlights: -0.3 },
+  digicam: { contrast: -0.05, grain: 0.22, grainSize: 0.08, grainRough: 0.5, warmth: 0.15, fade: 0.1, sharpen: -0.1, highlights: -0.15 },
 };
 /** 프리셋을 누르면: 모든 보정을 그 프리셋 값으로 (흑백·세피아 같은 켜고 끄는 효과는 프리셋 이름으로) */
 function presetAdjust(key: string): Adjust {
@@ -137,6 +136,8 @@ function presetAdjust(key: string): Adjust {
 }
 
 // 세피아·흑백이 켜고 끄기였던 시절의 저장본: 그때 모습 그대로 (세피아·흑백 100%)
+// 없앤 프리셋(흑백 대비)으로 저장한 예전 보정을 그대로 다시 열기 위한 값
+const RETIRED_PRESETS: Record<string, Partial<Adjust>> = { drama: { mono: 1, contrast: 0.35 } };
 const LEGACY_FLAGS: Record<string, Partial<Adjust>> = { vintage: { sepia: 1 }, mono: { mono: 1 }, drama: { mono: 1 } };
 
 /** 예전에 저장한 보정(프리셋 값이 슬라이더에 더해지던 방식)을 지금 방식으로 — 보이는 결과는 그대로 */
@@ -144,7 +145,7 @@ function normalizeAdjust(a?: Partial<Adjust>): Adjust {
   const merged = { ...NO_ADJUST, ...a } as Adjust;
   const out = { ...merged, v: 2 as const };
   if (a?.v !== 2) {
-    const p = PRESETS[merged.preset] ?? {};
+    const p = PRESETS[merged.preset] ?? RETIRED_PRESETS[merged.preset] ?? {};
     for (const [k, val] of Object.entries(p)) if (typeof val === "number") (out as Record<string, unknown>)[k] = Number(merged[k as keyof Adjust] ?? 0) + val;
   }
   if (a?.sepia === undefined && a?.mono === undefined) Object.assign(out, LEGACY_FLAGS[merged.preset] ?? {});
@@ -1167,13 +1168,17 @@ export function ImageEditor({
     if (v("mono") > 0) list.push(new f.filters.ColorMatrix({ matrix: blendMatrix([GRAY, GRAY, GRAY], v("mono")) }));
     if (v("sepia") > 0) list.push(new f.filters.ColorMatrix({ matrix: blendMatrix(SEPIA, v("sepia")) }));
     if (v("brightness")) list.push(new f.filters.Brightness({ brightness: v("brightness") }));
-    // 페이드: 어두운 곳을 띄우고 대비를 낮춤
-    if (v("fade")) list.push(new f.filters.Brightness({ brightness: v("fade") * 0.12 }), new f.filters.Contrast({ contrast: -v("fade") * 0.35 }));
-    if (v("contrast")) list.push(new f.filters.Contrast({ contrast: v("contrast") }));
+    // 페이드: 필름 매트처럼 검정만 살짝 띄움 (밝은 곳은 그대로 → 전체가 뿌옇게 되지 않음)
+    const fd = v("fade") * 0.2;
+    if (fd) list.push(new f.filters.ColorMatrix({ matrix: [1 - fd, 0, 0, 0, fd, 0, 1 - fd, 0, 0, fd, 0, 0, 1 - fd, 0, fd, 0, 0, 0, 1, 0] }));
+    // 대비: 낮출 때는 절반 세기 (라이트룸 -값 정도로 — 사진 원래 대비를 지킴)
+    const ct = v("contrast");
+    if (ct) list.push(new f.filters.Contrast({ contrast: ct < 0 ? ct * 0.5 : ct }));
     if (v("saturation")) list.push(new f.filters.Saturation({ saturation: v("saturation") }));
     if (v("vibrance")) list.push(new f.filters.Vibrance({ vibrance: v("vibrance") }));
     const w = v("warmth");
-    if (w) list.push(new f.filters.BlendColor({ color: w > 0 ? "#ff9a3c" : "#3c9aff", mode: "tint", alpha: Math.min(0.35, Math.abs(w) * 0.35) }));
+    // 따뜻함: 화이트밸런스처럼 빨강·파랑 세기만 바꿈 (색을 덮지 않아 검정은 검정 그대로)
+    if (w) list.push(new f.filters.ColorMatrix({ matrix: [1 + 0.18 * w, 0, 0, 0, 0, 0, 1 + 0.04 * w, 0, 0, 0, 0, 0, 1 - 0.22 * w, 0, 0, 0, 0, 0, 1, 0] }));
     // 필름 톤: 노출 · 어두운 영역 · 검정 계열 · 곡선(암부 들어올림 · S자)
     const film = filmFilters(f);
     const tone = {
