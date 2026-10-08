@@ -222,7 +222,7 @@ def _link_facebook(code: str) -> _FbLinked:
         perms = client.get("me/permissions").get("data", [])
     granted = ",".join(p["permission"] for p in perms if p.get("status") == "granted")
     declined = [p["permission"] for p in perms if p.get("status") == "declined"]
-    log.info("facebook link: %d pages (%d with instagram), declined=%s", len(pages),
+    log.warning("facebook link: %d pages (%d with instagram), declined=%s", len(pages),
              sum(1 for p in pages if p.get("instagram_business_account")), declined)
     return _FbLinked(
         fb_user_id=str(me.get("id", "")),
