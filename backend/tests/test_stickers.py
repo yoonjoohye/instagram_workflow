@@ -43,3 +43,16 @@ def test_sticker_roundtrip(client, login, account, db):
         db.commit()
     assert client.delete(f"/studio/stickers/{s['id']}").status_code == 204
     assert client.get("/studio/stickers").json()["data"] == []
+
+
+def test_layers_keep_size_and_are_not_listed(client, login, account):
+    login(account)
+    r = client.post("/studio/layers", files={"file": ("l.png", png(), "image/png")})
+    assert r.status_code == 201, r.text
+    assert (r.json()["width"], r.json()["height"]) == (200, 100)  # 레이어는 가장자리를 자르지 않음
+    assert client.get(f"/media/{r.json()['id']}.png").headers["content-type"] == "image/png"
+    photo = io.BytesIO()
+    Image.new("RGB", (300, 200), "blue").save(photo, "JPEG")
+    r2 = client.post("/studio/layers", files={"file": ("p.jpg", photo.getvalue(), "image/jpeg")})
+    assert client.get(f"/media/{r2.json()['id']}.png").headers["content-type"] == "image/jpeg"  # 투명한 곳이 없으면 JPEG
+    assert client.get("/studio/stickers").json()["data"] == []  # 내 스티커 목록엔 안 나옴

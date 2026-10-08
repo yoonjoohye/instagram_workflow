@@ -13,6 +13,7 @@
 import type * as F from "fabric";
 import { filmFilters } from "./filmFilters";
 import { composite, removeBackground } from "@/lib/cutout";
+import { removeSolidBackground } from "@/lib/cutout/colorKey";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
@@ -54,6 +55,11 @@ type Named = F.FabricObject & { name?: string; isEditing?: boolean; orig?: strin
 type Sticker = { id: string; url: string; width: number; height: number };
 // 편집 기록·저장에 함께 남길 우리 속성 (orig: 배경을 바꾸기 전 원본 사진 주소)
 const KEEP = ["name", "selectable", "evented", "link", "orig"];
+// 편집기 복사·붙여넣기 (다른 사진 편집기를 열어도 남음 — 같은 페이지 안에서)
+let clipboard: F.FabricObject | null = null;
+let pasteCount = 0;
+// Ctrl/⌘+V: 브라우저 붙여넣기(paste) 이벤트로 받되, 사파리처럼 입력칸 밖에선 이벤트를 안 주는 브라우저를 위해 잠깐 뒤 직접 붙여 넣음
+let pasteFallback: ReturnType<typeof setTimeout> | undefined;
 const BG_COLORS = ["#ffffff", "#000000", "#f4ece1", "#ffd6e0", "#cfe8ff", "#d8f3dc", "#fff1b8", "#e9d5ff"];
 
 export type EditorPreview = { kind: "feed" | "story"; assets: Asset[]; username: string; avatar?: string; caption: string };
@@ -186,7 +192,8 @@ export function ImageEditor({
   const [linkLabel, setLinkLabel] = useState("");
   // AI 배경 지우기·내 스티커
   const [aiBusy, setAiBusy] = useState<{ label: string; progress?: number } | null>(null);
-  const [cutBg, setCutBg] = useState(true);
+  const [keyTolerance, setKeyTolerance] = useState(0.3);
+  const photoFile = useRef<HTMLInputElement>(null);
   const [hasCutout, setHasCutout] = useState(false);
   const cutout = useRef<{ png: Blob; original: Blob } | null>(null);
   const stickerFile = useRef<HTMLInputElement>(null);
@@ -284,6 +291,8 @@ export function ImageEditor({
         fab.current = f;
         const c = new f.Canvas(canvasEl.current, { preserveObjectStacking: true, backgroundColor: "#000" });
         canvas.current = c;
+        // 개발용: 브라우저 테스트에서 캔버스 상태를 확인 (배포 빌드에는 없음)
+        if (process.env.NODE_ENV === "development") (window as unknown as { __editorCanvas?: F.Canvas }).__editorCanvas = c;
 
         const saved = meta.edit?.layers ? (JSON.parse(meta.edit.layers) as Layers) : null;
         if (saved?.canvas) {
@@ -387,6 +396,16 @@ export function ImageEditor({
       if (typing || obj?.isEditing) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
+      if (mod && (key === "c" || key === "x") && obj && !SPECIAL.has(obj.name ?? "")) {
+        e.preventDefault();
+        copySelected(key === "x");
+        return;
+      }
+      if (mod && key === "v") {
+        clearTimeout(pasteFallback);
+        pasteFallback = setTimeout(() => clipboard && pasteClipboard(), 80);
+        return; // 기본 동작은 막지 않음 (paste 이벤트가 오면 그쪽이 처리하고 위 타이머를 취소)
+      }
       if (mod && (key === "z" || key === "y")) {
         e.preventDefault();
         const h = history.current;
@@ -402,6 +421,26 @@ export function ImageEditor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // Ctrl/⌘+V: 다른 곳에서 복사한 이미지가 있으면 그 이미지를, 아니면 편집기에서 복사한 것을 붙여 넣음
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if ((canvas.current?.getActiveObject() as Named | undefined)?.isEditing) return;
+      clearTimeout(pasteFallback);
+      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+      if (file) {
+        e.preventDefault();
+        placePhoto(file);
+      } else if (clipboard) {
+        e.preventDefault();
+        pasteClipboard();
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
   });
 
   // ── 도구 ───────────────────────────────────────────────────
@@ -662,6 +701,107 @@ export function ImageEditor({
     }
   }
 
+  // ── 복사·붙여넣기·복제 (글자·도형·그림·스티커·사진 모두) ──────────────────
+  async function copySelected(cut = false) {
+    const c = canvas.current;
+    const o = c?.getActiveObject() as Named | undefined;
+    if (!c || !o || SPECIAL.has(o.name ?? "")) return;
+    clipboard = await o.clone(KEEP);
+    pasteCount = 0;
+    if (cut) removeSelected();
+  }
+
+  async function pasteClipboard() {
+    const c = canvas.current;
+    if (!c || !clipboard) return;
+    const copy = (await clipboard.clone(KEEP)) as F.FabricObject;
+    pasteCount += 1;
+    const shift = Math.round(size.current.w * 0.03) * pasteCount;
+    copy.set({ left: (copy.left ?? 0) + shift, top: (copy.top ?? 0) + shift, evented: true, selectable: true });
+    c.discardActiveObject();
+    if (copy instanceof fab.current!.ActiveSelection) {
+      // 여러 개를 함께 복사한 경우: 하나씩 캔버스에 넣고 다시 함께 선택
+      copy.canvas = c;
+      copy.forEachObject((o) => c.add(o));
+      copy.setCoords();
+      c.setActiveObject(copy);
+      c.requestRenderAll();
+    } else add(copy);
+  }
+
+  async function duplicateSelected() {
+    await copySelected();
+    await pasteClipboard();
+  }
+
+  async function uploadLayer(blob: Blob): Promise<string> {
+    const body = new FormData();
+    body.append("file", blob, "layer.png");
+    const res = await fetch("/api/py/studio/layers", { method: "POST", body, credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || res.status);
+    return data.url as string;
+  }
+
+  /** 사진 붙이기 (AI 없이): 올려서 저장해 두고(다시 열어도 남게) 캔버스 가운데에 */
+  async function placePhoto(file: Blob) {
+    setError(undefined);
+    setAiBusy({ label: t("editor.applying") });
+    try {
+      const url = await uploadLayer(file);
+      const img = await fab.current!.FabricImage.fromURL(mediaSrc(url), { crossOrigin: "anonymous" });
+      img.scale((size.current.w * 0.6) / Math.max(img.width, img.height));
+      img.set(center());
+      add(img);
+    } catch (e) {
+      setError(t("editor.stickerFailed", { e: toApiError(e).message }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  /** 고른 사진(스티커·붙인 사진)의 배경 지우기 — AI 또는 단색. 언제나 원본에서 다시 하므로 여러 번 바꿔도 깨끗함 */
+  async function cutSelected(mode: "ai" | "solid", tolerance = keyTolerance) {
+    const o = canvas.current?.getActiveObject() as (F.FabricImage & Named) | undefined;
+    if (!o || o.type !== "image" || SPECIAL.has(o.name ?? "")) return;
+    setError(undefined);
+    try {
+      const orig = o.orig || o.getSrc();
+      let png: Blob;
+      if (mode === "ai") {
+        png = await cut(await (await fetch(mediaSrc(orig), { credentials: "include" })).blob());
+      } else {
+        const el = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const im = new Image();
+          im.crossOrigin = "anonymous";
+          im.onload = () => resolve(im);
+          im.onerror = () => reject(new Error("image"));
+          im.src = mediaSrc(orig);
+        });
+        png = await removeSolidBackground(el, tolerance);
+      }
+      setAiBusy({ label: t("editor.applying") });
+      const url = await uploadLayer(png);
+      await o.setSrc(mediaSrc(url), { crossOrigin: "anonymous" });
+      o.orig = orig;
+      canvas.current!.requestRenderAll();
+      snapshot();
+    } catch (e) {
+      setError(t("editor.cutFailed", { e: toApiError(e).message }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function restoreSelectedImage() {
+    const o = canvas.current?.getActiveObject() as (F.FabricImage & Named) | undefined;
+    if (!o?.orig) return;
+    await o.setSrc(mediaSrc(o.orig), { crossOrigin: "anonymous" });
+    o.orig = undefined;
+    canvas.current!.requestRenderAll();
+    snapshot();
+  }
+
   async function placeSticker(st: Sticker) {
     const f = fab.current!;
     const img = await f.FabricImage.fromURL(mediaSrc(st.url), { crossOrigin: "anonymous" });
@@ -684,7 +824,7 @@ export function ImageEditor({
   async function stickerFromFile(file: File) {
     setError(undefined);
     try {
-      const png = cutBg ? await cut(file) : file;
+      const png = await cut(file);
       setAiBusy({ label: t("editor.applying") });
       await placeSticker(await saveSticker(png));
     } catch (e) {
@@ -932,6 +1072,9 @@ export function ImageEditor({
             )}
             {selected && !SPECIAL.has(selected.name ?? "") && (
               <div className="absolute top-3 right-3 flex gap-1">
+                <button type="button" onClick={duplicateSelected} className="rounded-full bg-black/60 px-3 py-1.5 text-[12px]" title="Ctrl/⌘ + C · V">
+                  {t("editor.duplicate")}
+                </button>
                 <button type="button" onClick={bringFront} className="rounded-full bg-black/60 px-3 py-1.5 text-[12px]">
                   {t("editor.bringFront")}
                 </button>
@@ -1002,14 +1145,44 @@ export function ImageEditor({
               {tab === "sticker" && (
                 <div className="space-y-2.5">
                   <div className="space-y-1.5">
+                    {/* 고른 사진(붙인 사진·스티커)의 배경 지우기 */}
+                    {selected?.type === "image" && !SPECIAL.has(selected.name ?? "") && (
+                      <div className="space-y-1.5 rounded-lg border border-white/10 p-2">
+                        <p className="text-[12px] font-semibold text-white/80">🖼 {t("editor.selectedPhoto")}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Chip onClick={() => cutSelected("ai")}>✂ {t("editor.removeBgAi")}</Chip>
+                          <Chip onClick={() => cutSelected("solid")}>🪄 {t("editor.removeBgSolid")}</Chip>
+                          {(selected as Named).orig && <Chip onClick={restoreSelectedImage}>{t("editor.restorePhoto")}</Chip>}
+                        </div>
+                        <Slider
+                          label={t("editor.tolerance")}
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={keyTolerance}
+                          display={String(Math.round(keyTolerance * 100))}
+                          onChange={setKeyTolerance}
+                          onCommit={() => cutSelected("solid")}
+                        />
+                        <p className="text-[11px] text-white/45">{t("editor.solidHint")}</p>
+                      </div>
+                    )}
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="mr-1 text-[12px] font-semibold text-white/80">⭐ {t("editor.myStickers")}</span>
-                      <Chip onClick={() => stickerFile.current?.click()}>+ {t("editor.stickerFromPhoto")}</Chip>
-                      <label className="flex items-center gap-1 text-[11px] text-white/70">
-                        <input type="checkbox" checked={cutBg} onChange={(e) => setCutBg(e.target.checked)} className="accent-[#8b5cf6]" />
-                        {t("editor.removeBgToo")}
-                      </label>
+                      <Chip onClick={() => photoFile.current?.click()}>🖼 {t("editor.placePhoto")}</Chip>
+                      <Chip onClick={() => stickerFile.current?.click()}>✂ {t("editor.stickerFromPhoto")}</Chip>
                       {selected && !SPECIAL.has(selected.name ?? "") && <Chip onClick={saveSelectionAsSticker}>{t("editor.saveSelection")}</Chip>}
+                      <input
+                        ref={photoFile}
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (file) placePhoto(file);
+                        }}
+                      />
                       <input
                         ref={stickerFile}
                         type="file"
@@ -1022,6 +1195,7 @@ export function ImageEditor({
                         }}
                       />
                     </div>
+                    <p className="text-[11px] text-white/45">{t("editor.copyPasteHint")}</p>
                     {(stickers.data?.data.length ?? 0) > 0 ? (
                       <Row>
                         {stickers.data!.data.map((st) => (
