@@ -12,9 +12,11 @@
  */
 import type * as F from "fabric";
 import { filmFilters } from "./filmFilters";
+import { BAND_SWATCH, colorFilters, HSL_BANDS, type Band } from "./colorFilters";
 import { composite, removeBackground } from "@/lib/cutout";
 import { removeSolidBackground } from "@/lib/cutout/colorKey";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { haptic } from "@/lib/haptics";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
 import { StoryPreview } from "@/components/studio/StoryPreview";
 import { Button, cx, Spinner } from "@/components/ui";
@@ -26,7 +28,8 @@ import type { Asset } from "@/lib/types";
 type Tab = "text" | "sticker" | "draw" | "adjust" | "bg" | "crop";
 type Brush = "pen" | "marker" | "neon" | "eraser";
 type Layers = { v: 1; w: number; h: number; canvas: object; adjust?: Adjust; crop?: Crop };
-type Adjust = {
+type HslKey = `hsl${"H" | "S" | "L"}_${Band}`;
+type Adjust = Record<HslKey, number> & {
   /** 2: 프리셋을 누르면 슬라이더가 그 값으로 바뀜 (예전 1: 프리셋 값이 슬라이더에 몰래 더해짐) */
   v?: 2;
   preset: string;
@@ -37,8 +40,26 @@ type Adjust = {
   fade: number;
   vignette: number;
   sharpen: number;
+  sepia: number; // 0~1 세피아(누런 옛날 사진 톤) 정도
+  mono: number; // 0~1 흑백 정도
+  // 라이트룸식: 흰색 계열 · 색조(틴트) · 활기 · 텍스처 · 부분 대비(클래리티) · 디헤이즈
+  whites: number;
+  tint: number;
+  vibrance: number;
+  texture: number;
+  clarity: number;
+  dehaze: number;
+  // 컬러 그레이딩: 어두운·중간·밝은 영역의 색상(0~360)·채도(0~1) + 균형
+  gradeShadowHue: number;
+  gradeShadowSat: number;
+  gradeMidHue: number;
+  gradeMidSat: number;
+  gradeHighHue: number;
+  gradeHighSat: number;
+  gradeBalance: number;
   // 필름 보정 (Camera Raw 의 기본·곡선·효과)
   exposure: number;
+  highlights: number;
   shadows: number;
   blacks: number;
   lift: number;
@@ -75,13 +96,16 @@ const SHAPES = {
 } as const;
 const NO_ADJUST: Adjust = {
   v: 2,
-  preset: "none", brightness: 0, contrast: 0, warmth: 0, saturation: 0, fade: 0, vignette: 0, sharpen: 0,
-  exposure: 0, shadows: 0, blacks: 0, lift: 0, curve: 0, grain: 0, grainSize: 0.25, grainRough: 0.3,
+  preset: "none", brightness: 0, contrast: 0, warmth: 0, saturation: 0, fade: 0, vignette: 0, sharpen: 0, sepia: 0, mono: 0,
+  exposure: 0, highlights: 0, shadows: 0, blacks: 0, lift: 0, curve: 0, grain: 0, grainSize: 0.25, grainRough: 0.3,
   glow: 0, glowRadius: 0.5, glowSoft: 0,
+  whites: 0, tint: 0, vibrance: 0, texture: 0, clarity: 0, dehaze: 0,
+  gradeShadowHue: 210, gradeShadowSat: 0, gradeMidHue: 35, gradeMidSat: 0, gradeHighHue: 45, gradeHighSat: 0, gradeBalance: 0,
+  ...(Object.fromEntries(HSL_BANDS.flatMap((b) => (["H", "S", "L"] as const).map((x) => [`hsl${x}_${b}`, 0]))) as Record<HslKey, number>),
 };
 const NO_CROP: Crop = { zoom: 1, turns: 0, straighten: 0, flip: false };
 // 필터: 보정 값 묶음 (사용자가 슬라이더로 더 조정 가능)
-const PRESETS: Record<string, Partial<Adjust> & { mono?: boolean; sepia?: boolean }> = {
+const PRESETS: Record<string, Partial<Adjust>> = {
   none: {},
   clear: { brightness: 0.06, contrast: 0.12, saturation: 0.25 },
   // 필름 카메라 감성: 노출 +0.5, 대비 -15, 어두운 영역 +40, 검정 +15, 암부 들어올린 완만한 S자 곡선, 그레인 25
@@ -91,25 +115,58 @@ const PRESETS: Record<string, Partial<Adjust> & { mono?: boolean; sepia?: boolea
   warm: { warmth: 0.45, saturation: 0.08 },
   cool: { warmth: -0.45 },
   vivid: { saturation: 0.45, contrast: 0.12 },
-  vintage: { sepia: true, fade: 0.2, contrast: -0.05 },
-  mono: { mono: true },
-  drama: { mono: true, contrast: 0.35 },
+  vintage: { sepia: 0.35, fade: 0.2, contrast: -0.05 },
+  mono: { mono: 1 },
+  drama: { mono: 1, contrast: 0.35 },
+  // 2000년대 디카 감성: 대비 -20, 그레인 +22(입자 작게), 따뜻함 +15(살구빛 피부), 페이드 +28, 선명도 -10(옛 렌즈), 하이라이트 -30(플래시 질감)
+  // 내추럴 필름 (라이트룸 레시피: 노출 +0.3 · 대비 -8 · 하이라이트 -20 · 그림자 +15 · 활기 +8 · 클래리티 -12 · 그레인 14 …,
+  // 그림자는 살짝 차갑게·피부와 빛은 따뜻하게, 주황 밝게·노랑 살짝 주황 쪽으로)
+  natural: {
+    exposure: 0.3, contrast: -0.08, highlights: -0.2, shadows: 0.15, whites: -0.05, blacks: 0.08,
+    warmth: 0.055, tint: 0.02, saturation: 0.03, vibrance: 0.08, texture: -0.08, clarity: -0.12, dehaze: -0.02, sharpen: -0.1,
+    grain: 0.14, grainSize: 0.15, fade: 0.045,
+    gradeShadowHue: 210, gradeShadowSat: 0.03, gradeMidHue: 35, gradeMidSat: 0.04, gradeHighHue: 45, gradeHighSat: 0.06, gradeBalance: 0.05,
+    hslH_orange: -0.03, hslS_orange: -0.03, hslL_orange: 0.08, hslH_yellow: -0.1, hslS_yellow: -0.05, hslS_green: -0.08, hslS_blue: -0.05,
+  },
+  digicam: { contrast: -0.2, grain: 0.22, grainSize: 0.08, grainRough: 0.5, warmth: 0.15, fade: 0.28, sharpen: -0.1, highlights: -0.3 },
 };
 /** 프리셋을 누르면: 모든 보정을 그 프리셋 값으로 (흑백·세피아 같은 켜고 끄는 효과는 프리셋 이름으로) */
 function presetAdjust(key: string): Adjust {
-  const { mono: _m, sepia: _s, ...values } = PRESETS[key] ?? {};
-  return { ...NO_ADJUST, ...values, preset: key, v: 2 };
+  return { ...NO_ADJUST, ...(PRESETS[key] ?? {}), preset: key, v: 2 };
 }
+
+// 세피아·흑백이 켜고 끄기였던 시절의 저장본: 그때 모습 그대로 (세피아·흑백 100%)
+const LEGACY_FLAGS: Record<string, Partial<Adjust>> = { vintage: { sepia: 1 }, mono: { mono: 1 }, drama: { mono: 1 } };
 
 /** 예전에 저장한 보정(프리셋 값이 슬라이더에 더해지던 방식)을 지금 방식으로 — 보이는 결과는 그대로 */
 function normalizeAdjust(a?: Partial<Adjust>): Adjust {
   const merged = { ...NO_ADJUST, ...a } as Adjust;
-  if (a?.v === 2) return merged;
-  const p = PRESETS[merged.preset] ?? {};
   const out = { ...merged, v: 2 as const };
-  for (const [k, val] of Object.entries(p)) if (typeof val === "number") (out as Record<string, unknown>)[k] = Number(merged[k as keyof Adjust] ?? 0) + val;
+  if (a?.v !== 2) {
+    const p = PRESETS[merged.preset] ?? {};
+    for (const [k, val] of Object.entries(p)) if (typeof val === "number") (out as Record<string, unknown>)[k] = Number(merged[k as keyof Adjust] ?? 0) + val;
+  }
+  if (a?.sepia === undefined && a?.mono === undefined) Object.assign(out, LEGACY_FLAGS[merged.preset] ?? {});
   return out;
 }
+
+/** 원래 색과 효과 색을 amount 만큼 섞는 색 행렬 (fabric ColorMatrix, 4×5) */
+function blendMatrix(rows: number[][], amount: number): number[] {
+  const a = Math.max(0, Math.min(1, amount));
+  const m: number[] = [];
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) m.push((r === c ? 1 - a : 0) + rows[r][c] * a);
+    m.push(0, 0);
+  }
+  m.push(0, 0, 0, 1, 0);
+  return m;
+}
+const GRAY = [0.299, 0.587, 0.114];
+const SEPIA = [
+  [0.393, 0.769, 0.189],
+  [0.349, 0.686, 0.168],
+  [0.272, 0.534, 0.131],
+];
 
 /** 저장된 캔버스에서: 사진에 걸려 있던 필터(직접 만든 필터는 다시 못 읽음)와 예전 비네트 막을 뺌 — 보정은 adjust 로 다시 적용 */
 function cleanCanvasJson(json: { objects?: Record<string, unknown>[] }) {
@@ -127,18 +184,38 @@ function cleanCanvasJson(json: { objects?: Record<string, unknown>[] }) {
 type SliderKey = Exclude<keyof Adjust, "preset" | "glowSoft" | "v">;
 const pct = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`;
 const ev = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
-const ADJUST_GROUPS: { title: "editor.groupBasic" | "editor.groupCurve" | "editor.groupEffects"; sliders: [SliderKey, number, number, (v: number) => string][] }[] = [
+type GroupTitle = "editor.groupBasic" | "editor.groupColor" | "editor.groupDetail" | "editor.groupCurve" | "editor.groupEffects";
+const ADJUST_GROUPS: { title: GroupTitle; sliders: [SliderKey, number, number, (v: number) => string][] }[] = [
   {
     title: "editor.groupBasic",
     sliders: [
       ["exposure", -1, 1, ev],
-      ["brightness", -0.5, 0.5, pct],
       ["contrast", -0.5, 0.5, pct],
+      ["highlights", -1, 1, pct],
       ["shadows", -1, 1, pct],
+      ["whites", -1, 1, pct],
       ["blacks", -1, 1, pct],
+      ["brightness", -0.5, 0.5, pct],
+    ],
+  },
+  {
+    title: "editor.groupColor",
+    sliders: [
       ["warmth", -1, 1, pct],
+      ["tint", -1, 1, pct],
       ["saturation", -1, 1, pct],
-      ["sharpen", 0, 0.6, pct],
+      ["vibrance", -1, 1, pct],
+      ["sepia", 0, 1, pct],
+      ["mono", 0, 1, pct],
+    ],
+  },
+  {
+    title: "editor.groupDetail",
+    sliders: [
+      ["texture", -1, 1, pct],
+      ["clarity", -1, 1, pct],
+      ["dehaze", -1, 1, pct],
+      ["sharpen", -0.5, 0.6, pct],
     ],
   },
   {
@@ -161,6 +238,13 @@ const ADJUST_GROUPS: { title: "editor.groupBasic" | "editor.groupCurve" | "edito
     ],
   },
 ];
+const deg = (v: number) => `${Math.round(v)}°`;
+const hueColor = (h: number) => `hsl(${Math.round(h)} 85% 55%)`;
+const GRADES = [
+  { label: "editor.gradeShadows", hue: "gradeShadowHue", sat: "gradeShadowSat" },
+  { label: "editor.gradeMidtones", hue: "gradeMidHue", sat: "gradeMidSat" },
+  { label: "editor.gradeHighlights", hue: "gradeHighHue", sat: "gradeHighSat" },
+] as const;
 
 const faceName = (key: string) => `ffont-${key}`;
 // 글씨체에 없는 이모지는 기기의 이모지 글꼴로 그립니다 (없으면 빈칸·네모로 보임)
@@ -230,6 +314,10 @@ export function ImageEditor({
   // AI 배경 지우기·내 스티커
   const [aiBusy, setAiBusy] = useState<{ label: string; progress?: number } | null>(null);
   const [keyTolerance, setKeyTolerance] = useState(0.3);
+  const [hslMode, setHslMode] = useState<"H" | "S" | "L">("H");
+  // 인스타 게시 사이즈 가이드 (화면에만 — 저장 이미지엔 안 들어감)
+  const [view, setView] = useState({ w: 0, h: 0 });
+  const [guides, setGuides] = useState(true);
   const photoFile = useRef<HTMLInputElement>(null);
   const [hasCutout, setHasCutout] = useState(false);
   const cutout = useRef<{ png: Blob; original: Blob } | null>(null);
@@ -314,6 +402,7 @@ export function ImageEditor({
     const z = Math.min((el.clientWidth - 24) / w, (el.clientHeight - 24) / h);
     zoom.current = z;
     c.setDimensions({ width: Math.floor(w * z), height: Math.floor(h * z) });
+    setView({ w: Math.floor(w * z), h: Math.floor(h * z) });
     c.setZoom(z);
     c.requestRenderAll();
   }, []);
@@ -934,24 +1023,43 @@ export function ImageEditor({
 
   function buildFilters(a: Adjust): F.filters.BaseFilter<string, object>[] {
     const f = fab.current!;
-    const p = PRESETS[a.preset] ?? {};
     const v = (k: keyof Adjust) => Number(a[k] ?? 0);
     const list: F.filters.BaseFilter<string, object>[] = [];
-    if (p.mono) list.push(new f.filters.Grayscale());
-    if (p.sepia) list.push(new f.filters.Sepia());
+    if (v("mono") > 0) list.push(new f.filters.ColorMatrix({ matrix: blendMatrix([GRAY, GRAY, GRAY], v("mono")) }));
+    if (v("sepia") > 0) list.push(new f.filters.ColorMatrix({ matrix: blendMatrix(SEPIA, v("sepia")) }));
     if (v("brightness")) list.push(new f.filters.Brightness({ brightness: v("brightness") }));
     // 페이드: 어두운 곳을 띄우고 대비를 낮춤
     if (v("fade")) list.push(new f.filters.Brightness({ brightness: v("fade") * 0.12 }), new f.filters.Contrast({ contrast: -v("fade") * 0.35 }));
     if (v("contrast")) list.push(new f.filters.Contrast({ contrast: v("contrast") }));
     if (v("saturation")) list.push(new f.filters.Saturation({ saturation: v("saturation") }));
+    if (v("vibrance")) list.push(new f.filters.Vibrance({ vibrance: v("vibrance") }));
     const w = v("warmth");
     if (w) list.push(new f.filters.BlendColor({ color: w > 0 ? "#ff9a3c" : "#3c9aff", mode: "tint", alpha: Math.min(0.35, Math.abs(w) * 0.35) }));
     // 필름 톤: 노출 · 어두운 영역 · 검정 계열 · 곡선(암부 들어올림 · S자)
     const film = filmFilters(f);
-    const tone = { exposure: v("exposure"), shadows: v("shadows"), blacks: v("blacks"), lift: v("lift"), curve: v("curve") };
+    const tone = {
+      exposure: v("exposure"), highlights: v("highlights"), shadows: v("shadows"), whites: v("whites"), blacks: v("blacks"),
+      lift: v("lift"), curve: v("curve"), dehaze: v("dehaze"),
+    };
     if (Object.values(tone).some(Boolean)) list.push(new film.FilmTone(tone));
+    // 색조 · HSL 8색 · 컬러 그레이딩
+    const cf = colorFilters(f);
+    const color = {
+      tint: v("tint"),
+      gradeHue: [v("gradeShadowHue"), v("gradeMidHue"), v("gradeHighHue")] as [number, number, number],
+      gradeSat: [v("gradeShadowSat"), v("gradeMidSat"), v("gradeHighSat")] as [number, number, number],
+      balance: v("gradeBalance"),
+      hslHue: HSL_BANDS.map((b) => v(`hslH_${b}`)),
+      hslSat: HSL_BANDS.map((b) => v(`hslS_${b}`)),
+      hslLum: HSL_BANDS.map((b) => v(`hslL_${b}`)),
+    };
+    if (color.tint || color.gradeSat.some(Boolean) || [...color.hslHue, ...color.hslSat, ...color.hslLum].some(Boolean)) list.push(new cf.FilmColor(color));
+    // 텍스처 · 부분 대비
+    if (v("texture") || v("clarity")) list.push(new cf.FilmDetail({ texture: v("texture"), clarity: v("clarity") }));
+    // 선명도: + 는 또렷하게, - 는 살짝 뭉개 옛날 렌즈 느낌
     const sh = v("sharpen");
     if (sh > 0) list.push(new f.filters.Convolute({ matrix: [0, -sh, 0, -sh, 1 + 4 * sh, -sh, 0, -sh, 0] }));
+    if (sh < 0) list.push(new f.filters.Blur({ blur: -sh * 0.04 }));
     // 글로우 (흐린 사본을 겹쳐 하이라이트가 번지게) → 그 위에 그레인
     if (v("glow") > 0) list.push(new film.FilmGlow({ amount: v("glow"), radius: v("glowRadius"), mode: v("glowSoft") >= 0.5 ? "soft" : "screen" }));
     // 그레인은 맨 마지막 (선명도·글로우에 깎이지 않게)
@@ -990,7 +1098,9 @@ export function ImageEditor({
       sctx.drawImage(cv, 0, 0);
       out.getContext("2d")!.clearRect(0, 0, W, H);
       const gl = f.getFilterBackend() as { tileSize?: number };
-      const backend = gl.tileSize && Math.max(W, H) > gl.tileSize ? new f.Canvas2dFilterBackend() : f.getFilterBackend();
+      // 개발용: window.__force2d = true 로 WebGL 없는 기기(픽셀 계산)도 확인
+      const force2d = process.env.NODE_ENV === "development" && (window as unknown as { __force2d?: boolean }).__force2d;
+      const backend = force2d || (gl.tileSize && Math.max(W, H) > gl.tileSize) ? new f.Canvas2dFilterBackend() : f.getFilterBackend();
       backend.applyFilters(filters, src, W, H, out);
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1169,6 +1279,21 @@ export function ImageEditor({
         <div className="flex min-w-0 flex-1 flex-col">
           <div ref={holder} className="relative flex min-h-0 flex-1 items-center justify-center">
             <canvas ref={canvasEl} />
+            {ready && guides && preview && view.w > 0 && <SizeGuides kind={preview.kind} w={view.w} h={view.h} />}
+            {ready && preview && (
+              <button
+                type="button"
+                onClick={() => setGuides((g) => !g)}
+                aria-pressed={guides}
+                title={t("editor.guidesHint")}
+                className={cx(
+                  "absolute bottom-3 left-3 z-10 rounded-full px-3 py-1.5 text-[12px]",
+                  guides ? "bg-white/90 text-black" : "bg-black/60 text-white/80",
+                )}
+              >
+                📐 {t("editor.guides")}
+              </button>
+            )}
             {!ready && !error && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <Spinner className="size-6" />
@@ -1458,13 +1583,89 @@ export function ImageEditor({
                   {/* 기본 · 곡선 · 효과 (Camera Raw 패널 순서) — 많아서 패널 안에서 스크롤 */}
                   <div className="max-h-[30vh] space-y-3 overflow-y-auto pr-1 lg:max-h-[26vh]">
                     {ADJUST_GROUPS.map((g) => (
-                      <section key={g.title}>
+                      <Fragment key={g.title}>
+                      {g.title === "editor.groupEffects" && (
+                        <>
+                          {/* 컬러 그레이딩: 밝기 영역마다 색 */}
+                          <section>
+                            <p className="mb-1 text-[11px] font-semibold tracking-wide text-white/45">{t("editor.groupGrading")}</p>
+                            <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                              {GRADES.map((gr) => (
+                                <Fragment key={gr.label}>
+                                  <Slider
+                                    label={t(gr.label)}
+                                    swatch={hueColor(adjust[gr.hue])}
+                                    min={0}
+                                    max={360}
+                                    step={1}
+                                    value={adjust[gr.hue]}
+                                    display={deg(adjust[gr.hue])}
+                                    onChange={(v) => applyAdjust({ ...adjust, [gr.hue]: v })}
+                                    onCommit={snapshot}
+                                  />
+                                  <Slider
+                                    label={t("editor.gradeSat")}
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    value={adjust[gr.sat]}
+                                    display={pct(adjust[gr.sat])}
+                                    onChange={(v) => applyAdjust({ ...adjust, [gr.sat]: v })}
+                                    onCommit={snapshot}
+                                  />
+                                </Fragment>
+                              ))}
+                              <Slider
+                                label={t("editor.gradeBalance")}
+                                min={-1}
+                                max={1}
+                                step={0.01}
+                                value={adjust.gradeBalance}
+                                display={pct(adjust.gradeBalance)}
+                                onChange={(v) => applyAdjust({ ...adjust, gradeBalance: v })}
+                                onCommit={snapshot}
+                              />
+                            </div>
+                          </section>
+                          {/* HSL: 8색마다 색상·채도·밝기 */}
+                          <section>
+                            <div className="mb-1 flex items-center gap-2">
+                              <p className="text-[11px] font-semibold tracking-wide text-white/45">HSL</p>
+                              {(["H", "S", "L"] as const).map((m) => (
+                                <Chip key={m} on={hslMode === m} onClick={() => setHslMode(m)}>
+                                  {t(m === "H" ? "editor.hslHue" : m === "S" ? "editor.hslSat" : "editor.hslLum")}
+                                </Chip>
+                              ))}
+                            </div>
+                            <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                              {HSL_BANDS.map((b) => {
+                                const k = `hsl${hslMode}_${b}` as HslKey;
+                                return (
+                                  <Slider
+                                    key={k}
+                                    label={t(`editor.band_${b}`)}
+                                    swatch={BAND_SWATCH[b]}
+                                    min={-1}
+                                    max={1}
+                                    step={0.01}
+                                    value={adjust[k]}
+                                    display={pct(adjust[k])}
+                                    onChange={(v) => applyAdjust({ ...adjust, [k]: v })}
+                                    onCommit={snapshot}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </section>
+                        </>
+                      )}
+                      <section>
                         <p className="mb-1 text-[11px] font-semibold tracking-wide text-white/45">{t(g.title)}</p>
                         <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
                           {g.sliders.map(([k, min, max, show]) => (
                             <Slider
                               key={k}
-                              label={t(`editor.${k}`)}
+                              label={t(`editor.${k}` as "editor.brightness")}
                               min={min}
                               max={max}
                               step={0.01}
@@ -1487,6 +1688,7 @@ export function ImageEditor({
                           </div>
                         )}
                       </section>
+                      </Fragment>
                     ))}
                   </div>
                 </div>
@@ -1577,6 +1779,77 @@ function hexAlpha(hex: string, a: number) {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
+/** 인스타그램에 실제로 보이는 영역 점선 (화면에만).
+ *  피드: 4:5보다 길면 4:5만, 1.91:1보다 넓으면 그만큼만 올라가고, 프로필 그리드는 가운데 3:4.
+ *  스토리: 9:16 화면 위쪽(계정·진행 바)·아래쪽(답장 칸)은 화면 요소에 가려질 수 있음. */
+function SizeGuides({ kind, w, h }: { kind: "feed" | "story"; w: number; h: number }) {
+  const t = useT();
+  const a = w / h;
+  const box = (ratio: number) => (a > ratio ? { bw: h * ratio, bh: h } : { bw: w, bh: w / ratio });
+  const rects: { x: number; y: number; bw: number; bh: number; label: string; strong: boolean }[] = [];
+  const bands: { y: number; bh: number; label: string }[] = [];
+  if (kind === "feed") {
+    if (a < 0.8 - 0.005 || a > 1.91 + 0.005) {
+      const { bw, bh } = box(a < 0.8 ? 0.8 : 1.91);
+      rects.push({ x: (w - bw) / 2, y: (h - bh) / 2, bw, bh, label: t(a < 0.8 ? "editor.guideFeed45" : "editor.guideFeedWide"), strong: true });
+    }
+    if (Math.abs(a - 0.75) > 0.01) {
+      const { bw, bh } = box(0.75);
+      rects.push({ x: (w - bw) / 2, y: (h - bh) / 2, bw, bh, label: t("editor.guideGrid"), strong: false });
+    }
+  } else {
+    // 사진이 9:16 이 아니면 게시할 때 9:16 화면 가운데에 얹힘 → 그 화면 기준으로 가려지는 띠
+    const frameH = a > 9 / 16 ? w / (9 / 16) : h;
+    const offset = (frameH - h) / 2;
+    const top = frameH * 0.14 - offset;
+    const bottom = frameH * 0.2 - offset;
+    if (top > 2) bands.push({ y: 0, bh: Math.min(top, h), label: t("editor.guideStoryTop") });
+    if (bottom > 2) bands.push({ y: h - Math.min(bottom, h), bh: Math.min(bottom, h), label: t("editor.guideStoryBottom") });
+  }
+  return (
+    <svg
+      aria-hidden
+      width={w}
+      height={h}
+      className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+      style={{ overflow: "visible" }}
+    >
+      {bands.map((b) => (
+        <g key={b.label}>
+          <rect x={0} y={b.y} width={w} height={b.bh} fill="rgba(0,0,0,0.28)" />
+          <line x1={0} x2={w} y1={b.y === 0 ? b.bh : b.y} y2={b.y === 0 ? b.bh : b.y} stroke="#fff" strokeWidth={1.5} strokeDasharray="5 5" />
+          <text x={8} y={b.y === 0 ? b.bh - 6 : b.y + 14} fill="#fff" fontSize={11} style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.6)", strokeWidth: 3 }}>
+            {b.label}
+          </text>
+        </g>
+      ))}
+      {rects.map((r) => (
+        <g key={r.label}>
+          <rect
+            x={r.x + 0.75}
+            y={r.y + 0.75}
+            width={r.bw - 1.5}
+            height={r.bh - 1.5}
+            fill="none"
+            stroke={r.strong ? "#fff" : "rgba(255,255,255,0.6)"}
+            strokeWidth={r.strong ? 1.5 : 1}
+            strokeDasharray={r.strong ? "6 5" : "2 4"}
+          />
+          <text
+            x={r.x + 8}
+            y={r.strong ? r.y + 16 : r.y + r.bh - 8}
+            fill="#fff"
+            fontSize={11}
+            style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.6)", strokeWidth: 3 }}
+          >
+            {r.label}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 function Row({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cx("flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none]", className)}>{children}</div>;
 }
@@ -1622,8 +1895,11 @@ function Slider({
   max,
   step,
   display,
+  swatch,
 }: {
   label: string;
+  /** 이름 앞 색 점 (HSL 색·컬러 그레이딩 색상) */
+  swatch?: string;
   value: number;
   onChange: (v: number) => void;
   onCommit?: () => void;
@@ -1633,20 +1909,50 @@ function Slider({
   /** 오른쪽에 보이는 값 (예: +0.50, -15) */
   display?: string;
 }) {
+  // 움직일 때 '틱' 진동, 가운데(0)를 지나면 0에 살짝 붙으며 '팡'
+  const range = max - min;
+  const center = min < 0 && max > 0 ? 0 : null;
+  const last = useRef(value);
+  const change = (raw: number) => {
+    let v = raw;
+    if (center !== null && Math.abs(v - center) <= range * 0.025) v = center;
+    const prev = last.current;
+    last.current = v;
+    if (v === prev) return;
+    const crossed = center !== null && (v === center || (prev - center) * (v - center) < 0);
+    if (crossed && prev !== center) haptic("snap");
+    else if (Math.round((v - min) / (range / 20)) !== Math.round((prev - min) / (range / 20))) haptic("tick");
+    onChange(v);
+  };
+  useEffect(() => {
+    last.current = value;
+  }, [value]);
   return (
     <label className="flex items-center gap-3 text-[12px] text-white/70">
-      <span className="w-20 shrink-0">{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onPointerUp={onCommit}
-        onKeyUp={onCommit}
-        className="min-w-0 flex-1 accent-white"
-      />
+      <span className="flex w-20 shrink-0 items-center gap-1.5">
+        {swatch && <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: swatch }} />}
+        {label}
+      </span>
+      <span className="relative flex min-w-0 flex-1 items-center">
+        {center !== null && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 h-3 w-px -translate-y-1/2 bg-white/35"
+            style={{ left: `calc(${((center - min) / range) * 100}% )` }}
+          />
+        )}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => change(Number(e.target.value))}
+          onPointerUp={onCommit}
+          onKeyUp={onCommit}
+          className="relative w-full accent-white"
+        />
+      </span>
       {display !== undefined && <span className="tnum w-9 shrink-0 text-right text-[11px] text-white/55">{display}</span>}
     </label>
   );

@@ -1,12 +1,12 @@
 /** 필름 보정용 fabric 필터 (Camera Raw 의 기본·곡선·효과 패널과 포토샵 레이어 효과를 흉내):
- *  - FilmTone : 노출 · 어두운 영역 · 검정 계열 · 곡선(암부 들어올림 · S자)
+ *  - FilmTone : 노출 · 하이라이트 · 어두운 영역 · 검정 계열 · 곡선(암부 들어올림 · S자)
  *  - FilmGrain: 그레인 양 · 크기 · 거칠기 (같은 사진엔 항상 같은 무늬 — 슬라이더를 움직여도 깜빡이지 않음)
  *  - FilmGlow : 뽀얀 글로우 — 흐리게 한 사본을 스크린/소프트 라이트로 겹치고 불투명도로 섞기
  *  fabric 은 WebGL 셰이더로 그리고, WebGL 이 없으면 applyTo2d(픽셀 계산)로 같은 결과를 냅니다. */
 
 import type * as F from "fabric";
 
-export type ToneValues = { exposure: number; shadows: number; blacks: number; lift: number; curve: number };
+export type ToneValues = { exposure: number; highlights: number; shadows: number; whites: number; blacks: number; lift: number; curve: number; dehaze: number };
 export type GrainValues = { amount: number; size: number; roughness: number };
 export type GlowMode = "screen" | "soft";
 export type GlowValues = { amount: number; radius: number; mode: GlowMode };
@@ -15,16 +15,19 @@ export type GlowValues = { amount: number; radius: number; mode: GlowMode };
 export const glowRadiusPx = (radius: number, w: number, h: number) => Math.max(2, (0.004 + radius * 0.024) * Math.min(w, h));
 
 // 셰이더와 픽셀 계산이 같은 식을 쓰도록 계수를 한곳에
-const K = { shadows: 0.3, blacks: 0.18, lift: 0.22 };
+const K = { highlights: 0.3, shadows: 0.3, whites: 0.22, blacks: 0.18, lift: 0.22, dehaze: 0.14 };
 
 const TONE_GLSL = `
   precision highp float;
   uniform sampler2D uTexture;
   uniform float uExposure;
+  uniform float uHighlights;
   uniform float uShadows;
+  uniform float uWhites;
   uniform float uBlacks;
   uniform float uLift;
   uniform float uCurve;
+  uniform float uDehaze;
   varying vec2 vTexCoord;
   void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
@@ -33,9 +36,14 @@ const TONE_GLSL = `
     c = mix(c, 0.85 + 0.15 * (1.0 - exp(-(c - 0.85) / 0.15)), step(vec3(0.85), c));
     float l = clamp(dot(c, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
     float ws = (1.0 - l) * (1.0 - l);
+    c += uHighlights * ${K.highlights} * l * l; // 밝은 곳만 (하이라이트를 누르면 플래시 디카 질감)
     c += uShadows * ${K.shadows} * ws;
     c += uBlacks * ${K.blacks} * ws * ws;
+    c += uWhites * ${K.whites} * l * l * l * l; // 가장 밝은 끝만
     c = clamp(c, 0.0, 1.0);
+    // 디헤이즈: + 는 뿌연 막을 걷어 또렷하게, - 는 뽀얗게 안개를 더함
+    float dz = uDehaze * ${K.dehaze};
+    c = dz >= 0.0 ? clamp((c - dz) / (1.0 - dz), 0.0, 1.0) : mix(c, vec3(0.86), -dz * 1.6);
     c = mix(c, c * c * (3.0 - 2.0 * c), uCurve);
     c = uLift * ${K.lift} + c * (1.0 - uLift * ${K.lift});
     gl_FragColor = vec4(clamp(c, 0.0, 1.0), color.a);
@@ -108,7 +116,7 @@ function softLight1(a: number, b: number) {
 }
 
 /** 작게 줄였다 다시 키워 흐리게 (어느 브라우저에서나 동작하는 빠른 블러) */
-function blurred(imageData: ImageData, radius: number): Uint8ClampedArray {
+export function blurred(imageData: ImageData, radius: number): Uint8ClampedArray {
   const { width: w, height: h } = imageData;
   const src = document.createElement("canvas");
   src.width = w;
@@ -147,8 +155,11 @@ type Uniforms = Record<string, WebGLUniformLocation>;
 export function filmFilters(f: typeof F) {
   class FilmTone extends f.filters.BaseFilter<"FilmTone", ToneValues> {
     static type = "FilmTone";
-    static defaults: ToneValues = { exposure: 0, shadows: 0, blacks: 0, lift: 0, curve: 0 };
-    static uniformLocations = ["uExposure", "uShadows", "uBlacks", "uLift", "uCurve"];
+    static defaults: ToneValues = { exposure: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, lift: 0, curve: 0, dehaze: 0 };
+    static uniformLocations = ["uExposure", "uHighlights", "uShadows", "uWhites", "uBlacks", "uLift", "uCurve", "uDehaze"];
+    declare whites: number;
+    declare dehaze: number;
+    declare highlights: number;
     declare exposure: number;
     declare shadows: number;
     declare blacks: number;
@@ -160,12 +171,15 @@ export function filmFilters(f: typeof F) {
     }
 
     isNeutralState() {
-      return !this.exposure && !this.shadows && !this.blacks && !this.lift && !this.curve;
+      return !this.exposure && !this.highlights && !this.shadows && !this.whites && !this.blacks && !this.lift && !this.curve && !this.dehaze;
     }
 
     sendUniformData(gl: WebGLRenderingContext, u: Uniforms) {
       gl.uniform1f(u.uExposure, this.exposure);
+      gl.uniform1f(u.uHighlights, this.highlights);
       gl.uniform1f(u.uShadows, this.shadows);
+      gl.uniform1f(u.uWhites, this.whites);
+      gl.uniform1f(u.uDehaze, this.dehaze);
       gl.uniform1f(u.uBlacks, this.blacks);
       gl.uniform1f(u.uLift, this.lift);
       gl.uniform1f(u.uCurve, this.curve);
@@ -182,9 +196,11 @@ export function filmFilters(f: typeof F) {
         let r = expose(data[i] / 255), g = expose(data[i + 1] / 255), b = expose(data[i + 2] / 255);
         const l = clamp01(0.299 * r + 0.587 * g + 0.114 * b);
         const ws = (1 - l) * (1 - l);
-        const add = this.shadows * K.shadows * ws + this.blacks * K.blacks * ws * ws;
+        const add = this.highlights * K.highlights * l * l + this.shadows * K.shadows * ws + this.blacks * K.blacks * ws * ws + this.whites * K.whites * l ** 4;
+        const dz = this.dehaze * K.dehaze;
         const tone = (x: number) => {
           x = clamp01(x + add);
+          x = dz >= 0 ? clamp01((x - dz) / (1 - dz)) : x + (0.86 - x) * -dz * 1.6;
           x = x + (x * x * (3 - 2 * x) - x) * this.curve;
           return clamp01(lift + x * (1 - lift));
         };

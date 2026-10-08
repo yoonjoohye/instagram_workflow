@@ -1,6 +1,7 @@
 /** Auto Studio 앱: 웹 서비스 화면(WebView) + 휴대폰 기능(사진첩·로그인·사진 저장).
  *  웹 화면이 window.ReactNativeWebView.postMessage 로 요청하면, 여기서 처리해 window.__nativeBridge.reply 로 답합니다. */
 import Constants from "expo-constants";
+import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
 import { StatusBar } from "expo-status-bar";
 import * as WebBrowser from "expo-web-browser";
@@ -60,6 +61,11 @@ export default function App() {
             return reply(msg.id, await photos.thumbnails(msg.ids as string[], Number(msg.side) || 256));
           case "photo":
             return reply(msg.id, await photos.photo(String(msg.photoId)));
+          case "haptic":
+            // 웹 슬라이더의 '틱'(눈금) · '팡'(가운데에 붙을 때)
+            if (msg.kind === "snap") await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            else await Haptics.selectionAsync();
+            return reply(msg.id, true);
           case "save": {
             const n = await photos.save(msg.urls as string[]);
             if (typeof msg.message === "string") Alert.alert(msg.message, `${n}`);
