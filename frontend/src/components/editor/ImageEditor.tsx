@@ -442,6 +442,11 @@ export function ImageEditor({
         copySelected(key === "x");
         return;
       }
+      if (key === "\\" && !mod && tab === "adjust") {
+        e.preventDefault();
+        compare(true);
+        return;
+      }
       if (mod && key === "v") {
         clearTimeout(pasteFallback);
         pasteFallback = setTimeout(() => clipboard && pasteClipboard(), 80);
@@ -462,6 +467,17 @@ export function ImageEditor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  });
+
+  useEffect(() => {
+    const up = (e: KeyboardEvent) => e.key === "\\" && compare(false);
+    const blur = () => compare(false);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
   });
 
   // Ctrl/⌘+V: 다른 곳에서 복사한 이미지가 있으면 그 이미지를, 아니면 편집기에서 복사한 것을 붙여 넣음
@@ -905,6 +921,15 @@ export function ImageEditor({
   // 보정은 사진만이 아니라 캔버스 전체(사진·글자·스티커·도형·그림)에 한 번에 — 캔버스를 다 그린 뒤 걸러냅니다.
   // 화면·미리보기·저장(toDataURL) 모두 같은 'after:render' 를 거치므로 결과가 같습니다.
   const post = useRef<{ filters: F.filters.BaseFilter<string, object>[]; vignette: number }>({ filters: [], vignette: 0 });
+  // 원본과 비교: 누르고 있는 동안 보정을 끔 (저장·편집 기록엔 영향 없음)
+  const comparing = useRef(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const compare = (on: boolean) => {
+    if (comparing.current === on) return;
+    comparing.current = on;
+    setShowOriginal(on);
+    canvas.current?.requestRenderAll();
+  };
   const scratch = useRef<{ src?: HTMLCanvasElement; out?: HTMLCanvasElement }>({});
 
   function buildFilters(a: Adjust): F.filters.BaseFilter<string, object>[] {
@@ -949,6 +974,7 @@ export function ImageEditor({
   function postProcess(ctx: CanvasRenderingContext2D) {
     const { filters, vignette } = post.current;
     if (!filters.length && !vignette) return;
+    if (comparing.current && ctx.canvas === canvas.current?.lowerCanvasEl) return; // 화면에서만 원본 (저장은 언제나 보정 적용)
     const f = fab.current;
     const cv = ctx.canvas as HTMLCanvasElement;
     const W = cv.width, H = cv.height;
@@ -1147,6 +1173,26 @@ export function ImageEditor({
               <div className="absolute inset-0 flex items-center justify-center">
                 <Spinner className="size-6" />
               </div>
+            )}
+            {tab === "adjust" && (post.current.filters.length > 0 || post.current.vignette > 0) && (
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  compare(true);
+                }}
+                onPointerUp={() => compare(false)}
+                onPointerLeave={() => compare(false)}
+                onPointerCancel={() => compare(false)}
+                onContextMenu={(e) => e.preventDefault()}
+                title={t("editor.compareHint")}
+                className={cx(
+                  "absolute top-3 left-3 z-10 touch-none rounded-full px-3 py-1.5 text-[12px] select-none",
+                  showOriginal ? "bg-white text-black" : "bg-black/60 text-white",
+                )}
+              >
+                ◐ {showOriginal ? t("editor.showingOriginal") : t("editor.holdOriginal")}
+              </button>
             )}
             {aiBusy && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/55">
