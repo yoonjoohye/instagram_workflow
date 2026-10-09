@@ -373,9 +373,12 @@ export function ImageEditor({
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [brush, setBrush] = useState<{ kind: Brush; color: string; width: number }>({ kind: "pen", color: "#ffffff", width: 8 });
+  // 떠 있는 도구 모음: 펜·도형을 누르면 옆에 세부 도구가 펼쳐짐
+  const [subTool, setSubTool] = useState<"pen" | "shape" | null>(null);
   const [fillShapes, setFillShapes] = useState(false);
   const [adjust, setAdjustState] = useState<Adjust>(NO_ADJUST);
   const [crop, setCropState] = useState<Crop>(NO_CROP);
+  const [hasGap, setHasGap] = useState(false); // 사진을 옮기거나 줄여 틀에 빈 곳이 생김
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [showPreview, setShowPreview] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
@@ -475,7 +478,9 @@ export function ImageEditor({
     const el = holder.current;
     if (!c || !el) return;
     const { w, h } = size.current;
-    const z = Math.min((el.clientWidth - 24) / w, (el.clientHeight - 24) / h);
+    // 왼쪽 도구 모음 자리(padding)는 빼고 맞춤 — 가로 사진이 도구에 가리지 않게
+    const pad = parseFloat(getComputedStyle(el).paddingLeft) || 0;
+    const z = Math.min((el.clientWidth - pad - 24) / w, (el.clientHeight - 24) / h);
     zoom.current = z;
     c.setDimensions({ width: Math.floor(w * z), height: Math.floor(h * z) });
     setView({ w: Math.floor(w * z), h: Math.floor(h * z) });
@@ -531,6 +536,9 @@ export function ImageEditor({
         c.on("selection:cleared", () => setSelected(null));
         // 바로 만지기: 끄는 동안 맞춤·경고, 손을 떼면 표시를 지움
         c.on("object:moving", (e) => live.current.moving(e.target as Named));
+        c.on("object:scaling", (e) => {
+          if ((e.target as Named)?.name === "base") live.current.scalingBase(e.target as F.FabricObject);
+        });
         c.on("mouse:up", () => live.current.endMove());
         c.on("after:render", ({ ctx }) => postProcess(ctx));
         c.on("after:render", refreshPreview);
@@ -599,7 +607,9 @@ export function ImageEditor({
     if (img) {
       // 사진은 어느 탭에서나 빈 곳을 끌어 옮길 수 있음 (그리기 중에만 고정)
       const movable = tab !== "draw" && !overlay; // 동영상 꾸미기는 바탕이 영상이라 고정
-      img.set({ selectable: movable, evented: movable, hasControls: false, hasBorders: false, lockRotation: true, hoverCursor: "grab" });
+      // 사진을 누르면 모서리 손잡이로 크기 조절, 끌어서 아무 데나 옮김 (돌리기는 자르기 탭에서)
+      img.set({ selectable: movable, evented: movable, hasControls: movable, hasBorders: movable, lockRotation: true, lockScalingFlip: true, hoverCursor: "grab" });
+      img.setControlsVisibility?.({ mt: false, mb: false, ml: false, mr: false, mtr: false });
       if (!movable && c.getActiveObject() === img) c.discardActiveObject();
     }
     c.requestRenderAll();
@@ -896,6 +906,27 @@ export function ImageEditor({
     add(new f.FabricText(e, { ...center(), fontSize: Math.round(size.current.w * 0.16) }));
   }
 
+  /** 메모지(포스트잇): 노란 바탕 글 상자 — 두 번 눌러 고침 */
+  async function addMemo() {
+    const f = fab.current!;
+    await loadFont("pretendard");
+    const { w } = size.current;
+    add(
+      new f.Textbox(t("editor.memoText"), {
+        ...center(),
+        width: Math.round(w * 0.42),
+        fontSize: Math.round(w * 0.038),
+        fontFamily: fontFamily("pretendard"),
+        fontWeight: 600,
+        fill: "#3b2f0b",
+        backgroundColor: "#ffe066",
+        lineHeight: 1.45,
+        splitByGrapheme: true,
+        angle: -3,
+      }),
+    );
+  }
+
   function addShape(kind: "heart" | "arrow" | "star" | "circle" | "highlight" | "rect" | "line") {
     const f = fab.current!;
     const s = size.current.w * 0.22;
@@ -1135,6 +1166,12 @@ export function ImageEditor({
   const [tplName, setTplName] = useState("");
   const [tplSaved, setTplSaved] = useState(false);
   const slotInput = useRef<HTMLInputElement>(null);
+  // 열었을 때 틀에 빈 곳이 있으면 채우기 칩을 보여 줌
+  useEffect(() => {
+    if (ready && !overlay) syncBackdrop(cropRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
   // 템플릿을 고칠 때: 저장된 사진 칸도 틀째 옮길 수 있게
   useEffect(() => {
     const f = fab.current;
@@ -1617,8 +1654,7 @@ export function ImageEditor({
     img.set({ angle, flipX: next.flip, scaleX: s, scaleY: s, originX: "center", originY: "center" });
     if (recenter) img.set({ left: w / 2, top: h / 2 });
     img.setCoords();
-    clampBase(img); // 틀 밖으로 밀려나지 않게
-    syncBackdrop(next);
+    syncBackdrop(next); // 빈 곳이 생기면 채움 (사진은 어디든 둘 수 있음)
     canvas.current!.requestRenderAll();
     refreshPreview();
   }
@@ -1648,14 +1684,17 @@ export function ImageEditor({
 
   /** 줄였을 때 빈 곳: 흐린 사진(같은 사진을 흐리게 깔아 둠)·흰색·검정 */
   function syncBackdrop(cr: Crop) {
+    // (빈 곳이 있는지는 hasGap 으로 화면에 — 채우기 고르는 칩을 보여 줌)
     const c = canvas.current;
     const f = fab.current;
     const img = base() as (F.FabricImage & Named) | undefined;
     if (!c || !f || !img || overlay) return;
     const fill = cr.fill ?? "blur";
     const old = find("backdrop");
-    const need = cr.zoom < 0.999 && fill === "blur";
-    c.backgroundColor = cr.zoom < 0.999 && fill === "white" ? "#ffffff" : "#000";
+    const gap = !coversFrame(img);
+    if (gap !== hasGap) setHasGap(gap);
+    const need = gap && fill === "blur";
+    c.backgroundColor = gap && fill === "white" ? "#ffffff" : "#000";
     if (!need) {
       if (old) {
         history.current.restoring = true;
@@ -1691,59 +1730,64 @@ export function ImageEditor({
     history.current.restoring = false;
   }
 
-  /** 사진이 늘 틀을 다 덮도록 위치를 당김 (돌려도). 당겼으면 true — 틀 끝에 닿았다는 뜻 */
-  function clampBase(img: F.FabricObject): boolean {
+  // ── 바로 만지기: 끄는 동안 가운데 맞춤(착 붙고 진동)·틀 끝 닿음(진동)·가려지는 곳 경고(진동) ─────
+  const feel = useRef({ edge: false, v: false, h: false, warn: false });
+  /** 사진 가장자리가 틀 끝·가운데에 가까우면 붙임 (막지는 않음 — 어디든 옮길 수 있게) */
+  function snapBaseEdges(o: F.FabricObject, thr: number): boolean {
     const { w, h } = size.current;
-    if (cropRef.current.zoom < 0.999) {
-      // 줄였을 때: 사진이 틀보다 작은 쪽은 틀 안에, 큰 쪽은 틀을 덮게
-      const a0 = ((img.angle ?? 0) * Math.PI) / 180;
-      const iw = img.width * (img.scaleX ?? 1);
-      const ih = img.height * (img.scaleY ?? 1);
-      const bw = Math.abs(iw * Math.cos(a0)) + Math.abs(ih * Math.sin(a0));
-      const bh = Math.abs(iw * Math.sin(a0)) + Math.abs(ih * Math.cos(a0));
-      const fitIn = (v: number, size: number, b: number) =>
-        b <= size ? Math.min(size - b / 2, Math.max(b / 2, v)) : Math.min(b / 2, Math.max(size - b / 2, v));
-      const x0 = img.left ?? w / 2;
-      const y0 = img.top ?? h / 2;
-      const x = fitIn(x0, w, bw);
-      const y = fitIn(y0, h, bh);
-      img.set({ left: x, top: y });
-      img.setCoords();
-      return Math.abs(x - x0) > 1e-6 || Math.abs(y - y0) > 1e-6;
-    }
+    const r = o.getBoundingRect();
+    let dx = 0;
+    let dy = 0;
+    if (Math.abs(r.left) < thr) dx = -r.left;
+    else if (Math.abs(r.left + r.width - w) < thr) dx = w - (r.left + r.width);
+    if (Math.abs(r.top) < thr) dy = -r.top;
+    else if (Math.abs(r.top + r.height - h) < thr) dy = h - (r.top + r.height);
+    if (!dx && !dy) return false;
+    o.set({ left: (o.left ?? 0) + dx, top: (o.top ?? 0) + dy });
+    o.setCoords();
+    return true;
+  }
+
+  /** 사진이 틀을 다 덮는지 (빈 곳이 생겼으면 흐린 사진·흰색·검정으로 채움) */
+  function coversFrame(img: F.FabricObject): boolean {
+    const { w, h } = size.current;
     const a = ((img.angle ?? 0) * Math.PI) / 180;
     const cos = Math.cos(a);
     const sin = Math.sin(a);
-    const hw = (img.width * (img.scaleX ?? 1)) / 2;
-    const hh = (img.height * (img.scaleY ?? 1)) / 2;
-    let cx = img.left ?? w / 2;
-    let cy = img.top ?? h / 2;
-    let clamped = false;
-    for (let it = 0; it < 8; it++) {
-      let moved = false;
-      for (const [px, py] of [[0, 0], [w, 0], [0, h], [w, h]]) {
-        // 틀의 모서리를 사진 기준(돌리기 전) 좌표로 바꿔, 사진 밖이면 그만큼 사진을 옮김
-        const dx = px - cx;
-        const dy = py - cy;
-        const lx = dx * cos + dy * sin;
-        const ly = -dx * sin + dy * cos;
-        const ex = lx - Math.max(-hw, Math.min(hw, lx));
-        const ey = ly - Math.max(-hh, Math.min(hh, ly));
-        if (Math.abs(ex) > 1e-6 || Math.abs(ey) > 1e-6) {
-          cx += ex * cos - ey * sin;
-          cy += ex * sin + ey * cos;
-          moved = clamped = true;
-        }
-      }
-      if (!moved) break;
-    }
-    img.set({ left: cx, top: cy });
-    img.setCoords();
-    return clamped;
+    const hw = (img.width * Math.abs(img.scaleX ?? 1)) / 2 + 0.5;
+    const hh = (img.height * Math.abs(img.scaleY ?? 1)) / 2 + 0.5;
+    const cx = img.left ?? w / 2;
+    const cy = img.top ?? h / 2;
+    return [[0, 0], [w, 0], [0, h], [w, h]].every(([px, py]) => {
+      const dx = px - cx;
+      const dy = py - cy;
+      return Math.abs(dx * cos + dy * sin) <= hw && Math.abs(-dx * sin + dy * cos) <= hh;
+    });
   }
 
-  // ── 바로 만지기: 끄는 동안 가운데 맞춤(착 붙고 진동)·틀 끝 닿음(진동)·가려지는 곳 경고(진동) ─────
-  const feel = useRef({ edge: false, v: false, h: false, warn: false });
+  /** 모서리 손잡이로 사진 크기를 바꿀 때: 확대 값으로 맞추고, 꽉 참·인스타 영역 맞춤에서 붙으며 진동 */
+  function scalingBase(img: F.FabricObject) {
+    const { w, h } = size.current;
+    const cr = cropRef.current;
+    const rad = ((cr.turns * 90 + cr.straighten) * Math.PI) / 180;
+    const cos = Math.abs(Math.cos(rad));
+    const sin = Math.abs(Math.sin(rad));
+    const cover = Math.max((w * cos + h * sin) / img.width, (w * sin + h * cos) / img.height);
+    let z = Math.min(3, Math.max(minZoom(), (img.scaleX ?? 1) / cover));
+    const marks = [1, fitZoom()];
+    const near = marks.find((m) => Math.abs(z - m) < 0.02);
+    if (near !== undefined) {
+      z = near;
+      if (!feel.current.edge) haptic("snap");
+    }
+    feel.current.edge = near !== undefined;
+    img.set({ scaleX: cover * z, scaleY: cover * z });
+    img.setCoords();
+    cropRef.current = { ...cr, zoom: z };
+    setCropState(cropRef.current);
+    syncBackdrop(cropRef.current);
+  }
+
   function moving(o: Named) {
     const f = fab.current;
     if (!f || !o) return;
@@ -1756,7 +1800,8 @@ export function ImageEditor({
     let edge = false;
     let warn = false;
     if (o.name === "base") {
-      edge = clampBase(o);
+      edge = snapBaseEdges(o, thr);
+      syncBackdrop(cropRef.current);
     } else if (!SPECIAL.has(o.name ?? "")) {
       // 글자·스티커가 인스타에서 보이는 영역 밖으로 나가면 경고
       const area = visibleArea(guideKind, w, h);
@@ -1845,8 +1890,8 @@ export function ImageEditor({
   }
   // 캔버스 이벤트에서 늘 최신 함수를 부르도록
   const hasAdjust = () => post.current.filters.length > 0 || post.current.vignette > 0;
-  const live = useRef({ moving, endMove, pinchStart, pinchMove, pinchEnd, compare: (on: boolean) => compare(on), tab, hasAdjust });
-  live.current = { moving, endMove, pinchStart, pinchMove, pinchEnd, compare: (on: boolean) => compare(on), tab, hasAdjust };
+  const live = useRef({ moving, scalingBase, endMove, pinchStart, pinchMove, pinchEnd, compare: (on: boolean) => compare(on), tab, hasAdjust });
+  live.current = { moving, scalingBase, endMove, pinchStart, pinchMove, pinchEnd, compare: (on: boolean) => compare(on), tab, hasAdjust };
   useEffect(() => {
     const el = canvas.current?.upperCanvasEl;
     if (!ready || !el) return;
@@ -2180,7 +2225,7 @@ export function ImageEditor({
           <div
             ref={holder}
             className={cx(
-              "relative flex min-h-0 flex-1 items-center justify-center bg-[repeating-conic-gradient(#18181b_0_25%,#111113_0_50%)] bg-[length:18px_18px] [&_.canvas-container]:outline [&_.canvas-container]:outline-1 [&_.canvas-container]:outline-white/35",
+              "relative flex min-h-0 flex-1 items-center justify-center pl-[60px] sm:pl-[64px] bg-[repeating-conic-gradient(#18181b_0_25%,#111113_0_50%)] bg-[length:18px_18px] [&_.canvas-container]:outline [&_.canvas-container]:outline-1 [&_.canvas-container]:outline-white/35",
               // svh: 주소창이 숨었다 나타나도 그대로인 화면 높이
               clip ? "max-lg:h-[42svh]" : "max-lg:h-[54svh]",
               "max-lg:flex-none",
@@ -2208,11 +2253,141 @@ export function ImageEditor({
                 onCanPlay={() => setVideoOk(true)}
                 onError={() => setVideoOk(false)}
                 onPause={() => setPlaying(false)}
-                className={cx("absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black object-cover", !videoOk && "invisible")}
+                className={cx("absolute top-1/2 left-[calc(50%+30px)] sm:left-[calc(50%+32px)] -translate-x-1/2 -translate-y-1/2 bg-black object-cover", !videoOk && "invisible")}
                 style={{ width: view.w, height: view.h }}
               />
             )}
             <canvas ref={canvasEl} />
+            {/* 떠 있는 도구 모음 — 선택·펜·도형·선·메모·글자·스티커를 탭을 바꾸지 않고 바로 */}
+            {ready && (
+              <div className="absolute inset-y-2 left-2 z-20 flex items-center gap-1.5" onPointerDown={(e) => e.stopPropagation()}>
+                <div className="flex max-h-full flex-col gap-0.5 overflow-y-auto rounded-2xl bg-white p-1 text-black shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+                  {(
+                    [
+                      ["select", "➤", "editor.toolSelect", tab !== "draw"],
+                      ["pen", "✎", "editor.toolPen", tab === "draw"],
+                      ["shape", "◆", "editor.toolShape", subTool === "shape"],
+                      ["line", "╱", "editor.shapeLine", false],
+                      ["memo", "🗒", "editor.toolMemo", false],
+                      ["text", "T", "editor.toolText", false],
+                      ["sticker", "☺", "editor.tabSticker", tab === "sticker" && subTool === null],
+                    ] as [string, string, MessageKey, boolean][]
+                  ).map(([key, icon, label, on]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      title={t(label)}
+                      aria-label={t(label)}
+                      aria-pressed={on}
+                      onClick={() => {
+                        if (key === "select") {
+                          if (tab === "draw") setTab("text");
+                          setSubTool(null);
+                        } else if (key === "pen") {
+                          setTab("draw");
+                          if (brush.kind === "eraser") setBrush({ ...brush, kind: "pen" });
+                          setSubTool(subTool === "pen" ? null : "pen");
+                        } else if (key === "shape") {
+                          if (tab === "draw") setTab("sticker");
+                          setSubTool(subTool === "shape" ? null : "shape");
+                        } else {
+                          if (tab === "draw") setTab("text");
+                          setSubTool(null);
+                          if (key === "line") addShape("line");
+                          else if (key === "memo") void addMemo();
+                          else if (key === "text") void addText();
+                          else setTab("sticker");
+                        }
+                      }}
+                      className={cx(
+                        "flex size-10 items-center justify-center rounded-xl text-[18px] font-bold sm:size-11",
+                        on ? "bg-zinc-200" : "hover:bg-zinc-100",
+                        key === "text" && "font-serif text-[#7c3aed]",
+                        key === "pen" && "text-[#ef4444]",
+                        key === "line" && "text-[#3b82f6]",
+                      )}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                </div>
+                {subTool === "pen" && tab === "draw" && (
+                  <div className="flex max-h-full flex-col items-center gap-1 overflow-y-auto rounded-2xl bg-white p-1.5 text-black shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+                    {(
+                      [
+                        ["pen", "✎", "editor.brushPen"],
+                        ["marker", "▬", "editor.brushMarker"],
+                        ["neon", "✦", "editor.brushNeon"],
+                        ["eraser", "⌫", "editor.eraser"],
+                      ] as [Brush, string, MessageKey][]
+                    ).map(([k, icon, label]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        title={t(label)}
+                        aria-label={t(label)}
+                        aria-pressed={brush.kind === k}
+                        onClick={() => setBrush({ ...brush, kind: k })}
+                        className={cx("flex size-9 items-center justify-center rounded-xl text-[16px]", brush.kind === k ? "bg-zinc-200" : "hover:bg-zinc-100")}
+                        style={{ color: k === "eraser" ? "#e11d48" : brush.color === "#ffffff" ? "#111" : brush.color }}
+                      >
+                        {icon}
+                      </button>
+                    ))}
+                    <span className="my-0.5 h-px w-6 bg-zinc-200" />
+                    {["#ffffff", "#111111", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7"].map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={c}
+                        onClick={() => setBrush({ ...brush, color: c, kind: brush.kind === "eraser" ? "pen" : brush.kind })}
+                        className={cx("size-6 rounded-full border", brush.color === c ? "ring-2 ring-zinc-900 ring-offset-1" : "border-zinc-300")}
+                        style={{ background: c }}
+                      />
+                    ))}
+                    <span className="my-0.5 h-px w-6 bg-zinc-200" />
+                    {[4, 8, 16].map((wd) => (
+                      <button
+                        key={wd}
+                        type="button"
+                        title={t("editor.brushSize")}
+                        aria-label={`${t("editor.brushSize")} ${wd}`}
+                        onClick={() => setBrush({ ...brush, width: wd })}
+                        className={cx("flex h-6 w-9 items-center justify-center rounded-lg", brush.width === wd ? "bg-zinc-200" : "hover:bg-zinc-100")}
+                      >
+                        <span className="w-6 rounded-full bg-zinc-900" style={{ height: wd / 3 + 1 }} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {subTool === "shape" && (
+                  <div className="flex max-h-full flex-col items-center gap-1 overflow-y-auto rounded-2xl bg-white p-1.5 text-black shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+                    {(
+                      [
+                        ["rect", "■", "editor.shapeRect"],
+                        ["circle", "●", "editor.shapeCircle"],
+                        ["heart", "♥", "editor.shapeHeart"],
+                        ["star", "★", "editor.shapeStar"],
+                        ["arrow", "➜", "editor.shapeArrow"],
+                        ["highlight", "▭", "editor.shapeHighlight"],
+                      ] as ["rect" | "circle" | "heart" | "star" | "arrow" | "highlight", string, MessageKey][]
+                    ).map(([k, icon, label]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        title={t(label)}
+                        aria-label={t(label)}
+                        onClick={() => addShape(k)}
+                        className="flex size-9 items-center justify-center rounded-xl text-[18px] hover:bg-zinc-100"
+                        style={{ color: brush.color === "#ffffff" ? "#111" : brush.color }}
+                      >
+                        {icon}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <input
               ref={slotInput}
               type="file"
@@ -2227,7 +2402,7 @@ export function ImageEditor({
             {ready && (guides || snap.warn) && guideKind && view.w > 0 && <SizeGuides kind={guideKind} w={view.w} h={view.h} warn={snap.warn} />}
             {/* 가운데에 맞았을 때 선 (인스타 스토리처럼) */}
             {(snap.v || snap.h) && view.w > 0 && (
-              <svg aria-hidden width={view.w} height={view.h} className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+              <svg aria-hidden width={view.w} height={view.h} className="pointer-events-none absolute top-1/2 left-[calc(50%+30px)] sm:left-[calc(50%+32px)] -translate-x-1/2 -translate-y-1/2">
                 {snap.v && <line x1={view.w / 2} x2={view.w / 2} y1={0} y2={view.h} stroke="#ff2d87" strokeWidth={1.5} />}
                 {snap.h && <line x1={0} x2={view.w} y1={view.h / 2} y2={view.h / 2} stroke="#ff2d87" strokeWidth={1.5} />}
               </svg>
@@ -2239,7 +2414,7 @@ export function ImageEditor({
                 aria-pressed={guides}
                 title={t("editor.guidesHint")}
                 className={cx(
-                  "absolute bottom-3 left-3 z-10 rounded-full px-3 py-1.5 text-[12px]",
+                  "absolute right-3 bottom-3 z-10 rounded-full px-3 py-1.5 text-[12px]",
                   guides ? "bg-white/90 text-black" : "bg-black/60 text-white/80",
                 )}
               >
@@ -2941,7 +3116,7 @@ export function ImageEditor({
                     onCommit={snapshot}
                   />
                   {/* 줄여서 생긴 빈 곳 채우기 */}
-                  {crop.zoom < 0.999 && (
+                  {hasGap && (
                     <Row>
                       <span className="shrink-0 text-[11px] text-white/45">{t("editor.fillEmpty")}</span>
                       {(["blur", "white", "black"] as const).map((fl) => (
@@ -3057,7 +3232,7 @@ function SizeGuides({ kind, w, h, warn }: { kind: "feed" | "story"; w: number; h
       aria-hidden
       width={w}
       height={h}
-      className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+      className="pointer-events-none absolute top-1/2 left-[calc(50%+30px)] sm:left-[calc(50%+32px)] -translate-x-1/2 -translate-y-1/2"
       style={{ overflow: "visible" }}
     >
       {bands.map((b) => (
