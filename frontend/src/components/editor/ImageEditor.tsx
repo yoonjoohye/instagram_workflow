@@ -126,8 +126,6 @@ const PRESETS: Record<string, Partial<Adjust>> = {
   fade: { fade: 0.4, saturation: -0.2 },
   warm: { warmth: 0.45, saturation: 0.08 },
   cool: { warmth: -0.45 },
-  vivid: { saturation: 0.45, contrast: 0.12 },
-  vintage: { sepia: 0.35, fade: 0.1 },
   mono: { mono: 1 },
   // 2000년대 디카 감성: 대비 -20, 그레인 +22(입자 작게), 따뜻함 +15(살구빛 피부), 페이드 +28, 선명도 -10(옛 렌즈), 하이라이트 -30(플래시 질감)
   // 내추럴 필름 (라이트룸 레시피: 노출 +0.3 · 대비 -8 · 하이라이트 -20 · 그림자 +15 · 활기 +8 · 클래리티 -12 · 그레인 14 …,
@@ -154,9 +152,13 @@ function presetAdjust(key: string): Adjust {
   return { ...NO_ADJUST, ...(PRESETS[key] ?? {}), preset: key, v: 2 };
 }
 
+// 없앤 프리셋(흑백 대비·선명하게·빈티지)으로 예전 방식으로 저장한 보정도 그때 모습 그대로 열리게
+const RETIRED_PRESETS: Record<string, Partial<Adjust>> = {
+  drama: { mono: 1, contrast: 0.35 },
+  vivid: { saturation: 0.45, contrast: 0.12 },
+  vintage: { sepia: 0.35, fade: 0.1 },
+};
 // 세피아·흑백이 켜고 끄기였던 시절의 저장본: 그때 모습 그대로 (세피아·흑백 100%)
-// 없앤 프리셋(흑백 대비)으로 저장한 예전 보정을 그대로 다시 열기 위한 값
-const RETIRED_PRESETS: Record<string, Partial<Adjust>> = { drama: { mono: 1, contrast: 0.35 } };
 const LEGACY_FLAGS: Record<string, Partial<Adjust>> = { vintage: { sepia: 1 }, mono: { mono: 1 }, drama: { mono: 1 } };
 
 /** 예전에 저장한 보정(프리셋 값이 슬라이더에 더해지던 방식)을 지금 방식으로 — 보이는 결과는 그대로 */
