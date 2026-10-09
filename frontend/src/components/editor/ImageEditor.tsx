@@ -13,7 +13,7 @@
 import type { MessageKey } from "@/i18n/core";
 import { applyTheme, currentSlot, drawBg, exportPage, fitToSlot, placeholder, slotToMovable, type Tk } from "@/lib/design/render";
 import type { Bg } from "@/lib/design/templates";
-import { BUILTIN_THEMES, type Theme } from "@/lib/design/themes";
+import { BUILTIN_THEMES, colorOf, type Theme } from "@/lib/design/themes";
 import { fontFamily, fontKeyOf, loadFont } from "@/lib/fonts";
 import { toBrowserImage } from "@/lib/heic";
 import type * as F from "fabric";
@@ -373,8 +373,6 @@ export function ImageEditor({
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [brush, setBrush] = useState<{ kind: Brush; color: string; width: number }>({ kind: "pen", color: "#ffffff", width: 8 });
-  // 떠 있는 도구 모음: 펜·도형을 누르면 옆에 세부 도구가 펼쳐짐
-  const [subTool, setSubTool] = useState<"pen" | "shape" | null>(null);
   const [fillShapes, setFillShapes] = useState(false);
   const [adjust, setAdjustState] = useState<Adjust>(NO_ADJUST);
   const [crop, setCropState] = useState<Crop>(NO_CROP);
@@ -478,9 +476,7 @@ export function ImageEditor({
     const el = holder.current;
     if (!c || !el) return;
     const { w, h } = size.current;
-    // 왼쪽 도구 모음 자리(padding)는 빼고 맞춤 — 가로 사진이 도구에 가리지 않게
-    const pad = parseFloat(getComputedStyle(el).paddingLeft) || 0;
-    const z = Math.min((el.clientWidth - pad - 24) / w, (el.clientHeight - 24) / h);
+    const z = Math.min((el.clientWidth - 24) / w, (el.clientHeight - 24) / h);
     zoom.current = z;
     c.setDimensions({ width: Math.floor(w * z), height: Math.floor(h * z) });
     setView({ w: Math.floor(w * z), h: Math.floor(h * z) });
@@ -1965,6 +1961,56 @@ export function ImageEditor({
   }, [selected]);
 
   // ── 저장 ───────────────────────────────────────────────────
+  // ── 보정 필터 미리보기: 이 사진을 작게 잘라 필터마다 입혀 봄 (보정 탭을 열 때, 사진마다 한 번) ─────
+  const [presetThumbs, setPresetThumbs] = useState<Record<string, string>>({});
+  const thumbsFor = useRef("");
+  useEffect(() => {
+    const f = fab.current;
+    const img = base() as F.FabricImage | undefined;
+    if (tab !== "adjust" || !ready || overlay || !f || !img) return;
+    const src = img.getSrc();
+    if (thumbsFor.current === src) return;
+    thumbsFor.current = src;
+    let alive = true;
+    (async () => {
+      const el = img.getElement() as HTMLImageElement | HTMLCanvasElement;
+      const sw = (el as HTMLImageElement).naturalWidth || el.width;
+      const sh = (el as HTMLImageElement).naturalHeight || el.height;
+      const side = Math.min(sw, sh);
+      const S = 120;
+      const square = document.createElement("canvas");
+      square.width = square.height = S;
+      square.getContext("2d")!.drawImage(el, (sw - side) / 2, (sh - side) / 2, side, side, 0, 0, S, S);
+      const out: Record<string, string> = {};
+      for (const key of Object.keys(PRESETS)) {
+        if (!alive) return;
+        const a = presetAdjust(key);
+        const fi = new f.FabricImage(square);
+        fi.filters = buildFilters(a);
+        fi.applyFilters();
+        const c2 = document.createElement("canvas");
+        c2.width = c2.height = S;
+        const x = c2.getContext("2d")!;
+        x.drawImage(fi.getElement() as CanvasImageSource, 0, 0, S, S);
+        if (a.vignette > 0) {
+          const g = x.createRadialGradient(S / 2, S / 2, S * 0.3, S / 2, S / 2, S * 0.75);
+          g.addColorStop(0, "rgba(0,0,0,0)");
+          g.addColorStop(1, `rgba(0,0,0,${Math.min(0.8, a.vignette * 0.7)})`);
+          x.fillStyle = g;
+          x.fillRect(0, 0, S, S);
+        }
+        out[key] = c2.toDataURL("image/jpeg", 0.8);
+        setPresetThumbs({ ...out });
+        await new Promise((r) => setTimeout(r, 0)); // 화면이 멈추지 않게 하나씩
+      }
+    })().catch(() => undefined);
+    return () => {
+      alive = false;
+      thumbsFor.current = "";
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, ready]);
+
   // ── 동영상 꾸미기: 재생 위치에 맞춰 보이기 · 재생 · 타임라인 ─────────────────
   const timed = () => ((canvas.current?.getObjects() ?? []) as Named[]).filter((o) => !SPECIAL.has(o.name ?? ""));
   // 지금 재생 위치에 보일 것만 보이게 (고른 것은 시간 밖이어도 보여서 고칠 수 있게)
@@ -2168,6 +2214,8 @@ export function ImageEditor({
     { key: "theme", label: t("design.tabTheme"), icon: "🎨" },
   ]
     .filter((x) => !overlay || x.key === "text" || x.key === "sticker" || x.key === "draw")
+    // 배경 탭은 템플릿(디자인) 장에서만 — 바탕 바꾸기 (배경 지우기는 없앰)
+    .filter((x) => x.key !== "bg" || isDesign)
     .concat((extras?.tabs ?? []).map((x) => ({ key: `x:${x.key}` as Tab, label: x.label, icon: x.icon }))) as { key: Tab; label: string; icon: string }[];
   const extraPanel = extras?.tabs.find((x) => `x:${x.key}` === tab)?.panel;
   const previewAssets = preview?.assets.map((a, i) => (i === index && previewUrl ? { ...a, url: previewUrl, type: "image" as const } : a)) ?? [];
@@ -2225,7 +2273,7 @@ export function ImageEditor({
           <div
             ref={holder}
             className={cx(
-              "relative flex min-h-0 flex-1 items-center justify-center pl-[60px] sm:pl-[64px] bg-[repeating-conic-gradient(#18181b_0_25%,#111113_0_50%)] bg-[length:18px_18px] [&_.canvas-container]:outline [&_.canvas-container]:outline-1 [&_.canvas-container]:outline-white/35",
+              "relative flex min-h-0 flex-1 items-center justify-center bg-[repeating-conic-gradient(#18181b_0_25%,#111113_0_50%)] bg-[length:18px_18px] [&_.canvas-container]:outline [&_.canvas-container]:outline-1 [&_.canvas-container]:outline-white/35",
               // svh: 주소창이 숨었다 나타나도 그대로인 화면 높이
               clip ? "max-lg:h-[42svh]" : "max-lg:h-[54svh]",
               "max-lg:flex-none",
@@ -2253,141 +2301,11 @@ export function ImageEditor({
                 onCanPlay={() => setVideoOk(true)}
                 onError={() => setVideoOk(false)}
                 onPause={() => setPlaying(false)}
-                className={cx("absolute top-1/2 left-[calc(50%+30px)] sm:left-[calc(50%+32px)] -translate-x-1/2 -translate-y-1/2 bg-black object-cover", !videoOk && "invisible")}
+                className={cx("absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black object-cover", !videoOk && "invisible")}
                 style={{ width: view.w, height: view.h }}
               />
             )}
             <canvas ref={canvasEl} />
-            {/* 떠 있는 도구 모음 — 선택·펜·도형·선·메모·글자·스티커를 탭을 바꾸지 않고 바로 */}
-            {ready && (
-              <div className="absolute inset-y-2 left-2 z-20 flex items-center gap-1.5" onPointerDown={(e) => e.stopPropagation()}>
-                <div className="flex max-h-full flex-col gap-0.5 overflow-y-auto rounded-2xl bg-white p-1 text-black shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
-                  {(
-                    [
-                      ["select", "➤", "editor.toolSelect", tab !== "draw"],
-                      ["pen", "✎", "editor.toolPen", tab === "draw"],
-                      ["shape", "◆", "editor.toolShape", subTool === "shape"],
-                      ["line", "╱", "editor.shapeLine", false],
-                      ["memo", "🗒", "editor.toolMemo", false],
-                      ["text", "T", "editor.toolText", false],
-                      ["sticker", "☺", "editor.tabSticker", tab === "sticker" && subTool === null],
-                    ] as [string, string, MessageKey, boolean][]
-                  ).map(([key, icon, label, on]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      title={t(label)}
-                      aria-label={t(label)}
-                      aria-pressed={on}
-                      onClick={() => {
-                        if (key === "select") {
-                          if (tab === "draw") setTab("text");
-                          setSubTool(null);
-                        } else if (key === "pen") {
-                          setTab("draw");
-                          if (brush.kind === "eraser") setBrush({ ...brush, kind: "pen" });
-                          setSubTool(subTool === "pen" ? null : "pen");
-                        } else if (key === "shape") {
-                          if (tab === "draw") setTab("sticker");
-                          setSubTool(subTool === "shape" ? null : "shape");
-                        } else {
-                          if (tab === "draw") setTab("text");
-                          setSubTool(null);
-                          if (key === "line") addShape("line");
-                          else if (key === "memo") void addMemo();
-                          else if (key === "text") void addText();
-                          else setTab("sticker");
-                        }
-                      }}
-                      className={cx(
-                        "flex size-10 items-center justify-center rounded-xl text-[18px] font-bold sm:size-11",
-                        on ? "bg-zinc-200" : "hover:bg-zinc-100",
-                        key === "text" && "font-serif text-[#7c3aed]",
-                        key === "pen" && "text-[#ef4444]",
-                        key === "line" && "text-[#3b82f6]",
-                      )}
-                    >
-                      {icon}
-                    </button>
-                  ))}
-                </div>
-                {subTool === "pen" && tab === "draw" && (
-                  <div className="flex max-h-full flex-col items-center gap-1 overflow-y-auto rounded-2xl bg-white p-1.5 text-black shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
-                    {(
-                      [
-                        ["pen", "✎", "editor.brushPen"],
-                        ["marker", "▬", "editor.brushMarker"],
-                        ["neon", "✦", "editor.brushNeon"],
-                        ["eraser", "⌫", "editor.eraser"],
-                      ] as [Brush, string, MessageKey][]
-                    ).map(([k, icon, label]) => (
-                      <button
-                        key={k}
-                        type="button"
-                        title={t(label)}
-                        aria-label={t(label)}
-                        aria-pressed={brush.kind === k}
-                        onClick={() => setBrush({ ...brush, kind: k })}
-                        className={cx("flex size-9 items-center justify-center rounded-xl text-[16px]", brush.kind === k ? "bg-zinc-200" : "hover:bg-zinc-100")}
-                        style={{ color: k === "eraser" ? "#e11d48" : brush.color === "#ffffff" ? "#111" : brush.color }}
-                      >
-                        {icon}
-                      </button>
-                    ))}
-                    <span className="my-0.5 h-px w-6 bg-zinc-200" />
-                    {["#ffffff", "#111111", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7"].map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        aria-label={c}
-                        onClick={() => setBrush({ ...brush, color: c, kind: brush.kind === "eraser" ? "pen" : brush.kind })}
-                        className={cx("size-6 rounded-full border", brush.color === c ? "ring-2 ring-zinc-900 ring-offset-1" : "border-zinc-300")}
-                        style={{ background: c }}
-                      />
-                    ))}
-                    <span className="my-0.5 h-px w-6 bg-zinc-200" />
-                    {[4, 8, 16].map((wd) => (
-                      <button
-                        key={wd}
-                        type="button"
-                        title={t("editor.brushSize")}
-                        aria-label={`${t("editor.brushSize")} ${wd}`}
-                        onClick={() => setBrush({ ...brush, width: wd })}
-                        className={cx("flex h-6 w-9 items-center justify-center rounded-lg", brush.width === wd ? "bg-zinc-200" : "hover:bg-zinc-100")}
-                      >
-                        <span className="w-6 rounded-full bg-zinc-900" style={{ height: wd / 3 + 1 }} />
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {subTool === "shape" && (
-                  <div className="flex max-h-full flex-col items-center gap-1 overflow-y-auto rounded-2xl bg-white p-1.5 text-black shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
-                    {(
-                      [
-                        ["rect", "■", "editor.shapeRect"],
-                        ["circle", "●", "editor.shapeCircle"],
-                        ["heart", "♥", "editor.shapeHeart"],
-                        ["star", "★", "editor.shapeStar"],
-                        ["arrow", "➜", "editor.shapeArrow"],
-                        ["highlight", "▭", "editor.shapeHighlight"],
-                      ] as ["rect" | "circle" | "heart" | "star" | "arrow" | "highlight", string, MessageKey][]
-                    ).map(([k, icon, label]) => (
-                      <button
-                        key={k}
-                        type="button"
-                        title={t(label)}
-                        aria-label={t(label)}
-                        onClick={() => addShape(k)}
-                        className="flex size-9 items-center justify-center rounded-xl text-[18px] hover:bg-zinc-100"
-                        style={{ color: brush.color === "#ffffff" ? "#111" : brush.color }}
-                      >
-                        {icon}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
             <input
               ref={slotInput}
               type="file"
@@ -2402,7 +2320,7 @@ export function ImageEditor({
             {ready && (guides || snap.warn) && guideKind && view.w > 0 && <SizeGuides kind={guideKind} w={view.w} h={view.h} warn={snap.warn} />}
             {/* 가운데에 맞았을 때 선 (인스타 스토리처럼) */}
             {(snap.v || snap.h) && view.w > 0 && (
-              <svg aria-hidden width={view.w} height={view.h} className="pointer-events-none absolute top-1/2 left-[calc(50%+30px)] sm:left-[calc(50%+32px)] -translate-x-1/2 -translate-y-1/2">
+              <svg aria-hidden width={view.w} height={view.h} className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                 {snap.v && <line x1={view.w / 2} x2={view.w / 2} y1={0} y2={view.h} stroke="#ff2d87" strokeWidth={1.5} />}
                 {snap.h && <line x1={0} x2={view.w} y1={view.h / 2} y2={view.h / 2} stroke="#ff2d87" strokeWidth={1.5} />}
               </svg>
@@ -2580,51 +2498,79 @@ export function ImageEditor({
                       <p className="text-[11px] text-white/50">
                         {rangeOf(textSel) ? `✂ ${t("editor.textPartSelected")}` : t("editor.textPartHint")}
                       </p>
-                      <Row>
-                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.textEffect")}</span>
+                      {/* 효과 — '가'에 그 효과를 입혀 보여 줌 */}
+                      <Row className="gap-2">
                         {(["none", "shadow", "neon"] as const).map((g) => (
-                          <Chip key={g} on={glowOf(textSel) === g} onClick={() => textGlow(g)}>
-                            {t(g === "none" ? "editor.effectNone" : g === "shadow" ? "editor.effectShadow" : "editor.styleNeon")}
-                          </Chip>
+                          <Tile
+                            key={g}
+                            on={glowOf(textSel) === g}
+                            onClick={() => textGlow(g)}
+                            label={t(g === "none" ? "editor.effectNone" : g === "shadow" ? "editor.effectShadow" : "editor.styleNeon")}
+                          >
+                            <span
+                              className="font-black"
+                              style={
+                                g === "shadow"
+                                  ? { textShadow: "0 3px 6px rgba(0,0,0,0.7)" }
+                                  : g === "neon"
+                                    ? { color: "#fff", textShadow: "0 0 6px #ff3b5c, 0 0 12px #ff3b5c" }
+                                    : undefined
+                              }
+                            >
+                              가
+                            </span>
+                          </Tile>
                         ))}
-                        <span className="mx-1 h-4 w-px shrink-0 bg-white/15" />
-                        <Chip on={!!textSel.stroke && (textSel.strokeWidth ?? 0) > 0} onClick={textOutline}>
-                          {t("editor.effectOutline")}
-                        </Chip>
-                        <Chip on={Boolean(textSel.backgroundColor)} onClick={() => setTextProp({ backgroundColor: textSel.backgroundColor ? "" : "rgba(0,0,0,0.55)" })}>
-                          {t("editor.textBox")}
-                        </Chip>
+                        <Tile on={!!textSel.stroke && (textSel.strokeWidth ?? 0) > 0} onClick={textOutline} label={t("editor.effectOutline")}>
+                          <span className="font-black text-white" style={{ WebkitTextStroke: "1.5px #000", paintOrder: "stroke" }}>
+                            가
+                          </span>
+                        </Tile>
+                        <Tile
+                          on={Boolean(textSel.backgroundColor)}
+                          onClick={() => setTextProp({ backgroundColor: textSel.backgroundColor ? "" : "rgba(0,0,0,0.55)" })}
+                          label={t("editor.textBox")}
+                        >
+                          <span className="rounded bg-black/70 px-1.5 py-0.5 text-[13px] font-black text-white">가</span>
+                        </Tile>
                       </Row>
-                      <Row>
-                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.fontWeight")}</span>
+                      {/* 굵기 · 기울임·밑줄·취소선(함께 켤 수 있음) · 정렬 */}
+                      <Row className="gap-2">
                         {([
                           [300, "editor.weightLight"],
                           [400, "editor.weightRegular"],
                           [700, "editor.weightBold"],
                           [900, "editor.weightBlack"],
                         ] as const).map(([w, label]) => (
-                          <Chip key={w} on={Number(charStyleValue("fontWeight") ?? 400) === w || (w === 700 && charStyleValue("fontWeight") === "bold")} onClick={() => setCharStyle({ fontWeight: w })}>
-                            {t(label)}
-                          </Chip>
+                          <Tile
+                            key={w}
+                            on={Number(charStyleValue("fontWeight") ?? 400) === w || (w === 700 && charStyleValue("fontWeight") === "bold")}
+                            onClick={() => setCharStyle({ fontWeight: w })}
+                            label={t(label)}
+                          >
+                            <span style={{ fontWeight: w }}>가</span>
+                          </Tile>
                         ))}
-                        <span className="mx-1 h-4 w-px shrink-0 bg-white/15" />
-                        {/* 기울임·밑줄·취소선은 각각 켜고 끄기 — 여러 개 함께 */}
-                        <Chip on={charStyleValue("fontStyle") === "italic"} onClick={() => setCharStyle({ fontStyle: charStyleValue("fontStyle") === "italic" ? "normal" : "italic" })}>
-                          <i>{t("editor.italic")}</i>
-                        </Chip>
-                        <Chip on={charStyleValue("underline") === true} onClick={() => setCharStyle({ underline: charStyleValue("underline") !== true })}>
-                          <u>{t("editor.underline")}</u>
-                        </Chip>
-                        <Chip on={charStyleValue("linethrough") === true} onClick={() => setCharStyle({ linethrough: charStyleValue("linethrough") !== true })}>
-                          <s>{t("editor.strike")}</s>
-                        </Chip>
-                      </Row>
-                      <Row>
-                        <span className="shrink-0 text-[11px] text-white/45">{t("editor.align")}</span>
+                        <span className="mx-0.5 h-8 w-px shrink-0 self-start bg-white/15" />
+                        <Tile on={charStyleValue("fontStyle") === "italic"} onClick={() => setCharStyle({ fontStyle: charStyleValue("fontStyle") === "italic" ? "normal" : "italic" })} label={t("editor.italic")}>
+                          <span className="font-serif italic">I</span>
+                        </Tile>
+                        <Tile on={charStyleValue("underline") === true} onClick={() => setCharStyle({ underline: charStyleValue("underline") !== true })} label={t("editor.underline")}>
+                          <span className="underline underline-offset-2">U</span>
+                        </Tile>
+                        <Tile on={charStyleValue("linethrough") === true} onClick={() => setCharStyle({ linethrough: charStyleValue("linethrough") !== true })} label={t("editor.strike")}>
+                          <span className="line-through">S</span>
+                        </Tile>
+                        <span className="mx-0.5 h-8 w-px shrink-0 self-start bg-white/15" />
                         {(["left", "center", "right", "justify"] as const).map((a) => (
-                          <Chip key={a} on={textSel.textAlign === a} onClick={() => setTextProp({ textAlign: a })}>
-                            {t(a === "left" ? "editor.alignLeft" : a === "center" ? "editor.alignCenter" : a === "right" ? "editor.alignRight" : "editor.alignJustify")}
-                          </Chip>
+                          <Tile
+                            key={a}
+                            on={textSel.textAlign === a}
+                            onClick={() => setTextProp({ textAlign: a })}
+                            label={t(a === "left" ? "editor.alignLeft" : a === "center" ? "editor.alignCenter" : a === "right" ? "editor.alignRight" : "editor.alignJustify")}
+                          >
+                            <LinesIcon align={a} />
+                          </Tile>
                         ))}
                       </Row>
                       <Slider
@@ -2671,35 +2617,23 @@ export function ImageEditor({
               {tab === "sticker" && (
                 <div className="space-y-2.5">
                   <div className="space-y-1.5">
-                    {/* 고른 사진(붙인 사진·스티커)의 배경 지우기 */}
-                    {selected?.type === "image" && !SPECIAL.has(selected.name ?? "") && (
-                      <div className="space-y-1.5 rounded-lg border border-white/10 p-2">
-                        <p className="text-[12px] font-semibold text-white/80">🖼 {t("editor.selectedPhoto")}</p>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Chip onClick={() => cutSelected("ai")}>✂ {t("editor.removeBgAi")}</Chip>
-                          <Chip onClick={() => cutSelected("solid")}>🪄 {t("editor.removeBgSolid")}</Chip>
-                          <Chip onClick={refineSelected}>🧽 {t("editor.refine")}</Chip>
-                          {(selected as Named).orig && <Chip onClick={restoreSelectedImage}>{t("editor.restorePhoto")}</Chip>}
-                        </div>
-                        <Slider
-                          label={t("editor.tolerance")}
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={keyTolerance}
-                          display={String(Math.round(keyTolerance * 100))}
-                          onChange={setKeyTolerance}
-                          onCommit={() => cutSelected("solid")}
-                        />
-                        <p className="text-[11px] text-white/45">{t("editor.solidHint")}</p>
-                      </div>
-                    )}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="mr-1 text-[12px] font-semibold text-white/80">⭐ {t("editor.myStickers")}</span>
-                      <Chip onClick={() => photoFile.current?.click()}>🖼 {t("editor.placePhoto")}</Chip>
-                      {isDesign && <Chip onClick={addPhotoSlot}>▢ {t("design.addSlot")}</Chip>}
-                      <Chip onClick={() => stickerFile.current?.click()}>✂ {t("editor.stickerFromPhoto")}</Chip>
-                      {selected && !SPECIAL.has(selected.name ?? "") && <Chip onClick={saveSelectionAsSticker}>{t("editor.saveSelection")}</Chip>}
+                    <Row className="gap-2">
+                      <Tile onClick={() => photoFile.current?.click()} label={t("editor.placePhoto")} wide>
+                        🖼
+                      </Tile>
+                      {isDesign && (
+                        <Tile onClick={addPhotoSlot} label={t("design.addSlot")} wide>
+                          <span className="flex size-6 items-center justify-center rounded border-2 border-dashed border-current text-[11px]">📷</span>
+                        </Tile>
+                      )}
+                      <Tile onClick={() => void addMemo()} label={t("editor.toolMemo")} wide>
+                        <span className="flex h-6 w-7 -rotate-3 items-center justify-center bg-[#ffe066] text-[9px] font-bold text-[#3b2f0b]">memo</span>
+                      </Tile>
+                      {selected && !SPECIAL.has(selected.name ?? "") && (
+                        <Tile onClick={saveSelectionAsSticker} label={t("editor.saveSelection")} wide>
+                          ⭐
+                        </Tile>
+                      )}
                       <input
                         ref={photoFile}
                         type="file"
@@ -2711,18 +2645,7 @@ export function ImageEditor({
                           if (file) placePhoto(file);
                         }}
                       />
-                      <input
-                        ref={stickerFile}
-                        type="file"
-                        accept="image/*,.heic,.heif"
-                        hidden
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          e.target.value = "";
-                          if (file) stickerFromFile(file);
-                        }}
-                      />
-                    </div>
+                    </Row>
                     <p className="text-[11px] text-white/45">{t("editor.copyPasteHint")}</p>
                     {(stickers.data?.data.length ?? 0) > 0 ? (
                       <Row>
@@ -2802,15 +2725,29 @@ export function ImageEditor({
                       </button>
                     ))}
                   </Row>
-                  <Row>
-                    {(["heart", "star", "arrow", "circle", "rect", "line", "highlight"] as const).map((k) => (
-                      <Chip key={k} onClick={() => addShape(k)}>
-                        {t(`editor.shape${k[0].toUpperCase()}${k.slice(1)}` as "editor.shapeHeart")}
-                      </Chip>
+                  {/* 도형 — 지금 색으로 모양을 그대로 보여 줌 */}
+                  <Row className="gap-2">
+                    {(
+                      [
+                        ["heart", "♥"],
+                        ["star", "★"],
+                        ["arrow", "➜"],
+                        ["circle", fillShapes ? "●" : "○"],
+                        ["rect", fillShapes ? "■" : "□"],
+                        ["line", "╱"],
+                        ["highlight", "▬"],
+                      ] as const
+                    ).map(([k, icon]) => (
+                      <Tile key={k} onClick={() => addShape(k)} label={t(`editor.shape${k[0].toUpperCase()}${k.slice(1)}` as "editor.shapeHeart")}>
+                        <span className="text-[20px]" style={{ color: paintColor, opacity: k === "highlight" ? 0.6 : 1 }}>
+                          {icon}
+                        </span>
+                      </Tile>
                     ))}
-                    <Chip on={fillShapes} onClick={toggleFill}>
-                      {t("editor.fill")}
-                    </Chip>
+                    <span className="mx-0.5 h-8 w-px shrink-0 self-start bg-white/15" />
+                    <Tile on={fillShapes} onClick={toggleFill} label={t("editor.fill")}>
+                      <span className="text-[20px]">{fillShapes ? "■" : "□"}</span>
+                    </Tile>
                   </Row>
                   <Swatches value={paintColor} onPick={recolor} customLabel={t("editor.customColor")} small />
                 </div>
@@ -2818,11 +2755,35 @@ export function ImageEditor({
 
               {tab === "draw" && (
                 <div className="space-y-2.5">
-                  <Row>
+                  {/* 붓 — 모양을 그림으로 */}
+                  <Row className="gap-2">
                     {(["pen", "marker", "neon", "eraser"] as const).map((k) => (
-                      <Chip key={k} on={brush.kind === k} onClick={() => setBrush({ ...brush, kind: k })}>
-                        {t(k === "eraser" ? "editor.eraser" : (`editor.brush${k[0].toUpperCase()}${k.slice(1)}` as "editor.brushPen"))}
-                      </Chip>
+                      <Tile
+                        key={k}
+                        on={brush.kind === k}
+                        onClick={() => setBrush({ ...brush, kind: k })}
+                        label={t(k === "eraser" ? "editor.eraser" : (`editor.brush${k[0].toUpperCase()}${k.slice(1)}` as "editor.brushPen"))}
+                        wide
+                      >
+                        <svg width="40" height="22" viewBox="0 0 40 22" aria-hidden>
+                          {k === "eraser" ? (
+                            <g>
+                              <rect x="10" y="5" width="20" height="12" rx="2" fill="#f9a8b8" transform="rotate(-20 20 11)" />
+                              <rect x="10" y="5" width="7" height="12" rx="2" fill="#e5567a" transform="rotate(-20 20 11)" />
+                            </g>
+                          ) : (
+                            <path
+                              d="M4 15 C 12 4, 20 20, 36 7"
+                              fill="none"
+                              stroke={k === "neon" ? "#fff" : brush.color === "#ffffff" && brush.kind !== k ? "#fff" : brush.color}
+                              strokeWidth={k === "marker" ? 7 : k === "neon" ? 3 : 2.5}
+                              strokeLinecap={k === "marker" ? "square" : "round"}
+                              opacity={k === "marker" ? 0.5 : 1}
+                              style={k === "neon" ? { filter: `drop-shadow(0 0 3px ${brush.color === "#ffffff" ? "#ff3b5c" : brush.color})` } : undefined}
+                            />
+                          )}
+                        </svg>
+                      </Tile>
                     ))}
                   </Row>
                   {brush.kind === "eraser" ? (
@@ -2830,7 +2791,14 @@ export function ImageEditor({
                   ) : (
                     <>
                       <Swatches value={paintColor} onPick={recolor} customLabel={t("editor.customColor")} />
-                      <Slider label={t("editor.brushSize")} min={2} max={40} step={1} value={brush.width} onChange={(v) => setBrush({ ...brush, width: v })} />
+                      {/* 굵기 — 그 굵기의 선으로 */}
+                      <Row className="gap-2">
+                        {[3, 6, 10, 18, 30].map((wd) => (
+                          <Tile key={wd} on={brush.width === wd} onClick={() => setBrush({ ...brush, width: wd })} label={String(wd)}>
+                            <span className="rounded-full bg-current" style={{ width: 24, height: Math.max(2, wd / 2.2) }} />
+                          </Tile>
+                        ))}
+                      </Row>
                     </>
                   )}
                 </div>
@@ -2840,12 +2808,24 @@ export function ImageEditor({
                 <div className="space-y-1.5">
                   <p className="text-[11px] text-white/50">◐ {t("editor.compareHint")}</p>
                   <Row>
-                    {Object.keys(PRESETS).map((p) => (
-                      <Chip key={p} on={adjust.preset === p} onClick={() => applyAdjust(presetAdjust(p), true)}>
-                        {t(`editor.preset${p[0].toUpperCase()}${p.slice(1)}` as "editor.presetNone")}
-                      </Chip>
-                    ))}
-                    <Chip onClick={() => applyAdjust(NO_ADJUST, true)}>{t("editor.reset")}</Chip>
+                    {/* 필터 — 이 사진에 입혀 본 작은 미리보기 */}
+                    {Object.keys(PRESETS).map((p) => {
+                      const label = t(`editor.preset${p[0].toUpperCase()}${p.slice(1)}` as "editor.presetNone");
+                      return (
+                        <button key={p} type="button" onClick={() => applyAdjust(presetAdjust(p), true)} aria-pressed={adjust.preset === p} className="flex w-14 shrink-0 flex-col items-center gap-1">
+                          <span className={cx("block size-14 overflow-hidden rounded-xl bg-white/10", adjust.preset === p ? "ring-2 ring-white ring-offset-2 ring-offset-[#141416]" : "opacity-90")}>
+                            {presetThumbs[p] && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={presetThumbs[p]} alt="" className="size-full object-cover" />
+                            )}
+                          </span>
+                          <span className={cx("max-w-14 truncate text-[10px]", adjust.preset === p ? "text-white" : "text-white/55")}>{label}</span>
+                        </button>
+                      );
+                    })}
+                    <Tile onClick={() => applyAdjust(NO_ADJUST, true)} label={t("editor.reset")}>
+                      ↺
+                    </Tile>
                   </Row>
                   {/* 내 필터 */}
                   <Row>
@@ -3003,11 +2983,13 @@ export function ImageEditor({
                             ["design.bgStripes", { kind: "pattern", pattern: "stripes", color: "bg", ink: "primary", alpha: 0.12 }],
                           ] as [MessageKey, Bg][]
                         ).map(([label, spec]) => (
-                          <Chip key={label} onClick={() => changeBackdrop(spec)}>
-                            {t(label)}
-                          </Chip>
+                          <Tile key={label} onClick={() => changeBackdrop(spec)} label={t(label)}>
+                            <span className="size-full" style={{ background: bgPreview(spec, designTheme() ?? BUILTIN_THEMES[0]) }} />
+                          </Tile>
                         ))}
-                        <Chip onClick={() => backdropInput.current?.click()}>📷 {t("design.bgFromPhoto")}</Chip>
+                        <Tile onClick={() => backdropInput.current?.click()} label={t("design.bgFromPhoto")}>
+                          📷
+                        </Tile>
                       </Row>
                       <input
                         ref={backdropInput}
@@ -3023,40 +3005,6 @@ export function ImageEditor({
                       <p className="text-[11px] text-white/45">{t("design.changeBgHint")}</p>
                     </div>
                   )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={removePhotoBackground}
-                      disabled={!!aiBusy}
-                      className="rounded-lg bg-white px-3 py-1.5 text-[13px] font-semibold text-black disabled:opacity-50"
-                    >
-                      ✂ {t("editor.removeBg")}
-                    </button>
-                    {hasCutout && <Chip onClick={refinePhoto}>🧽 {t("editor.refine")}</Chip>}
-                    {(hasCutout || (base() as Named | undefined)?.orig) && <Chip onClick={restoreOriginalPhoto}>{t("editor.restorePhoto")}</Chip>}
-                  </div>
-                  <p className="text-[11px] leading-relaxed text-white/50">{t("editor.removeBgHint")}</p>
-                  {hasCutout && (
-                    <div className="space-y-1.5">
-                      <p className="text-[12px] text-white/70">{t("editor.newBackground")}</p>
-                      <Row>
-                        {BG_COLORS.map((c) => (
-                          <button
-                            key={c}
-                            type="button"
-                            aria-label={c}
-                            onClick={() => changeBackground({ color: c })}
-                            className="size-7 shrink-0 rounded-full border border-white/30"
-                            style={{ background: c }}
-                          />
-                        ))}
-                        <label className="relative size-7 shrink-0 cursor-pointer overflow-hidden rounded-full border border-white/30 bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)]" title={t("editor.customColor")}>
-                          <input type="color" className="absolute inset-0 opacity-0" onChange={(e) => changeBackground({ color: e.target.value })} />
-                        </label>
-                        <Chip onClick={() => changeBackground({ blur: true })}>{t("editor.blurredOriginal")}</Chip>
-                      </Row>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -3066,16 +3014,21 @@ export function ImageEditor({
                   <div className="space-y-1.5">
                     <p className="text-[12px] font-semibold text-white/80">{t("design.applyTheme")}</p>
                     <p className="text-[11px] text-white/45">{t("design.applyThemeHint")}</p>
-                    <Row>
+                    <Row className="gap-2">
                       {[...(myThemes.data?.data ?? []).map((x) => ({ ...x, mine: true })), ...BUILTIN_THEMES].map((th) => (
-                        <Chip key={th.id} onClick={() => themeThisPage(th)}>
-                          <span className="mr-1.5 inline-flex overflow-hidden rounded-full align-[-2px]">
-                            {[th.colors.bg, th.colors.primary, th.colors.accent].map((c, i) => (
-                              <span key={i} className="size-3" style={{ background: c }} />
-                            ))}
+                        <Tile
+                          key={th.id}
+                          on={designTheme()?.id === th.id}
+                          onClick={() => themeThisPage(th)}
+                          label={"mine" in th ? th.name : t(`design.th_${th.id}` as MessageKey)}
+                        >
+                          {/* 바탕 위에 메인 색 막대·포인트 점 — 테마를 작은 카드로 */}
+                          <span className="relative size-full" style={{ background: th.colors.bg }}>
+                            <span className="absolute top-2 left-1.5 h-1.5 w-6 rounded-full" style={{ background: th.colors.text }} />
+                            <span className="absolute top-5 left-1.5 h-3 w-7 rounded" style={{ background: th.colors.primary }} />
+                            <span className="absolute right-1.5 bottom-1.5 size-2.5 rounded-full" style={{ background: th.colors.accent }} />
                           </span>
-                          {"mine" in th ? th.name : t(`design.th_${th.id}` as MessageKey)}
-                        </Chip>
+                        </Tile>
                       ))}
                     </Row>
                   </div>
@@ -3117,21 +3070,39 @@ export function ImageEditor({
                   />
                   {/* 줄여서 생긴 빈 곳 채우기 */}
                   {hasGap && (
-                    <Row>
-                      <span className="shrink-0 text-[11px] text-white/45">{t("editor.fillEmpty")}</span>
+                    <Row className="gap-2">
+                      <span className="shrink-0 self-start pt-3 text-[11px] text-white/45">{t("editor.fillEmpty")}</span>
                       {(["blur", "white", "black"] as const).map((fl) => (
-                        <Chip key={fl} on={(crop.fill ?? "blur") === fl} onClick={() => (applyCrop({ ...crop, fill: fl }), snapshot())}>
-                          {t(fl === "blur" ? "editor.fillBlur" : fl === "white" ? "editor.fillWhite" : "editor.fillBlack")}
-                        </Chip>
+                        <Tile
+                          key={fl}
+                          on={(crop.fill ?? "blur") === fl}
+                          onClick={() => (applyCrop({ ...crop, fill: fl }), snapshot())}
+                          label={t(fl === "blur" ? "editor.fillBlur" : fl === "white" ? "editor.fillWhite" : "editor.fillBlack")}
+                        >
+                          <span
+                            className="size-7 rounded-md border border-white/30"
+                            style={{ background: fl === "white" ? "#fff" : fl === "black" ? "#000" : "linear-gradient(135deg,#8aa3b8,#d9c7b0,#7f8f7a)", filter: fl === "blur" ? "blur(1.5px)" : undefined }}
+                          />
+                        </Tile>
                       ))}
                     </Row>
                   )}
                   <Slider label={t("editor.straighten")} min={-30} max={30} step={0.5} value={crop.straighten} onChange={(v) => applyCrop({ ...crop, straighten: v })} onCommit={snapshot} />
-                  <Row>
-                    <Chip onClick={() => (applyCrop({ ...crop, turns: (crop.turns + 1) % 4, zoom: 1 }, true), snapshot())}>⟳ {t("editor.rotate")}</Chip>
-                    <Chip onClick={() => (applyCrop({ ...crop, flip: !crop.flip }), snapshot())}>⇋ {t("editor.flip")}</Chip>
-                    <Chip onClick={() => (applyCrop({ ...crop, zoom: fitZoom() }, true), haptic("snap"), snapshot())}>{t("editor.fitWhole")}</Chip>
-                    <Chip onClick={() => (applyCrop(NO_CROP, true), snapshot())}>{t("editor.reset")}</Chip>
+                  <Row className="gap-2">
+                    <Tile onClick={() => (applyCrop({ ...crop, turns: (crop.turns + 1) % 4, zoom: 1 }, true), snapshot())} label={t("editor.rotate")} wide>
+                      ⟳
+                    </Tile>
+                    <Tile on={crop.flip} onClick={() => (applyCrop({ ...crop, flip: !crop.flip }), snapshot())} label={t("editor.flip")} wide>
+                      ⇋
+                    </Tile>
+                    <Tile onClick={() => (applyCrop({ ...crop, zoom: fitZoom() }, true), haptic("snap"), snapshot())} label={t("editor.fitWhole")} wide>
+                      <span className="flex h-6 w-5 items-center justify-center rounded-sm border-2 border-current">
+                        <span className="h-2.5 w-3 bg-current" />
+                      </span>
+                    </Tile>
+                    <Tile onClick={() => (applyCrop(NO_CROP, true), snapshot())} label={t("editor.reset")} wide>
+                      ↺
+                    </Tile>
                   </Row>
                 </div>
               )}
@@ -3175,6 +3146,28 @@ export function ImageEditor({
       )}
     </div>
   );
+}
+
+/** 바탕 무늬를 CSS 로 작게 (고르는 칸 미리보기) */
+function bgPreview(spec: Bg, theme: Theme): string {
+  const c = (tk: Parameters<typeof colorOf>[1]) => colorOf(theme, tk);
+  if (spec.kind === "solid") return c(spec.color);
+  if (spec.kind === "gradient") return `linear-gradient(${spec.angle ?? 180}deg, ${c(spec.from)}, ${c(spec.to)})`;
+  if (spec.kind === "photo") return "#888";
+  const bg = c(spec.color);
+  const ink = c(spec.ink);
+  switch (spec.pattern) {
+    case "dots":
+      return `radial-gradient(${ink} 1.5px, transparent 1.6px) 0 0/8px 8px, ${bg}`;
+    case "grid":
+      return `linear-gradient(${ink}55 1px, transparent 1px) 0 0/8px 8px, linear-gradient(90deg, ${ink}55 1px, transparent 1px) 0 0/8px 8px, ${bg}`;
+    case "checker":
+      return `repeating-conic-gradient(${ink}aa 0 25%, ${bg} 0 50%) 0 0/12px 12px`;
+    case "lines":
+      return `linear-gradient(${ink}66 1px, transparent 1px) 0 0/100% 7px, ${bg}`;
+    default:
+      return `repeating-linear-gradient(45deg, ${ink}44 0 3px, ${bg} 3px 7px)`;
+  }
 }
 
 /** 인스타그램에서 실제로 보이는 영역 (캔버스 좌표). 피드는 4:5·1.91:1 밖이 잘리고, 스토리는 위아래 띠가 화면 요소에 가려짐 */
@@ -3232,7 +3225,7 @@ function SizeGuides({ kind, w, h, warn }: { kind: "feed" | "story"; w: number; h
       aria-hidden
       width={w}
       height={h}
-      className="pointer-events-none absolute top-1/2 left-[calc(50%+30px)] sm:left-[calc(50%+32px)] -translate-x-1/2 -translate-y-1/2"
+      className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
       style={{ overflow: "visible" }}
     >
       {bands.map((b) => (
@@ -3292,6 +3285,38 @@ function Swatches({ value, onPick, small, customLabel }: { value: string; onPick
         <input type="color" value={value.startsWith("#") ? value : "#ffffff"} onChange={(e) => onPick(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" aria-label={customLabel} />
       </label>
     </Row>
+  );
+}
+
+/** 눌러서 고르는 그림 칸: 위에 모양(미리보기), 아래 작은 이름 */
+function Tile({ on, onClick, label, children, wide }: { on?: boolean; onClick: () => void; label?: string; children: ReactNode; wide?: boolean }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={on} aria-label={label} title={label} className="flex shrink-0 flex-col items-center gap-1">
+      <span
+        className={cx(
+          "flex h-11 items-center justify-center overflow-hidden rounded-xl border text-[17px] leading-none transition",
+          wide ? "w-16" : "w-11",
+          on ? "border-white bg-white text-black" : "border-white/15 bg-white/[0.06] text-white hover:bg-white/15",
+        )}
+      >
+        {children}
+      </span>
+      {label && <span className={cx("max-w-16 truncate text-[10px]", on ? "text-white" : "text-white/55")}>{label}</span>}
+    </button>
+  );
+}
+
+/** 선 모양 아이콘 (정렬 등) */
+function LinesIcon({ align }: { align: "left" | "center" | "right" | "justify" }) {
+  const rows = [18, 12, 16, 10];
+  return (
+    <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden>
+      {rows.map((w0, i) => {
+        const w = align === "justify" ? 18 : w0;
+        const x = align === "left" || align === "justify" ? 1 : align === "right" ? 19 - w : (20 - w) / 2;
+        return <rect key={i} x={x} y={1 + i * 4} width={w} height="2" rx="1" fill="currentColor" />;
+      })}
+    </svg>
   );
 }
 
