@@ -154,6 +154,37 @@ export function Review({
   // ── 오른쪽: 올라갈 모습 + 임시저장 / 게시 ───────────────────────
   const canPublish =
     !locked || (isStory && job.status === "publishing" && !!progress && progress.done < progress.total);
+  const actionButtons = (
+    <div className="grid grid-cols-2 gap-2">
+      <Button onClick={save} disabled={!(dirty || arDirty) || !arValid || publishing} loading={saving}>
+        {saved ? t("studio.draftSaved") : t("studio.saveDraft")}
+      </Button>
+      <Button
+        variant="primary"
+        onClick={publish}
+        loading={publishing}
+        disabled={overCaption || overTags || !arValid || visual.length === 0 || quota.data?.remaining === 0}
+      >
+        {isStory
+          ? publishing && progress
+            ? t("studio.publishingStories", { done: progress.done, total: progress.total })
+            : t("studio.publishStories", { n: visual.length })
+          : publishing
+            ? t("studio.publishing")
+            : job.status === "failed" || job.status === "deleted" || job.status === "expired"
+              ? t("studio.republish")
+              : t("studio.publish")}
+      </Button>
+    </div>
+  );
+  // 휴대폰·태블릿: 스크롤해도 늘 보이게 화면 아래(탭 메뉴 바로 위)에 고정
+  const actionBar = canPublish && (
+    <div className="fixed inset-x-0 bottom-[calc(64px+env(safe-area-inset-bottom))] z-30 border-t border-line bg-surface-1/95 px-4 py-2.5 backdrop-blur md:bottom-0 md:pb-[max(0.625rem,env(safe-area-inset-bottom))] lg:hidden">
+      {(dirty || arDirty) && <p className="mb-1.5 text-[11px] font-medium text-warn">· {t("studio.unsaved")}</p>}
+      {actionButtons}
+    </div>
+  );
+
   const preview = (
     <div className="space-y-3">
       <Card
@@ -213,27 +244,8 @@ export function Review({
                 {t("studio.shareToFeed")}
               </label>
             )}
-            <div className="grid grid-cols-2 gap-2">
-              <Button onClick={save} disabled={!(dirty || arDirty) || !arValid || publishing} loading={saving}>
-                {saved ? t("studio.draftSaved") : t("studio.saveDraft")}
-              </Button>
-              <Button
-                variant="primary"
-                onClick={publish}
-                loading={publishing}
-                disabled={overCaption || overTags || !arValid || visual.length === 0 || quota.data?.remaining === 0}
-              >
-                {isStory
-                  ? publishing && progress
-                    ? t("studio.publishingStories", { done: progress.done, total: progress.total })
-                    : t("studio.publishStories", { n: visual.length })
-                  : publishing
-                    ? t("studio.publishing")
-                    : job.status === "failed" || job.status === "deleted" || job.status === "expired"
-                      ? t("studio.republish")
-                      : t("studio.publish")}
-              </Button>
-            </div>
+            {/* 넓은 화면: 여기 / 휴대폰·태블릿: 화면 아래에 고정 (아래 actionBar) */}
+            <div className="hidden lg:block">{actionButtons}</div>
             {publishing && <p className="text-[12px] text-fg-3">{t("studio.videoWait")}</p>}
           </div>
         )}
@@ -397,12 +409,15 @@ export function Review({
             </div>
           </Card>
         )}
+        {/* 아래 고정 버튼에 마지막 내용이 가리지 않게 */}
+        {canPublish && <div className="h-16 lg:hidden" aria-hidden />}
       </div>
 
       {/* ── 오른쪽: 고정 미리보기 (넓은 화면) ── */}
       <aside className="hidden lg:block">
         <div className="sticky top-6">{preview}</div>
       </aside>
+      {actionBar}
 
       {editing !== null && visual[editing] && (
         <ImageEditor

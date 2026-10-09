@@ -122,6 +122,15 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
     }
   }
 
+  const actionButtons = (
+    <div className="grid grid-cols-2 gap-2">
+      <Button disabled>{t("studio.saveDraft")}</Button>
+      <Button variant="primary" disabled>
+        {story ? t("studio.publishStories", { n: 0 }) : t("studio.publish")}
+      </Button>
+    </div>
+  );
+
   const preview = (
     <Card title={t("studio.livePreview")} subtitle={t("studio.livePreviewHint")}>
       {story ? (
@@ -129,15 +138,8 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
       ) : (
         <InstagramPreview username={me.username} avatar={me.profile_picture_url} assets={[]} caption={finalCaption} />
       )}
-      {/* 작업 공간과 같은 자리에 게시 버튼 (사진을 넣으면 쓸 수 있음) */}
-      <div className="mt-4 space-y-3 border-t border-line pt-4">
-        <div className="grid grid-cols-2 gap-2">
-          <Button disabled>{t("studio.saveDraft")}</Button>
-          <Button variant="primary" disabled>
-            {story ? t("studio.publishStories", { n: 0 }) : t("studio.publish")}
-          </Button>
-        </div>
-      </div>
+      {/* 작업 공간과 같은 자리에 게시 버튼 (사진을 넣으면 쓸 수 있음) — 넓은 화면만, 휴대폰·태블릿은 아래 고정 */}
+      <div className="mt-4 hidden space-y-3 border-t border-line pt-4 lg:block">{actionButtons}</div>
     </Card>
   );
 
@@ -207,11 +209,17 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
             </div>
           </Card>
         )}
+        {/* 아래 고정 버튼에 마지막 내용이 가리지 않게 */}
+        <div className="h-16 lg:hidden" aria-hidden />
       </div>
 
       <aside className="hidden lg:block">
         <div className="sticky top-6">{preview}</div>
       </aside>
+      {/* 휴대폰·태블릿: 화면 아래(탭 메뉴 바로 위)에 고정 */}
+      <div className="fixed inset-x-0 bottom-[calc(64px+env(safe-area-inset-bottom))] z-30 border-t border-line bg-surface-1/95 px-4 py-2.5 backdrop-blur md:bottom-0 md:pb-[max(0.625rem,env(safe-area-inset-bottom))] lg:hidden">
+        {actionButtons}
+      </div>
     </div>
   );
 }
