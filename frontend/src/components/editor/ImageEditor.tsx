@@ -121,7 +121,8 @@ const PRESETS: Record<string, Partial<Adjust>> = {
   clear: { brightness: 0.06, contrast: 0.12, saturation: 0.25 },
   // 필름 카메라 감성: 사진 원래 대비는 지키고 질감(그레인·S자 곡선·살짝 띄운 암부·따뜻함)만 더함
   film: { exposure: 0.2, shadows: 0.15, lift: 0.1, curve: 0.3, grain: 0.25, warmth: 0.08, fade: 0.1 },
-  dreamy: { brightness: 0.03, saturation: -0.15, warmth: 0.1, fade: 0.1, glow: 0.4 },
+  // 몽환 (사용자가 맞춘 값): 밝기 +6 · 비네트 +1 · 글로우 +48(번짐 0, 스크린)
+  dreamy: { brightness: 0.06, vignette: 0.01, glow: 0.48, glowRadius: 0, glowSoft: 0, grainSize: 0, grainRough: 0 },
   fade: { fade: 0.4, saturation: -0.2 },
   warm: { warmth: 0.45, saturation: 0.08 },
   cool: { warmth: -0.45 },
@@ -138,14 +139,13 @@ const PRESETS: Record<string, Partial<Adjust>> = {
     gradeShadowHue: 210, gradeShadowSat: 0.03, gradeMidHue: 35, gradeMidSat: 0.04, gradeHighHue: 45, gradeHighSat: 0.06, gradeBalance: 0.05,
     hslH_orange: -0.03, hslS_orange: -0.03, hslL_orange: 0.08, hslH_yellow: -0.1, hslS_yellow: -0.05, hslS_green: -0.08, hslS_blue: -0.05,
   },
-  // 폴라로이드: 검정을 살짝 띄운 매트 · 크림빛 밝은 곳 · 청록빛 어두운 곳 · 낮은 채도 · 고운 입자 · 가장자리 살짝 어둡게
-  // (대비는 원래에 가깝게 — 뿌옇지 않게 띄우는 건 조금만)
+  // 폴라로이드 (사용자가 맞춘 값): 노출 +0.45 · 흰색/검정 계열 -100 · 따뜻함 -21 · 활기 -37 · 흑백 +12 · 텍스처 -17 · 부분 대비 -18
+  // 디헤이즈 +68 · S자 곡선 +18 · 컬러 그레이딩(어두운 180° 12 / 중간 40° 3 / 밝은 50° 12, 균형 +10) · 비네트 +100 · 글로우 +48(번짐 0, 스크린)
   polaroid: {
-    exposure: 0.08, contrast: 0, highlights: -0.16, whites: -0.05, shadows: 0.08, lift: 0.06, fade: 0.06, curve: 0.12,
-    warmth: 0.1, tint: 0.03, saturation: -0.14, vibrance: 0.06, clarity: -0.08, sharpen: -0.06,
+    exposure: 0.45, whites: -1, blacks: -1, warmth: -0.21, vibrance: -0.37, mono: 0.12,
+    texture: -0.17, clarity: -0.18, dehaze: 0.68, curve: 0.18,
     gradeShadowHue: 180, gradeShadowSat: 0.12, gradeMidHue: 40, gradeMidSat: 0.03, gradeHighHue: 50, gradeHighSat: 0.12, gradeBalance: 0.1,
-    hslS_blue: -0.12, hslL_orange: 0.05, hslH_green: 0.06,
-    grain: 0.16, grainSize: 0.3, vignette: 0.22,
+    vignette: 1, glow: 0.48, glowRadius: 0, glowSoft: 0, grainSize: 0, grainRough: 0,
   },
   digicam: { contrast: -0.05, grain: 0.22, grainSize: 0.08, grainRough: 0.5, warmth: 0.15, fade: 0.1, sharpen: -0.1, highlights: -0.15 },
 };
