@@ -83,6 +83,30 @@ async function drawBg(bg: Bg, theme: Theme, w: number, h: number, photoSrc?: str
     g.addColorStop(1, colorOf(theme, bg.to));
     x.fillStyle = g;
     x.fillRect(0, 0, w, h);
+  } else if (bg.kind === "pattern") {
+    x.fillStyle = colorOf(theme, bg.color);
+    x.fillRect(0, 0, w, h);
+    x.globalAlpha = bg.alpha ?? 0.18;
+    x.fillStyle = x.strokeStyle = colorOf(theme, bg.ink);
+    const g = bg.gap ?? (bg.pattern === "checker" ? 90 : bg.pattern === "lines" ? 72 : 48);
+    if (bg.pattern === "dots") {
+      for (let yy = g / 2; yy < h; yy += g) for (let xx = g / 2; xx < w; xx += g) x.fillRect(xx - 3, yy - 3, 6, 6);
+    } else if (bg.pattern === "grid") {
+      x.lineWidth = 2;
+      for (let xx = 0; xx <= w; xx += g) x.fillRect(xx, 0, 2, h);
+      for (let yy = 0; yy <= h; yy += g) x.fillRect(0, yy, w, 2);
+    } else if (bg.pattern === "checker") {
+      for (let yy = 0, r = 0; yy < h; yy += g, r++) for (let xx = (r % 2) * g; xx < w; xx += g * 2) x.fillRect(xx, yy, g, g);
+    } else if (bg.pattern === "lines") {
+      for (let yy = g; yy < h; yy += g) x.fillRect(0, yy, w, 2);
+    } else {
+      x.translate(w / 2, h / 2);
+      x.rotate(-Math.PI / 4);
+      const d = Math.hypot(w, h);
+      for (let xx = -d; xx < d; xx += g) x.fillRect(xx, -d, g / 2, d * 2);
+      x.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    x.globalAlpha = 1;
   } else {
     const im = await loadImage(photoSrc || placeholder());
     const s = Math.max(w / im.naturalWidth, h / im.naturalHeight);
@@ -137,16 +161,17 @@ async function buildEl(f: typeof F, el: El, theme: Theme, input: PageInput, phot
       ...TL,
       left: el.x, top: el.y, width: el.w, fontSize: el.size, fontFamily: fontFamily(theme.fonts[el.font]),
       fill: colorOf(theme, el.color), fontWeight: el.weight ?? 400, textAlign: el.align ?? "left", lineHeight: el.lh ?? 1.25,
-      charSpacing: el.ls ?? 0, splitByGrapheme: true, backgroundColor: el.box ? colorOf(theme, el.box) : "",
+      charSpacing: el.ls ?? 0, splitByGrapheme: true, backgroundColor: el.box ? colorOf(theme, el.box) : "", angle: el.angle ?? 0,
     }) as unknown as WithTk;
     o.tk = { fill: el.color, font: el.font, ...(el.box ? { box: el.box } : {}) };
   } else if (el.t === "rect") {
     o = new f.Rect({
       ...TL,
-      left: el.x, top: el.y, width: el.w, height: el.h, rx: el.r ?? 0, ry: el.r ?? 0, fill: colorOf(theme, el.fill), opacity: el.opacity ?? 1,
-      ...(el.stroke ? { stroke: colorOf(theme, el.stroke), strokeWidth: el.sw ?? 2 } : { strokeWidth: 0 }),
+      left: el.x, top: el.y, width: el.w, height: el.h, rx: el.r ?? 0, ry: el.r ?? 0,
+      fill: el.fill === "none" ? "" : colorOf(theme, el.fill), opacity: el.opacity ?? 1, angle: el.angle ?? 0,
+      ...(el.stroke ? { stroke: colorOf(theme, el.stroke), strokeWidth: el.sw ?? 2, strokeDashArray: el.dash ?? null } : { strokeWidth: 0 }),
     }) as unknown as WithTk;
-    o.tk = { fill: el.fill, ...(el.stroke ? { stroke: el.stroke } : {}) };
+    o.tk = { ...(el.fill !== "none" ? { fill: el.fill } : {}), ...(el.stroke ? { stroke: el.stroke } : {}) };
   } else if (el.t === "circle") {
     o = new f.Circle({
       ...TL,
@@ -155,8 +180,21 @@ async function buildEl(f: typeof F, el: El, theme: Theme, input: PageInput, phot
     }) as unknown as WithTk;
     o.tk = { fill: el.fill, ...(el.stroke ? { stroke: el.stroke } : {}) };
   } else if (el.t === "line") {
-    o = new f.Line([el.x1, el.y1, el.x2, el.y2], { ...TL, stroke: colorOf(theme, el.color), strokeWidth: el.w, strokeLineCap: "round" }) as unknown as WithTk;
+    o = new f.Line([el.x1, el.y1, el.x2, el.y2], {
+      ...TL, stroke: colorOf(theme, el.color), strokeWidth: el.w, strokeLineCap: el.dash ? "butt" : "round", strokeDashArray: el.dash ?? null,
+    }) as unknown as WithTk;
     o.tk = { stroke: el.color };
+  } else if (el.t === "star") {
+    const n = el.points ?? 5;
+    const pts = Array.from({ length: n * 2 }, (_, i) => {
+      const rr = i % 2 ? el.r * 0.5 : el.r;
+      const a = (Math.PI * i) / n - Math.PI / 2;
+      return { x: Math.cos(a) * rr, y: Math.sin(a) * rr };
+    });
+    o = new f.Polygon(pts, {
+      originX: "center", originY: "center", left: el.x, top: el.y, fill: colorOf(theme, el.fill), angle: el.angle ?? 0, opacity: el.opacity ?? 1, strokeWidth: 0,
+    }) as unknown as WithTk;
+    o.tk = { fill: el.fill };
   } else {
     const src = photos.shift() || placeholder();
     const img = await f.FabricImage.fromURL(src, { crossOrigin: "anonymous" });

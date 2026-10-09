@@ -31,6 +31,12 @@ export const IconInbox = (p: P) => (
     <path d="M3 13h5l1 3h6l1-3h5" />
   </svg>
 );
+export const IconTemplate = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2.5" />
+    <path d="M3 9h18M9 9v12" />
+  </svg>
+);
 export const IconGrid = (p: P) => (
   <svg {...base} {...p}>
     <rect x="3" y="3" width="7" height="7" rx="1.5" />

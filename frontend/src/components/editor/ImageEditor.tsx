@@ -303,12 +303,16 @@ export type OverlayMode = {
 const DEFAULT_SPAN = 3; // 새로 넣은 글자·스티커가 보이는 시간 (초)
 const round1 = (x: number) => Math.round(x * 10) / 10;
 
+/** 템플릿 만들기 모드: 게시물 작업 없이 빈 캔버스(또는 내 템플릿)를 꾸며 '내 템플릿'으로 저장 (id 가 있으면 덮어씀) */
+export type TemplateMode = { id?: string; name?: string; post: "feed" | "story" };
+
 export function ImageEditor({
   jobId,
   index,
   asset,
   preview,
   overlay,
+  templateMode,
   onClose,
   onSaved,
 }: {
@@ -317,6 +321,7 @@ export function ImageEditor({
   asset: Asset;
   preview?: EditorPreview;
   overlay?: OverlayMode;
+  templateMode?: TemplateMode;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
 }) {
@@ -343,7 +348,7 @@ export function ImageEditor({
   const [clipCut, setClipCut] = useState({ start: clip?.start ?? 0, end: clip?.end ?? 0 });
   const [videoDur, setVideoDur] = useState(clip?.duration ?? 0);
   const extras = overlay?.extras;
-  const guideKind = preview?.kind ?? overlay?.guideKind;
+  const guideKind = preview?.kind ?? overlay?.guideKind ?? templateMode?.post;
   const cutRef = useRef(clipCut);
   cutRef.current = clipCut;
   const vtRef = useRef(vt);
@@ -1115,6 +1120,42 @@ export function ImageEditor({
       setAiBusy(null);
     }
   }
+  /** 템플릿 만들기 모드의 저장: 이름을 정해 내 템플릿으로 (고치는 중이면 덮어씀) */
+  async function saveTemplate() {
+    const c = canvas.current;
+    if (!c || !templateMode) return;
+    const name = (tplName.trim() || templateMode.name || window.prompt(t("design.templateName"), t("design.newTemplateName")) || "").trim();
+    if (!name) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      c.discardActiveObject();
+      c.isDrawingMode = false;
+      c.renderAll();
+      const out = await exportPage(c, size.current, zoom.current);
+      const thumb = await (await fetch(c.toDataURL({ format: "jpeg", quality: 0.82, multiplier: 270 / size.current.w / zoom.current }))).blob();
+      const body = new FormData();
+      body.append("pages", JSON.stringify([out.layers]));
+      body.append("bgs", out.bg, "bg.jpg");
+      body.append("thumb", thumb, "thumb.jpg");
+      body.append("name", name.slice(0, 40));
+      if (!templateMode.id) body.append("post_type", templateMode.post);
+      const res = await fetch(`/api/py/studio/templates${templateMode.id ? `/${templateMode.id}` : ""}`, {
+        method: templateMode.id ? "PUT" : "POST",
+        body,
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || res.status);
+      await onSaved();
+      onClose();
+    } catch (e) {
+      setError(t("editor.saveFailed", { e: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveAsTemplate() {
     const c = canvas.current;
     if (!c || !tplName.trim()) return;
@@ -1874,6 +1915,7 @@ export function ImageEditor({
   async function save() {
     const c = canvas.current;
     if (!c) return;
+    if (templateMode) return saveTemplate();
     setSaving(true);
     setError(undefined);
     try {
@@ -1987,12 +2029,12 @@ export function ImageEditor({
   );
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0b0c] text-white" role="dialog" aria-modal="true" aria-label={overlay?.title ?? t("editor.title")}>
+    <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0b0c] text-white" role="dialog" aria-modal="true" aria-label={overlay?.title ?? (templateMode ? t("design.makerTitle") : t("editor.title"))}>
       <header className="flex items-center gap-2 border-b border-white/10 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <button type="button" onClick={close} className="rounded-md px-2 py-1.5 text-[14px] text-white/80 hover:bg-white/10">
           {extras ? t("media.close") : clip ? `← ${t("editor.back")}` : t("editor.cancel")}
         </button>
-        <span className="flex-1 text-center text-[14px] font-semibold">{overlay?.title ?? t("editor.title")}</span>
+        <span className="flex-1 text-center text-[14px] font-semibold">{overlay?.title ?? (templateMode ? t("design.makerTitle") : t("editor.title"))}</span>
         <button type="button" disabled={h.at <= 0} onClick={() => restore(h.at - 1)} aria-label={t("editor.undo")} className="rounded-md px-2 py-1.5 text-lg disabled:opacity-30">
           ↶
         </button>
@@ -2006,7 +2048,17 @@ export function ImageEditor({
         )}
         {extras?.headerExtra}
         <Button variant="primary" size="sm" onClick={save} loading={saving} disabled={!ready || (!!extras && !dirty && !extras.dirty)}>
-          {extras ? (saving ? extras.submittingLabel : extras.submitLabel) : saving ? t("editor.saving") : clip ? t("editor.done") : t("editor.save")}
+          {extras
+            ? saving
+              ? extras.submittingLabel
+              : extras.submitLabel
+            : saving
+              ? t("editor.saving")
+              : templateMode
+                ? t("design.saveTemplate")
+                : clip
+                  ? t("editor.done")
+                  : t("editor.save")}
         </Button>
       </header>
 
@@ -2709,6 +2761,7 @@ export function ImageEditor({
                       placeholder={t("design.templateName")}
                       className="min-w-0 flex-1 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-[13px] text-white placeholder:text-white/35"
                     />
+                    {!templateMode && (
                     <button
                       type="button"
                       onClick={saveAsTemplate}
@@ -2717,6 +2770,7 @@ export function ImageEditor({
                     >
                       {t("design.saveAsTemplate")}
                     </button>
+                    )}
                   </div>
                   {tplSaved && <p className="text-[12px] text-emerald-300">✓ {t("design.savedTemplate")}</p>}
                 </div>

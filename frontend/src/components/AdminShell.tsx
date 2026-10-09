@@ -7,7 +7,7 @@ import { createContext, Suspense, useContext, useEffect, useState, type ReactNod
 import { api, startLink, useApi } from "@/lib/api";
 import { fmtCompact } from "@/lib/format";
 import type { Health, Me, Session } from "@/lib/types";
-import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark, IconUser } from "./icons";
+import { IconChart, IconGrid, IconInbox, IconInstagram, IconLogout, IconReply, IconSpark, IconTemplate, IconUser } from "./icons";
 import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useT } from "@/i18n/client";
@@ -37,6 +37,7 @@ const PROFILE = "/admin/profile";
 const NAV = [
   { href: "/admin", label: "shell.dashboard", short: "shell.dashboardShort", icon: IconChart },
   { href: "/admin/studio", label: "shell.studio", short: "shell.studioShort", icon: IconSpark },
+  { href: "/admin/templates", label: "shell.templates", short: "shell.templatesShort", icon: IconTemplate },
   { href: "/admin/jobs", label: "shell.jobs", short: "shell.jobsShort", icon: IconInbox },
   { href: "/admin/posts", label: "shell.posts", short: "shell.postsShort", icon: IconGrid },
   { href: "/admin/autoreply", label: "shell.autoreply", short: "shell.autoreplyShort", icon: IconReply },
@@ -160,7 +161,7 @@ function Sidebar({ session }: { session: Session }) {
     {/* 휴대폰: 하단 탭바 */}
     <nav
       aria-label={t("shell.mainMenu")}
-      className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+      className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-line bg-surface-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
     >
       {NAV.map(({ href, short, icon: Icon }) => (
         <Link

@@ -8,7 +8,9 @@ export type Bg =
   | { kind: "solid"; color: ColorToken }
   | { kind: "gradient"; from: ColorToken; to: ColorToken; angle?: number }
   /** 사진을 꽉 채움 (dim: 위에 깔 검은 막 0~1) */
-  | { kind: "photo"; dim?: number };
+  | { kind: "photo"; dim?: number }
+  /** 무늬: 바탕색 color 위에 ink 색으로 (gap: 무늬 간격 px) */
+  | { kind: "pattern"; pattern: "dots" | "grid" | "checker" | "lines" | "stripes"; color: ColorToken; ink: ColorToken; gap?: number; alpha?: number };
 
 export type El =
   | {
@@ -27,15 +29,33 @@ export type El =
       ls?: number;
       /** 글자 상자 바탕 */
       box?: ColorToken;
+      /** 기울기 (도) */
+      angle?: number;
     }
-  | { t: "rect"; x: number; y: number; w: number; h: number; fill: ColorToken; r?: number; opacity?: number; stroke?: ColorToken; sw?: number }
+  | {
+      t: "rect";
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      fill: ColorToken | "none";
+      r?: number;
+      opacity?: number;
+      stroke?: ColorToken;
+      sw?: number;
+      /** 점선 [선, 빈칸] */
+      dash?: [number, number];
+      angle?: number;
+    }
+  /** 별 (points 개 꼭짓점) */
+  | { t: "star"; x: number; y: number; r: number; fill: ColorToken; points?: number; angle?: number; opacity?: number }
   | { t: "circle"; x: number; y: number; r: number; fill: ColorToken; opacity?: number; stroke?: ColorToken; sw?: number }
-  | { t: "line"; x1: number; y1: number; x2: number; y2: number; color: ColorToken; w: number }
+  | { t: "line"; x1: number; y1: number; x2: number; y2: number; color: ColorToken; w: number; dash?: [number, number] }
   /** 사진 칸 (사진을 고르지 않으면 '사진을 넣어 주세요' 자리) */
   | { t: "photo"; x: number; y: number; w: number; h: number; r?: number; circle?: boolean };
 
 export type Page = { bg: Bg; els: El[] };
-export type Category = "cardnews" | "photo" | "notice" | "story";
+export type Category = "cardnews" | "photo" | "notice" | "promo" | "story";
 export type Template = {
   id: string;
   name: string;
@@ -55,6 +75,7 @@ const txt = (o: Omit<Extract<El, { t: "text" }>, "t">): El => ({ t: "text", ...o
 const rect = (o: Omit<Extract<El, { t: "rect" }>, "t">): El => ({ t: "rect", ...o });
 const circle = (o: Omit<Extract<El, { t: "circle" }>, "t">): El => ({ t: "circle", ...o });
 const line = (o: Omit<Extract<El, { t: "line" }>, "t">): El => ({ t: "line", ...o });
+const star = (o: Omit<Extract<El, { t: "star" }>, "t">): El => ({ t: "star", ...o });
 const photo = (o: Omit<Extract<El, { t: "photo" }>, "t">): El => ({ t: "photo", ...o });
 const pageNo = (color: ColorToken, y = FEED_H - 90): El => txt({ text: "{page}", x: W - 260, y, w: 180, size: 30, font: "body", color, align: "right", weight: 600 });
 
@@ -394,12 +415,582 @@ export const TEMPLATES: Template[] = [
       ],
     },
   },
+
+  // ════ 추가 템플릿 (국내 SNS 디자인에서 흔한 형식을 새로 디자인) ════
+  // ── 카드뉴스 ──
+  {
+    id: "cn-qna",
+    name: "Q&A 카드뉴스",
+    category: "cardnews",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "primary" },
+      els: [
+        txt({ text: "Q&A", x: 80, y: 260, w: 920, size: 260, font: "heading", color: "on_primary", align: "center", weight: 900 }),
+        txt({ text: "자주 묻는 질문\n한 번에 정리했어요", x: 80, y: 640, w: 920, size: 72, font: "heading", color: "on_primary", align: "center", lh: 1.25, weight: 800 }),
+        rect({ x: 390, y: 960, w: 300, h: 80, fill: "on_primary", r: 40 }),
+        txt({ text: "넘겨 보기 →", x: 390, y: 980, w: 300, size: 36, font: "body", color: "primary", align: "center", weight: 700 }),
+      ],
+    },
+    body: {
+      bg: { kind: "solid", color: "bg" },
+      els: [
+        rect({ x: 80, y: 150, w: 920, h: 360, fill: "primary", r: 40 }),
+        txt({ text: "Q.", x: 130, y: 200, w: 200, size: 84, font: "heading", color: "on_primary", weight: 900 }),
+        txt({ text: "질문을 적어 주세요?", x: 130, y: 320, w: 820, size: 60, font: "heading", color: "on_primary", weight: 800 }),
+        rect({ x: 80, y: 560, w: 920, h: 560, fill: "surface", r: 40, stroke: "primary", sw: 4 }),
+        txt({ text: "A.", x: 130, y: 610, w: 200, size: 84, font: "heading", color: "primary", weight: 900 }),
+        txt({ text: "답을 짧고 분명하게 적어 주세요.\n필요하면 한 줄 더 덧붙여요.", x: 130, y: 740, w: 820, size: 46, font: "body", color: "text", lh: 1.6 }),
+        pageNo("muted", FEED_H - 110),
+      ],
+    },
+    end: {
+      bg: { kind: "solid", color: "primary" },
+      els: [
+        txt({ text: "더 궁금한 점은\n댓글로 물어보세요", x: 80, y: 480, w: 920, size: 96, font: "heading", color: "on_primary", align: "center", lh: 1.2, weight: 900 }),
+        txt({ text: "💬", x: 80, y: 760, w: 920, size: 120, font: "body", color: "on_primary", align: "center" }),
+      ],
+    },
+  },
+  {
+    id: "cn-top5",
+    name: "순위 카드뉴스",
+    category: "cardnews",
+    post: "feed",
+    cover: {
+      bg: { kind: "pattern", pattern: "dots", color: "bg", ink: "primary", gap: 54, alpha: 0.25 },
+      els: [
+        txt({ text: "TOP", x: 80, y: 220, w: 920, size: 120, font: "heading", color: "text", align: "center", weight: 900, ls: 200 }),
+        txt({ text: "5", x: 80, y: 330, w: 920, size: 420, font: "heading", color: "primary", align: "center", weight: 900 }),
+        txt({ text: "이번 달 인기 순위", x: 80, y: 860, w: 920, size: 76, font: "heading", color: "text", align: "center", weight: 800 }),
+        txt({ text: "1위는 마지막 장에서 공개!", x: 80, y: 980, w: 920, size: 42, font: "body", color: "muted", align: "center" }),
+      ],
+    },
+    body: {
+      bg: { kind: "pattern", pattern: "dots", color: "bg", ink: "primary", gap: 54, alpha: 0.18 },
+      els: [
+        circle({ x: 540, y: 330, r: 170, fill: "primary" }),
+        txt({ text: "{n}", x: 370, y: 230, w: 340, size: 170, font: "heading", color: "on_primary", align: "center", weight: 900 }),
+        txt({ text: "위", x: 600, y: 410, w: 100, size: 44, font: "body", color: "on_primary", weight: 700 }),
+        txt({ text: "순위 항목 이름", x: 80, y: 600, w: 920, size: 84, font: "heading", color: "text", align: "center", weight: 900 }),
+        rect({ x: 140, y: 760, w: 800, h: 320, fill: "surface", r: 32 }),
+        txt({ text: "왜 이 순위인지 짧게 설명해 주세요.", x: 190, y: 840, w: 700, size: 46, font: "body", color: "text", align: "center", lh: 1.6 }),
+        pageNo("muted", FEED_H - 110),
+      ],
+    },
+    end: {
+      bg: { kind: "solid", color: "primary" },
+      els: [
+        txt({ text: "여러분의 1위는?", x: 80, y: 520, w: 920, size: 110, font: "heading", color: "on_primary", align: "center", weight: 900 }),
+        txt({ text: "댓글로 알려 주세요 👇", x: 80, y: 700, w: 920, size: 52, font: "body", color: "on_primary", align: "center", weight: 600 }),
+      ],
+    },
+  },
+  {
+    id: "cn-quote",
+    name: "인용구 카드뉴스",
+    category: "cardnews",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "bg" },
+      els: [
+        txt({ text: "“", x: 60, y: 60, w: 400, size: 420, font: "body", color: "accent", weight: 900 }),
+        txt({ text: "오늘 마음에\n남은 한 문장", x: 120, y: 520, w: 860, size: 116, font: "heading", color: "text", lh: 1.2, weight: 900 }),
+        line({ x1: 120, y1: 860, x2: 320, y2: 860, color: "primary", w: 8 }),
+        txt({ text: "넘겨서 읽어 보세요", x: 120, y: 900, w: 860, size: 40, font: "body", color: "muted" }),
+      ],
+    },
+    body: {
+      bg: { kind: "solid", color: "surface" },
+      els: [
+        txt({ text: "“", x: 80, y: 80, w: 240, size: 260, font: "body", color: "primary", weight: 900 }),
+        txt({ text: "마음에 남은 문장을\n여기에 적어 주세요.", x: 140, y: 470, w: 800, size: 72, font: "heading", color: "text", align: "center", lh: 1.5, weight: 700 }),
+        txt({ text: "”", x: 760, y: 760, w: 240, size: 260, font: "body", color: "primary", align: "right", weight: 900 }),
+        txt({ text: "— 출처나 사람 이름", x: 140, y: 1120, w: 800, size: 38, font: "body", color: "muted", align: "center" }),
+      ],
+    },
+    end: {
+      bg: { kind: "solid", color: "text" },
+      els: [
+        txt({ text: "공감되면\n저장해 두세요", x: 80, y: 500, w: 920, size: 104, font: "heading", color: "bg", align: "center", lh: 1.2, weight: 900 }),
+        txt({ text: "@myaccount", x: 80, y: 820, w: 920, size: 42, font: "body", color: "accent", align: "center", weight: 700 }),
+      ],
+    },
+  },
+  {
+    id: "cn-chat",
+    name: "대화형 카드뉴스",
+    category: "cardnews",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "accent" },
+      els: [
+        rect({ x: 120, y: 300, w: 700, h: 200, fill: "surface", r: 60 }),
+        txt({ text: "이거 알고 있었어? 🤔", x: 170, y: 370, w: 620, size: 54, font: "body", color: "text", weight: 700 }),
+        rect({ x: 260, y: 560, w: 700, h: 200, fill: "primary", r: 60 }),
+        txt({ text: "아니?! 빨리 알려 줘", x: 310, y: 630, w: 620, size: 54, font: "body", color: "on_primary", align: "right", weight: 700 }),
+        txt({ text: "대화로 보는\n오늘의 꿀팁", x: 80, y: 880, w: 920, size: 96, font: "heading", color: "text", align: "center", lh: 1.2, weight: 900 }),
+      ],
+    },
+    body: {
+      bg: { kind: "solid", color: "bg" },
+      els: [
+        circle({ x: 140, y: 230, r: 50, fill: "accent" }),
+        rect({ x: 220, y: 180, w: 700, h: 220, fill: "surface", r: 50 }),
+        txt({ text: "질문이나 말을 적어 주세요", x: 270, y: 255, w: 620, size: 48, font: "body", color: "text" }),
+        circle({ x: 940, y: 530, r: 50, fill: "primary" }),
+        rect({ x: 160, y: 480, w: 700, h: 300, fill: "primary", r: 50 }),
+        txt({ text: "대답을 적어 주세요.\n두 줄까지 괜찮아요.", x: 210, y: 545, w: 620, size: 48, font: "body", color: "on_primary", lh: 1.5 }),
+        circle({ x: 140, y: 910, r: 50, fill: "accent" }),
+        rect({ x: 220, y: 860, w: 560, h: 180, fill: "surface", r: 50 }),
+        txt({ text: "오 그렇구나! 👍", x: 270, y: 920, w: 480, size: 48, font: "body", color: "text" }),
+        pageNo("muted", FEED_H - 110),
+      ],
+    },
+    end: {
+      bg: { kind: "solid", color: "primary" },
+      els: [
+        txt({ text: "친구에게도\n공유해 주세요 💌", x: 80, y: 500, w: 920, size: 96, font: "heading", color: "on_primary", align: "center", lh: 1.25, weight: 900 }),
+      ],
+    },
+  },
+  {
+    id: "cn-window",
+    name: "레트로 윈도우 카드뉴스",
+    category: "cardnews",
+    post: "feed",
+    cover: {
+      bg: { kind: "pattern", pattern: "checker", color: "bg", ink: "accent", gap: 90, alpha: 0.5 },
+      els: [
+        rect({ x: 110, y: 270, w: 880, h: 780, fill: "text", r: 18 }),
+        rect({ x: 90, y: 250, w: 880, h: 780, fill: "surface", r: 18, stroke: "text", sw: 6 }),
+        rect({ x: 90, y: 250, w: 880, h: 90, fill: "primary", r: 18, stroke: "text", sw: 6 }),
+        circle({ x: 150, y: 295, r: 16, fill: "surface", stroke: "text", sw: 4 }),
+        circle({ x: 200, y: 295, r: 16, fill: "surface", stroke: "text", sw: 4 }),
+        circle({ x: 250, y: 295, r: 16, fill: "surface", stroke: "text", sw: 4 }),
+        txt({ text: "notice.exe", x: 300, y: 272, w: 600, size: 40, font: "body", color: "on_primary", weight: 700 }),
+        txt({ text: "레트로하게\n알려 드릴게요", x: 150, y: 460, w: 760, size: 110, font: "heading", color: "text", lh: 1.15, weight: 900 }),
+        rect({ x: 150, y: 830, w: 320, h: 100, fill: "accent", r: 12, stroke: "text", sw: 5 }),
+        txt({ text: "OK", x: 150, y: 852, w: 320, size: 52, font: "heading", color: "text", align: "center", weight: 900 }),
+      ],
+    },
+    body: {
+      bg: { kind: "pattern", pattern: "grid", color: "bg", ink: "text", gap: 60, alpha: 0.12 },
+      els: [
+        rect({ x: 110, y: 170, w: 880, h: 960, fill: "text", r: 18 }),
+        rect({ x: 90, y: 150, w: 880, h: 960, fill: "surface", r: 18, stroke: "text", sw: 6 }),
+        rect({ x: 90, y: 150, w: 880, h: 90, fill: "primary", r: 18, stroke: "text", sw: 6 }),
+        txt({ text: "step_{n}.txt", x: 140, y: 172, w: 600, size: 40, font: "body", color: "on_primary", weight: 700 }),
+        txt({ text: "제목을 적어 주세요", x: 150, y: 320, w: 760, size: 80, font: "heading", color: "text", weight: 900 }),
+        txt({ text: "> 내용을 적어 주세요\n> 한 줄씩 적으면\n> 터미널처럼 보여요", x: 150, y: 480, w: 760, size: 50, font: "body", color: "text", lh: 1.7 }),
+        pageNo("text", FEED_H - 100),
+      ],
+    },
+    end: {
+      bg: { kind: "pattern", pattern: "checker", color: "bg", ink: "accent", gap: 90, alpha: 0.5 },
+      els: [
+        rect({ x: 170, y: 470, w: 760, h: 420, fill: "text", r: 18 }),
+        rect({ x: 150, y: 450, w: 760, h: 420, fill: "surface", r: 18, stroke: "text", sw: 6 }),
+        txt({ text: "팔로우 하시겠습니까?", x: 190, y: 560, w: 680, size: 64, font: "heading", color: "text", align: "center", weight: 900 }),
+        rect({ x: 210, y: 700, w: 280, h: 100, fill: "primary", r: 12, stroke: "text", sw: 5 }),
+        txt({ text: "예", x: 210, y: 722, w: 280, size: 52, font: "heading", color: "on_primary", align: "center", weight: 900 }),
+        rect({ x: 570, y: 700, w: 280, h: 100, fill: "surface", r: 12, stroke: "text", sw: 5 }),
+        txt({ text: "물론", x: 570, y: 722, w: 280, size: 52, font: "heading", color: "text", align: "center", weight: 900 }),
+      ],
+    },
+  },
+  {
+    id: "cn-note",
+    name: "메모장 카드뉴스",
+    category: "cardnews",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "accent" },
+      els: [
+        rect({ x: 120, y: 160, w: 840, h: 1060, fill: "surface", r: 8, angle: -2 }),
+        rect({ x: 420, y: 120, w: 240, h: 70, fill: "primary", opacity: 0.7, angle: -6 }),
+        txt({ text: "MEMO", x: 180, y: 300, w: 700, size: 48, font: "body", color: "primary", weight: 800, ls: 200, angle: -2 }),
+        txt({ text: "잊지 말고\n기억할 것들", x: 180, y: 420, w: 720, size: 116, font: "heading", color: "text", lh: 1.2, weight: 900, angle: -2 }),
+        txt({ text: "✍️ 넘겨서 읽어 보세요", x: 190, y: 860, w: 700, size: 44, font: "body", color: "muted", angle: -2 }),
+      ],
+    },
+    body: {
+      bg: { kind: "pattern", pattern: "lines", color: "surface", ink: "primary", gap: 80, alpha: 0.25 },
+      els: [
+        rect({ x: 140, y: 0, w: 4, h: FEED_H, fill: "primary", opacity: 0.6 }),
+        txt({ text: "{n}.", x: 190, y: 150, w: 300, size: 90, font: "heading", color: "primary", weight: 900 }),
+        txt({ text: "메모 제목", x: 190, y: 290, w: 800, size: 72, font: "heading", color: "text", weight: 800 }),
+        txt({ text: "줄 노트 위에 적듯이\n편하게 써 주세요.\n짧을수록 좋아요.", x: 190, y: 410, w: 800, size: 48, font: "body", color: "text", lh: 1.66 }),
+        pageNo("muted", FEED_H - 110),
+      ],
+    },
+    end: {
+      bg: { kind: "solid", color: "accent" },
+      els: [
+        rect({ x: 200, y: 400, w: 680, h: 500, fill: "surface", r: 8, angle: 3 }),
+        rect({ x: 420, y: 370, w: 240, h: 70, fill: "primary", opacity: 0.7, angle: 5 }),
+        txt({ text: "오늘의 메모 끝!\n저장 잊지 마세요", x: 240, y: 560, w: 600, size: 66, font: "heading", color: "text", align: "center", lh: 1.3, weight: 900, angle: 3 }),
+      ],
+    },
+  },
+
+  // ── 사진 + 문구 ──
+  {
+    id: "ph-split",
+    name: "반반 분할",
+    category: "photo",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "primary" },
+      els: [
+        photo({ x: 0, y: 0, w: 600, h: FEED_H }),
+        txt({ text: "TODAY'S\nPICK", x: 640, y: 160, w: 400, size: 46, font: "body", color: "on_primary", lh: 1.2, weight: 800, ls: 100 }),
+        txt({ text: "오늘의\n추천", x: 640, y: 480, w: 420, size: 120, font: "heading", color: "on_primary", lh: 1.1, weight: 900 }),
+        line({ x1: 640, y1: 800, x2: 760, y2: 800, color: "on_primary", w: 8 }),
+        txt({ text: "짧은 설명을\n적어 주세요", x: 640, y: 850, w: 400, size: 42, font: "body", color: "on_primary", lh: 1.5 }),
+      ],
+    },
+  },
+  {
+    id: "ph-collage",
+    name: "사진 3장 콜라주",
+    category: "photo",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "bg" },
+      els: [
+        photo({ x: 60, y: 60, w: 960, h: 660, r: 28 }),
+        photo({ x: 60, y: 750, w: 470, h: 420, r: 28 }),
+        photo({ x: 550, y: 750, w: 470, h: 420, r: 28 }),
+        txt({ text: "오늘의 기록 📸", x: 60, y: 1205, w: 960, size: 64, font: "heading", color: "text", weight: 900 }),
+      ],
+    },
+  },
+  {
+    id: "ph-film",
+    name: "필름 스트립",
+    category: "photo",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "black" },
+      els: [
+        ...Array.from({ length: 12 }, (_, i): El => rect({ x: 30 + i * 88, y: 60, w: 50, h: 34, fill: "white", r: 6, opacity: 0.85 })),
+        ...Array.from({ length: 12 }, (_, i): El => rect({ x: 30 + i * 88, y: 1060, w: 50, h: 34, fill: "white", r: 6, opacity: 0.85 })),
+        photo({ x: 60, y: 140, w: 960, h: 880, r: 6 }),
+        txt({ text: "FILM 2026 · ISO 400", x: 60, y: 1130, w: 960, size: 34, font: "body", color: "accent", weight: 700, ls: 120 }),
+        txt({ text: "필름처럼 남긴 하루", x: 60, y: 1190, w: 960, size: 60, font: "heading", color: "white", weight: 900 }),
+      ],
+    },
+  },
+  {
+    id: "ph-brutal",
+    name: "브루탈 포스터",
+    category: "photo",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "accent" },
+      els: [
+        rect({ x: 100, y: 100, w: 900, h: 760, fill: "text" }),
+        photo({ x: 80, y: 80, w: 900, h: 760 }),
+        rect({ x: 80, y: 80, w: 900, h: 760, fill: "none", stroke: "text", sw: 10 }),
+        rect({ x: 80, y: 900, w: 720, h: 150, fill: "primary", stroke: "text", sw: 8 }),
+        txt({ text: "BIG NEWS!", x: 110, y: 920, w: 680, size: 96, font: "heading", color: "on_primary", weight: 900 }),
+        txt({ text: "굵고 분명하게 한 줄로 전해요", x: 80, y: 1110, w: 920, size: 50, font: "body", color: "text", weight: 800 }),
+        star({ x: 930, y: 960, r: 90, fill: "surface", points: 8, angle: 12 }),
+      ],
+    },
+  },
+  {
+    id: "ph-scrap",
+    name: "스크랩북",
+    category: "photo",
+    post: "feed",
+    cover: {
+      bg: { kind: "pattern", pattern: "grid", color: "bg", ink: "primary", gap: 54, alpha: 0.15 },
+      els: [
+        rect({ x: 140, y: 130, w: 800, h: 820, fill: "white", angle: 3 }),
+        photo({ x: 180, y: 170, w: 720, h: 640 }),
+        rect({ x: 120, y: 120, w: 220, h: 64, fill: "accent", opacity: 0.8, angle: -20 }),
+        rect({ x: 760, y: 120, w: 220, h: 64, fill: "primary", opacity: 0.7, angle: 18 }),
+        txt({ text: "소중한 순간 ♡", x: 180, y: 850, w: 720, size: 60, font: "heading", color: "black", align: "center", weight: 800, angle: 3 }),
+        txt({ text: "오늘 있었던 일을\n짧게 적어 주세요", x: 120, y: 1040, w: 840, size: 46, font: "body", color: "text", align: "center", lh: 1.5 }),
+      ],
+    },
+  },
+
+  // ── 공지 · 이벤트 · 할인 ──
+  {
+    id: "nt-coupon",
+    name: "할인 쿠폰",
+    category: "notice",
+    post: "feed",
+    cover: {
+      bg: { kind: "pattern", pattern: "stripes", color: "primary", ink: "on_primary", gap: 60, alpha: 0.08 },
+      els: [
+        txt({ text: "COUPON", x: 80, y: 170, w: 920, size: 80, font: "heading", color: "on_primary", align: "center", weight: 900, ls: 300 }),
+        rect({ x: 110, y: 330, w: 860, h: 560, fill: "surface", r: 40 }),
+        rect({ x: 150, y: 370, w: 780, h: 480, fill: "none", r: 24, stroke: "primary", sw: 5, dash: [22, 14] }),
+        circle({ x: 110, y: 610, r: 50, fill: "primary" }),
+        circle({ x: 970, y: 610, r: 50, fill: "primary" }),
+        txt({ text: "3,000원", x: 150, y: 450, w: 780, size: 150, font: "heading", color: "primary", align: "center", weight: 900 }),
+        txt({ text: "할인 쿠폰", x: 150, y: 640, w: 780, size: 60, font: "heading", color: "text", align: "center", weight: 800 }),
+        txt({ text: "2만원 이상 주문 시 · ~10.31", x: 150, y: 740, w: 780, size: 36, font: "body", color: "muted", align: "center" }),
+        txt({ text: "이 게시물을 저장하고 보여 주세요!", x: 80, y: 980, w: 920, size: 48, font: "body", color: "on_primary", align: "center", weight: 700 }),
+      ],
+    },
+  },
+  {
+    id: "nt-oneplus",
+    name: "1+1 이벤트",
+    category: "notice",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "accent" },
+      els: [
+        star({ x: 540, y: 520, r: 430, fill: "primary", points: 16, angle: 8 }),
+        txt({ text: "1+1", x: 80, y: 340, w: 920, size: 300, font: "heading", color: "on_primary", align: "center", weight: 900 }),
+        txt({ text: "EVENT", x: 80, y: 660, w: 920, size: 64, font: "heading", color: "on_primary", align: "center", weight: 900, ls: 300 }),
+        txt({ text: "하나 사면 하나 더!", x: 80, y: 1010, w: 920, size: 76, font: "heading", color: "text", align: "center", weight: 900 }),
+        txt({ text: "10월 한 달 동안 · 매장 한정", x: 80, y: 1120, w: 920, size: 40, font: "body", color: "text", align: "center" }),
+      ],
+    },
+  },
+  {
+    id: "nt-schedule",
+    name: "일정 안내",
+    category: "notice",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "bg" },
+      els: [
+        txt({ text: "SCHEDULE", x: 90, y: 130, w: 900, size: 40, font: "body", color: "primary", weight: 800, ls: 200 }),
+        txt({ text: "이번 주 일정", x: 90, y: 200, w: 900, size: 100, font: "heading", color: "text", weight: 900 }),
+        line({ x1: 160, y1: 400, x2: 160, y2: 1200, color: "primary", w: 6 }),
+        ...[0, 1, 2, 3].flatMap((i): El[] => [
+          circle({ x: 160, y: 440 + i * 200, r: 22, fill: "primary" }),
+          txt({ text: ["10.09 THU", "10.11 SAT", "10.13 MON", "10.15 WED"][i], x: 220, y: 412 + i * 200, w: 760, size: 40, font: "body", color: "primary", weight: 800 }),
+          txt({ text: "일정 내용을 적어 주세요", x: 220, y: 470 + i * 200, w: 760, size: 48, font: "body", color: "text", weight: 600 }),
+        ]),
+      ],
+    },
+  },
+  {
+    id: "nt-maint",
+    name: "변경 안내",
+    category: "notice",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "surface" },
+      els: [
+        rect({ x: 0, y: 0, w: W, h: 300, fill: "primary" }),
+        txt({ text: "⚠️ 꼭 확인해 주세요", x: 80, y: 90, w: 920, size: 44, font: "body", color: "on_primary", weight: 700 }),
+        txt({ text: "영업시간 변경 안내", x: 80, y: 160, w: 920, size: 84, font: "heading", color: "on_primary", weight: 900 }),
+        ...[0, 1, 2].flatMap((i): El[] => [
+          rect({ x: 80, y: 380 + i * 190, w: 920, h: 160, fill: "bg", r: 24 }),
+          txt({ text: ["변경 전", "변경 후", "적용일"][i], x: 120, y: 435 + i * 190, w: 260, size: 42, font: "body", color: "primary", weight: 800 }),
+          txt({ text: ["11:00 – 21:00", "10:00 – 22:00", "10월 15일부터"][i], x: 380, y: 430 + i * 190, w: 580, size: 50, font: "heading", color: "text", weight: 800 }),
+        ]),
+        txt({ text: "이용에 참고 부탁드려요. 감사합니다 🙏", x: 80, y: 1000, w: 920, size: 42, font: "body", color: "muted", align: "center" }),
+      ],
+    },
+  },
+  {
+    id: "nt-giveaway",
+    name: "경품 이벤트",
+    category: "notice",
+    post: "feed",
+    cover: {
+      bg: { kind: "pattern", pattern: "dots", color: "primary", ink: "on_primary", gap: 60, alpha: 0.2 },
+      els: [
+        txt({ text: "🎁", x: 80, y: 90, w: 920, size: 170, font: "body", color: "on_primary", align: "center" }),
+        txt({ text: "GIVEAWAY", x: 80, y: 310, w: 920, size: 130, font: "heading", color: "on_primary", align: "center", weight: 900 }),
+        txt({ text: "참여 방법", x: 80, y: 500, w: 920, size: 48, font: "body", color: "on_primary", align: "center", weight: 700 }),
+        ...[0, 1, 2].flatMap((i): El[] => [
+          rect({ x: 120, y: 590 + i * 170, w: 840, h: 140, fill: "surface", r: 70 }),
+          circle({ x: 200, y: 660 + i * 170, r: 46, fill: "primary" }),
+          txt({ text: String(i + 1), x: 154, y: 632 + i * 170, w: 92, size: 48, font: "heading", color: "on_primary", align: "center", weight: 900 }),
+          txt({ text: ["계정 팔로우하기", "이 게시물 좋아요", "친구 2명 태그하기"][i], x: 280, y: 636 + i * 170, w: 640, size: 48, font: "body", color: "text", weight: 700 }),
+        ]),
+        txt({ text: "발표 10.22 · DM 으로 연락드려요", x: 80, y: 1140, w: 920, size: 40, font: "body", color: "on_primary", align: "center" }),
+      ],
+    },
+  },
+  {
+    id: "nt-news",
+    name: "뉴스 헤드라인",
+    category: "notice",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "surface" },
+      els: [
+        rect({ x: 0, y: 120, w: W, h: 110, fill: "primary" }),
+        txt({ text: "BREAKING NEWS", x: 80, y: 145, w: 920, size: 56, font: "heading", color: "on_primary", weight: 900, ls: 120 }),
+        txt({ text: "2026. 10. 09 · 단독", x: 80, y: 290, w: 920, size: 36, font: "body", color: "muted", weight: 600 }),
+        txt({ text: "드디어 공개!\n헤드라인을 적어 주세요", x: 80, y: 360, w: 920, size: 96, font: "heading", color: "text", lh: 1.2, weight: 900 }),
+        line({ x1: 80, y1: 640, x2: 1000, y2: 640, color: "text", w: 3 }),
+        photo({ x: 80, y: 680, w: 920, h: 480 }),
+        txt({ text: "사진 설명이나 요약 한 줄", x: 80, y: 1190, w: 920, size: 36, font: "body", color: "muted" }),
+      ],
+    },
+  },
+
+  // ── 메뉴 · 모집 · 후기 ──
+  {
+    id: "pr-menu",
+    name: "메뉴판",
+    category: "promo",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "bg" },
+      els: [
+        txt({ text: "MENU", x: 80, y: 120, w: 920, size: 120, font: "heading", color: "primary", align: "center", weight: 900, ls: 300 }),
+        txt({ text: "가게 이름", x: 80, y: 280, w: 920, size: 44, font: "body", color: "muted", align: "center" }),
+        ...[0, 1, 2, 3, 4].flatMap((i): El[] => [
+          txt({ text: ["아메리카노", "카페라떼", "바닐라라떼", "콜드브루", "오늘의 디저트"][i], x: 120, y: 420 + i * 150, w: 560, size: 52, font: "heading", color: "text", weight: 800 }),
+          line({ x1: 120, y1: 500 + i * 150, x2: 960, y2: 500 + i * 150, color: "muted", w: 3, dash: [6, 12] }),
+          txt({ text: ["4,500", "5,000", "5,500", "5,000", "6,500"][i], x: 700, y: 420 + i * 150, w: 260, size: 52, font: "heading", color: "primary", align: "right", weight: 800 }),
+        ]),
+        txt({ text: "매일 10:00 – 21:00", x: 80, y: 1200, w: 920, size: 38, font: "body", color: "muted", align: "center" }),
+      ],
+    },
+  },
+  {
+    id: "pr-newmenu",
+    name: "신메뉴 출시",
+    category: "promo",
+    post: "feed",
+    cover: {
+      bg: { kind: "gradient", from: "bg", to: "accent", angle: 180 },
+      els: [
+        txt({ text: "NEW MENU", x: 80, y: 120, w: 920, size: 100, font: "heading", color: "primary", align: "center", weight: 900, ls: 100 }),
+        photo({ x: 230, y: 300, w: 620, h: 620, circle: true }),
+        star({ x: 840, y: 380, r: 120, fill: "primary", points: 12, angle: 10 }),
+        txt({ text: "NEW", x: 760, y: 352, w: 160, size: 48, font: "heading", color: "on_primary", align: "center", weight: 900, angle: 10 }),
+        txt({ text: "메뉴 이름", x: 80, y: 980, w: 920, size: 90, font: "heading", color: "text", align: "center", weight: 900 }),
+        txt({ text: "한 줄 소개 · 6,500원", x: 80, y: 1110, w: 920, size: 44, font: "body", color: "text", align: "center" }),
+      ],
+    },
+  },
+  {
+    id: "pr-recruit",
+    name: "모집 공고",
+    category: "promo",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "primary" },
+      els: [
+        txt({ text: "WE'RE HIRING", x: 80, y: 130, w: 920, size: 52, font: "body", color: "on_primary", weight: 800, ls: 200 }),
+        txt({ text: "함께할\n크루를 찾아요", x: 80, y: 220, w: 920, size: 120, font: "heading", color: "on_primary", lh: 1.15, weight: 900 }),
+        rect({ x: 80, y: 560, w: 920, h: 540, fill: "surface", r: 36 }),
+        ...[0, 1, 2, 3].flatMap((i): El[] => [
+          txt({ text: ["모집", "근무", "시간", "지원"][i], x: 130, y: 610 + i * 120, w: 200, size: 42, font: "body", color: "primary", weight: 800 }),
+          txt({ text: ["홀 서빙 2명", "주 3일 이상", "17:00 – 22:00", "DM 또는 프로필 링크"][i], x: 330, y: 606 + i * 120, w: 640, size: 48, font: "body", color: "text", weight: 700 }),
+        ]),
+        txt({ text: "~10.20 까지 · 경력 무관", x: 80, y: 1170, w: 920, size: 44, font: "body", color: "on_primary", align: "center", weight: 700 }),
+      ],
+    },
+  },
+  {
+    id: "pr-review",
+    name: "후기 카드",
+    category: "promo",
+    post: "feed",
+    cover: {
+      bg: { kind: "solid", color: "accent" },
+      els: [
+        rect({ x: 100, y: 180, w: 880, h: 990, fill: "surface", r: 48 }),
+        txt({ text: "REAL REVIEW", x: 100, y: 260, w: 880, size: 40, font: "body", color: "primary", align: "center", weight: 800, ls: 200 }),
+        ...[0, 1, 2, 3, 4].map((i): El => star({ x: 340 + i * 100, y: 400, r: 40, fill: "primary" })),
+        txt({ text: "“정말 만족스러웠어요!\n다음에 또 올게요”", x: 160, y: 520, w: 760, size: 68, font: "heading", color: "text", align: "center", lh: 1.4, weight: 800 }),
+        line({ x1: 440, y1: 820, x2: 640, y2: 820, color: "primary", w: 5 }),
+        txt({ text: "손님 이름 님 · 10월 방문", x: 160, y: 860, w: 760, size: 40, font: "body", color: "muted", align: "center" }),
+        txt({ text: "소중한 후기 감사합니다 🙏", x: 160, y: 1020, w: 760, size: 44, font: "body", color: "text", align: "center", weight: 700 }),
+      ],
+    },
+  },
+
+  // ── 스토리 ──
+  {
+    id: "st-poll",
+    name: "스토리 투표",
+    category: "story",
+    post: "story",
+    cover: {
+      bg: { kind: "gradient", from: "primary", to: "accent", angle: 170 },
+      els: [
+        txt({ text: "골라 주세요!", x: 80, y: 360, w: 920, size: 120, font: "heading", color: "on_primary", align: "center", weight: 900 }),
+        txt({ text: "어떤 게 더 좋아요?", x: 80, y: 520, w: 920, size: 52, font: "body", color: "on_primary", align: "center" }),
+        rect({ x: 120, y: 700, w: 400, h: 520, fill: "surface", r: 40 }),
+        rect({ x: 560, y: 700, w: 400, h: 520, fill: "surface", r: 40 }),
+        txt({ text: "A", x: 120, y: 780, w: 400, size: 200, font: "heading", color: "primary", align: "center", weight: 900 }),
+        txt({ text: "B", x: 560, y: 780, w: 400, size: 200, font: "heading", color: "primary", align: "center", weight: 900 }),
+        txt({ text: "선택 1", x: 120, y: 1080, w: 400, size: 48, font: "body", color: "text", align: "center", weight: 700 }),
+        txt({ text: "선택 2", x: 560, y: 1080, w: 400, size: 48, font: "body", color: "text", align: "center", weight: 700 }),
+        txt({ text: "↓ 투표 스티커를 여기에 붙여 주세요", x: 80, y: 1320, w: 920, size: 40, font: "body", color: "on_primary", align: "center" }),
+      ],
+    },
+  },
+  {
+    id: "st-window",
+    name: "스토리 레트로 창",
+    category: "story",
+    post: "story",
+    cover: {
+      bg: { kind: "pattern", pattern: "checker", color: "bg", ink: "accent", gap: 120, alpha: 0.5 },
+      els: [
+        rect({ x: 110, y: 560, w: 880, h: 760, fill: "text", r: 18 }),
+        rect({ x: 90, y: 540, w: 880, h: 760, fill: "surface", r: 18, stroke: "text", sw: 6 }),
+        rect({ x: 90, y: 540, w: 880, h: 100, fill: "primary", r: 18, stroke: "text", sw: 6 }),
+        txt({ text: "message.exe", x: 140, y: 567, w: 600, size: 44, font: "body", color: "on_primary", weight: 700 }),
+        txt({ text: "새 소식이\n도착했어요!", x: 150, y: 740, w: 760, size: 110, font: "heading", color: "text", lh: 1.15, weight: 900 }),
+        rect({ x: 150, y: 1100, w: 340, h: 110, fill: "accent", r: 12, stroke: "text", sw: 5 }),
+        txt({ text: "확인", x: 150, y: 1125, w: 340, size: 56, font: "heading", color: "text", align: "center", weight: 900 }),
+      ],
+    },
+  },
+  {
+    id: "st-chat",
+    name: "스토리 대화",
+    category: "story",
+    post: "story",
+    cover: {
+      bg: { kind: "solid", color: "bg" },
+      els: [
+        txt({ text: "오늘의 대화 💬", x: 80, y: 300, w: 920, size: 90, font: "heading", color: "text", align: "center", weight: 900 }),
+        rect({ x: 100, y: 520, w: 720, h: 200, fill: "surface", r: 60 }),
+        txt({ text: "오늘 뭐 먹지? 🍜", x: 150, y: 590, w: 640, size: 56, font: "body", color: "text", weight: 700 }),
+        rect({ x: 260, y: 780, w: 720, h: 200, fill: "primary", r: 60 }),
+        txt({ text: "새로 나온 메뉴 어때?", x: 310, y: 850, w: 620, size: 56, font: "body", color: "on_primary", align: "right", weight: 700 }),
+        rect({ x: 100, y: 1040, w: 560, h: 200, fill: "surface", r: 60 }),
+        txt({ text: "좋아 좋아 👍", x: 150, y: 1110, w: 480, size: 56, font: "body", color: "text", weight: 700 }),
+      ],
+    },
+  },
+  {
+    id: "st-today",
+    name: "스토리 오늘의 일정",
+    category: "story",
+    post: "story",
+    cover: {
+      bg: { kind: "pattern", pattern: "grid", color: "surface", ink: "primary", gap: 60, alpha: 0.12 },
+      els: [
+        txt({ text: "TODAY", x: 80, y: 300, w: 920, size: 64, font: "body", color: "primary", align: "center", weight: 800, ls: 300 }),
+        txt({ text: "10월 9일 목요일", x: 80, y: 400, w: 920, size: 90, font: "heading", color: "text", align: "center", weight: 900 }),
+        ...[0, 1, 2, 3].flatMap((i): El[] => [
+          rect({ x: 120, y: 620 + i * 230, w: 840, h: 190, fill: "bg", r: 30, stroke: "primary", sw: 3 }),
+          txt({ text: ["11:00", "14:00", "17:00", "20:00"][i], x: 160, y: 680 + i * 230, w: 220, size: 52, font: "heading", color: "primary", weight: 900 }),
+          txt({ text: "일정 내용", x: 400, y: 684 + i * 230, w: 520, size: 50, font: "body", color: "text", weight: 700 }),
+        ]),
+      ],
+    },
+  },
 ];
 
 export const CATEGORIES: { key: Category; label: string }[] = [
   { key: "cardnews", label: "카드뉴스" },
   { key: "photo", label: "사진 + 문구" },
   { key: "notice", label: "공지·이벤트·할인" },
+  { key: "promo", label: "메뉴·모집·후기" },
   { key: "story", label: "스토리" },
 ];
 

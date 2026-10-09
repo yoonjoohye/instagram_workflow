@@ -6,6 +6,7 @@
 import type * as F from "fabric";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { ThemeEditor } from "@/components/design/ThemeEditor";
 import { Button, cx, Notice, Spinner } from "@/components/ui";
 import { useT } from "@/i18n/client";
@@ -39,13 +40,25 @@ async function thumbFor(f: typeof F, tpl: Template, theme: Theme, photos: string
   return url;
 }
 
-export function DesignGallery({ story, onCreated, onClose }: { story: boolean; onCreated: (job: Job) => void; onClose: () => void }) {
+export function DesignGallery({
+  story,
+  initialMineId,
+  onCreated,
+  onClose,
+}: {
+  story: boolean;
+  /** 내 템플릿 하나를 골라 둔 채로 열기 (템플릿 화면의 '이걸로 게시물 만들기') */
+  initialMineId?: string;
+  onCreated: (job: Job) => void;
+  onClose: () => void;
+}) {
   const t = useT();
-  const [cat, setCat] = useState<Cat>(story ? "story" : "all");
+  const router = useRouter();
+  const [cat, setCat] = useState<Cat>(initialMineId ? "mine" : story ? "story" : "all");
   const myThemes = useApi<{ data: { id: string; name: string; colors: Theme["colors"]; fonts: Theme["fonts"] }[] }>("/studio/themes");
   const mine = useApi<{ data: Mine[] }>(cat === "mine" ? "/studio/templates" : null);
   const themes: Theme[] = useMemo(() => [...(myThemes.data?.data ?? []).map((x) => ({ ...x, mine: true })), ...BUILTIN_THEMES], [myThemes.data]);
-  const [themeId, setThemeId] = useState<string | null>(BUILTIN_THEMES[0].id);
+  const [themeId, setThemeId] = useState<string | null>(initialMineId ? null : BUILTIN_THEMES[0].id);
   const theme = themes.find((x) => x.id === themeId) ?? null;
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Template | null>(null);
@@ -57,6 +70,11 @@ export function DesignGallery({ story, onCreated, onClose }: { story: boolean; o
   const [error, setError] = useState<string>();
   const [editingTheme, setEditingTheme] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const m = initialMineId && mine.data?.data.find((x) => x.id === initialMineId);
+    if (m && !pickedMine) setPickedMine(m);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mine.data]);
   const visible = cat === "all" ? TEMPLATES : cat === "mine" ? [] : TEMPLATES.filter((x) => x.category === cat);
   const shown = theme ?? BUILTIN_THEMES[0];
 
@@ -280,9 +298,19 @@ export function DesignGallery({ story, onCreated, onClose }: { story: boolean; o
             mine.loading ? (
               <Spinner className="mx-auto mt-10 size-6" />
             ) : !mine.data?.data.length ? (
-              <p className="mt-8 text-center text-[13px] text-fg-3">{t("design.noMine")}</p>
+              <div className="mt-8 space-y-3 text-center">
+                <p className="text-[13px] text-fg-3">{t("design.noMine")}</p>
+                <Button onClick={() => router.push("/admin/templates?new=1")}>{t("design.newTemplate")}</Button>
+              </div>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                <button
+                  type="button"
+                  onClick={() => router.push("/admin/templates?new=1")}
+                  className="flex aspect-[4/5] items-center justify-center rounded-lg border-2 border-dashed border-line text-[13px] text-fg-2 hover:border-line-strong"
+                >
+                  {t("design.newTemplate")}
+                </button>
                 {mine.data.data.map((m) => (
                   <div key={m.id} className="relative">
                     <button

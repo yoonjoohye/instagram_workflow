@@ -4,8 +4,8 @@ export default defineMessages({
   ko: {
     accounts: "연결한 계정", addAccount: "다른 계정 연결", switchFailed: "계정을 바꾸지 못했습니다.",
     addAccountHint: "인스타그램 로그인 화면에서 연결할 계정으로 로그인하세요.",
-    dashboard: "대시보드", studio: "만들기", jobs: "작업함", posts: "게시물 성과", autoreply: "자동 응답",
-    dashboardShort: "홈", studioShort: "만들기", jobsShort: "작업함", postsShort: "성과", autoreplyShort: "자동응답",
+    dashboard: "대시보드", studio: "만들기", templates: "템플릿", jobs: "작업함", posts: "게시물 성과", autoreply: "자동 응답",
+    dashboardShort: "홈", studioShort: "만들기", templatesShort: "템플릿", jobsShort: "작업함", postsShort: "성과", autoreplyShort: "자동응답",
     mainMenu: "주 메뉴", accountMenu: "계정 메뉴", loadingAccount: "계정 정보를 불러오는 중…",
     followers: "팔로워 {n}", page: "페이지 · {name}", logout: "로그아웃", deleteAccount: "연결 해제 및 데이터 삭제",
     deleteConfirm: "@{username} 연결을 해제하고 이 서비스에 저장된 모든 데이터(토큰, 생성 기록, 인사이트 기록, 자동 응답·댓글 분석 기록)를 삭제할까요?\n되돌릴 수 없습니다. Instagram 에 게시된 게시물은 그대로 남습니다.",
@@ -17,8 +17,8 @@ export default defineMessages({
   en: {
     accounts: "Connected accounts", addAccount: "Connect another account", switchFailed: "Couldn't switch accounts.",
     addAccountHint: "Log in with the account you want to connect on the Instagram login screen.",
-    dashboard: "Dashboard", studio: "Create", jobs: "Drafts", posts: "Post performance", autoreply: "Auto-reply",
-    dashboardShort: "Home", studioShort: "Create", jobsShort: "Drafts", postsShort: "Posts", autoreplyShort: "Replies",
+    dashboard: "Dashboard", studio: "Create", templates: "Templates", jobs: "Drafts", posts: "Post performance", autoreply: "Auto-reply",
+    dashboardShort: "Home", studioShort: "Create", templatesShort: "Templates", jobsShort: "Drafts", postsShort: "Posts", autoreplyShort: "Replies",
     mainMenu: "Main menu", accountMenu: "Account menu", loadingAccount: "Loading your account…",
     followers: "{n} followers", page: "Page · {name}", logout: "Log out", deleteAccount: "Disconnect and delete data",
     deleteConfirm: "Disconnect @{username} and delete all data stored by this service (token, creation history, insight history, auto-reply and comment analysis records)?\nThis can't be undone. Posts already published on Instagram will stay there.",
@@ -30,8 +30,8 @@ export default defineMessages({
   ja: {
     accounts: "連携したアカウント", addAccount: "別のアカウントを連携", switchFailed: "アカウントを切り替えられませんでした。",
     addAccountHint: "Instagramのログイン画面で、連携したいアカウントでログインしてください。",
-    dashboard: "ダッシュボード", studio: "作成", jobs: "作業一覧", posts: "投稿の成果", autoreply: "自動返信",
-    dashboardShort: "ホーム", studioShort: "作成", jobsShort: "作業", postsShort: "成果", autoreplyShort: "自動返信",
+    dashboard: "ダッシュボード", studio: "作成", templates: "テンプレート", jobs: "作業一覧", posts: "投稿の成果", autoreply: "自動返信",
+    dashboardShort: "ホーム", studioShort: "作成", templatesShort: "テンプレ", jobsShort: "作業", postsShort: "成果", autoreplyShort: "自動返信",
     mainMenu: "メインメニュー", accountMenu: "アカウントメニュー", loadingAccount: "アカウント情報を読み込み中…",
     followers: "フォロワー {n}", page: "ページ · {name}", logout: "ログアウト", deleteAccount: "連携解除とデータ削除",
     deleteConfirm: "@{username} の連携を解除し、このサービスに保存されたすべてのデータ(トークン、作成履歴、インサイト履歴、自動返信・コメント分析の記録)を削除しますか?\n元に戻せません。Instagramに投稿済みの投稿はそのまま残ります。",

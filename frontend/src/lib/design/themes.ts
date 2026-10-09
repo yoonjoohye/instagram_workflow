@@ -31,6 +31,16 @@ export const BUILTIN_THEMES: Theme[] = [
   t("retro", "레트로", { bg: "#fdf0d5", surface: "#fffaf0", text: "#003049", primary: "#c1121f", on_primary: "#fdf0d5", accent: "#669bbc" }, "do_hyeon"),
   t("natural", "내추럴", { bg: "#ede8df", surface: "#f8f5ef", text: "#3d3a33", primary: "#6b8f71", on_primary: "#ffffff", accent: "#d9c5a0" }, "nanum_myeongjo"),
   t("neon", "네온 나이트", { bg: "#111014", surface: "#1c1b22", text: "#ffffff", primary: "#a3e635", on_primary: "#111014", accent: "#f472b6" }, "black_han_sans"),
+  t("butter", "버터", { bg: "#fff6d6", surface: "#fffdf3", text: "#3b2f0b", primary: "#f5b301", on_primary: "#3b2f0b", accent: "#ffe08a" }, "jua"),
+  t("lavender", "라벤더", { bg: "#f3f0ff", surface: "#ffffff", text: "#2e1065", primary: "#7c3aed", on_primary: "#ffffff", accent: "#c4b5fd" }, "pretendard"),
+  t("olive", "올리브", { bg: "#f1efe3", surface: "#fbfaf3", text: "#2f3320", primary: "#5f6b2d", on_primary: "#f8f6e9", accent: "#c9c08f" }, "nanum_myeongjo"),
+  t("coral", "코랄", { bg: "#fff4f0", surface: "#ffffff", text: "#3a1a14", primary: "#ff6f59", on_primary: "#ffffff", accent: "#ffc4b6" }, "black_han_sans"),
+  t("babyblue", "베이비 블루", { bg: "#eef6ff", surface: "#ffffff", text: "#0b2545", primary: "#4c8dff", on_primary: "#ffffff", accent: "#b9d6ff" }, "jua"),
+  t("burgundy", "버건디", { bg: "#f7efe9", surface: "#fffaf6", text: "#2b0f14", primary: "#7d1d2d", on_primary: "#f7efe9", accent: "#d9a5a0" }, "song_myung"),
+  t("goldblack", "블랙 & 골드", { bg: "#0d0d0d", surface: "#1a1a1a", text: "#f5f0e1", primary: "#d4af37", on_primary: "#0d0d0d", accent: "#8a6d1e" }, "nanum_myeongjo"),
+  t("y2k", "Y2K", { bg: "#e9f5ff", surface: "#ffffff", text: "#1a1a40", primary: "#ff4fd8", on_primary: "#ffffff", accent: "#7cf6ff" }, "do_hyeon"),
+  t("forest", "포레스트", { bg: "#0f2a1d", surface: "#173a2a", text: "#eaf4ec", primary: "#9fd356", on_primary: "#0f2a1d", accent: "#f2c14e" }, "black_han_sans"),
+  t("peach", "피치", { bg: "#fff0e6", surface: "#ffffff", text: "#4a2c1d", primary: "#ff9a76", on_primary: "#ffffff", accent: "#ffd6c2" }, "gaegu"),
 ];
 
 /** 토큰 → 실제 색 */

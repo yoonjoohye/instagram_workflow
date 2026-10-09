@@ -74,6 +74,17 @@ def test_my_templates(client, login, account, db):
     t = db.get(DesignTemplate, item["id"])
     assert json.loads(full["pages"][1])["canvas"]["objects"][0]["src"] == f"/api/py/media/{t.bg_ids[1]}.jpg"
     assert db.get(MediaBlob, t.bg_ids[0]).kind == "template"
+    # 고치기: 장·바탕을 새것으로, 예전 바탕은 지움
+    old_bgs = list(t.bg_ids)
+    up = client.put(f"/studio/templates/{item['id']}", data={"pages": json.dumps([_page("새 표지")]), "name": "고친 템플릿"},
+                    files=[("bgs", ("b.jpg", _jpg("blue"), "image/jpeg")), ("thumb", ("t.jpg", _jpg(), "image/jpeg"))])
+    assert up.status_code == 200, up.text
+    assert up.json()["name"] == "고친 템플릿" and up.json()["pages"] == 1
+    db.expire_all()
+    t = db.get(DesignTemplate, item["id"])
+    assert all(db.get(MediaBlob, b) is None for b in old_bgs) and len(t.bg_ids) == 1
+    page = json.loads(client.get(f"/studio/templates/{item['id']}").json()["pages"][0])
+    assert page["canvas"]["objects"][1]["text"] == "새 표지"
     bg_ids = list(t.bg_ids)
     assert client.delete(f"/studio/templates/{item['id']}").status_code == 204
     db.expire_all()

@@ -215,6 +215,33 @@ async def save_template(
     return _template_item(t)
 
 
+@router.put("/studio/templates/{template_id}")
+async def update_template(
+    template_id: str,
+    pages: str = Form(max_length=MAX_PAGES * MAX_LAYERS_BYTES),
+    bgs: list[UploadFile] = File(...),
+    thumb: UploadFile = File(...),
+    name: str = Form(min_length=1, max_length=40),
+    user: User = Depends(current_user),
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+) -> dict:
+    """템플릿 고치기: 장·바탕·미리보기를 새것으로 바꾸고 예전 그림은 지움."""
+    t = _own_template(db, user, template_id)
+    layers = _pages(pages, len(bgs))
+    old = [*(t.bg_ids or []), t.thumb_id]
+    t.bg_ids = [_save_blob(db, account, *(await _image(f)), kind="template").id for f in bgs]
+    t.thumb_id = _save_blob(db, account, *(await _image(thumb, max_side=540)), kind="template").id
+    t.pages = [p.replace(BG, f"__BG{i}__") for i, p in enumerate(layers)]
+    t.name = name.strip()
+    for blob_id in old:
+        blob = db.get(MediaBlob, blob_id) if blob_id else None
+        if blob is not None and blob.kind == "template":
+            db.delete(blob)
+    db.commit()
+    return _template_item(t)
+
+
 @router.delete("/studio/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 def delete_template(template_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> Response:
     t = _own_template(db, user, template_id)
