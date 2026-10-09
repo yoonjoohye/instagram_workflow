@@ -137,6 +137,15 @@ const PRESETS: Record<string, Partial<Adjust>> = {
     gradeShadowHue: 210, gradeShadowSat: 0.03, gradeMidHue: 35, gradeMidSat: 0.04, gradeHighHue: 45, gradeHighSat: 0.06, gradeBalance: 0.05,
     hslH_orange: -0.03, hslS_orange: -0.03, hslL_orange: 0.08, hslH_yellow: -0.1, hslS_yellow: -0.05, hslS_green: -0.08, hslS_blue: -0.05,
   },
+  // 폴라로이드: 검정을 살짝 띄운 매트 · 크림빛 밝은 곳 · 청록빛 어두운 곳 · 낮은 채도 · 고운 입자 · 가장자리 살짝 어둡게
+  // (대비는 원래에 가깝게 — 뿌옇지 않게 띄우는 건 조금만)
+  polaroid: {
+    exposure: 0.08, contrast: 0, highlights: -0.16, whites: -0.05, shadows: 0.08, lift: 0.06, fade: 0.06, curve: 0.12,
+    warmth: 0.1, tint: 0.03, saturation: -0.14, vibrance: 0.06, clarity: -0.08, sharpen: -0.06,
+    gradeShadowHue: 180, gradeShadowSat: 0.12, gradeMidHue: 40, gradeMidSat: 0.03, gradeHighHue: 50, gradeHighSat: 0.12, gradeBalance: 0.1,
+    hslS_blue: -0.12, hslL_orange: 0.05, hslH_green: 0.06,
+    grain: 0.16, grainSize: 0.3, vignette: 0.22,
+  },
   digicam: { contrast: -0.05, grain: 0.22, grainSize: 0.08, grainRough: 0.5, warmth: 0.15, fade: 0.1, sharpen: -0.1, highlights: -0.15 },
 };
 /** 프리셋을 누르면: 모든 보정을 그 프리셋 값으로 (흑백·세피아 같은 켜고 끄는 효과는 프리셋 이름으로) */
