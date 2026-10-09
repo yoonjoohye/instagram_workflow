@@ -19,6 +19,8 @@ export type Tk = {
   box?: ColorToken;
   font?: "heading" | "body";
   bg?: Bg;
+  /** 바탕에만: 이 장을 칠한 테마 (편집기에서 바탕·글자를 같은 테마 색으로) */
+  theme?: Theme;
   slot?: { x: number; y: number; w: number; h: number; r?: number; circle?: boolean };
 };
 type WithTk = F.FabricObject & { tk?: Tk; name?: string };
@@ -67,7 +69,7 @@ export function placeholder(): string {
 }
 
 /** 바탕 그림 (색·그라데이션, 또는 사진을 꽉 채우고 어둡게) */
-async function drawBg(bg: Bg, theme: Theme, w: number, h: number, photoSrc?: string): Promise<HTMLCanvasElement> {
+export async function drawBg(bg: Bg, theme: Theme, w: number, h: number, photoSrc?: string): Promise<HTMLCanvasElement> {
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
@@ -131,6 +133,30 @@ export function fitToSlot(f: typeof F, img: F.FabricImage, slot: NonNullable<Tk[
   img.setCoords();
 }
 
+/** 템플릿을 만들 때: 사진 칸을 틀째 옮기고 크기를 바꿀 수 있게 (틀이 사진을 따라다님) */
+export function slotToMovable(f: typeof F, img: F.FabricImage, slot: NonNullable<Tk["slot"]>) {
+  const s = Math.max(slot.w / img.width, slot.h / img.height);
+  img.set({ originX: "center", originY: "center", left: slot.x + slot.w / 2, top: slot.y + slot.h / 2, scaleX: s, scaleY: s, angle: 0 });
+  img.clipPath = slot.circle
+    ? new f.Circle({ radius: Math.min(slot.w, slot.h) / 2 / s, originX: "center", originY: "center", left: 0, top: 0 })
+    : new f.Rect({ width: slot.w / s, height: slot.h / s, rx: (slot.r ?? 0) / s, ry: (slot.r ?? 0) / s, originX: "center", originY: "center", left: 0, top: 0 });
+  img.setCoords();
+}
+
+/** 사진 칸의 지금 틀 (틀째 옮겼으면 그 자리) */
+export function currentSlot(img: F.FabricImage & { tk?: Tk }): NonNullable<Tk["slot"]> | null {
+  const base = img.tk?.slot;
+  if (!base) return null;
+  const clip = img.clipPath as (F.Rect & F.Circle) | undefined;
+  if (!clip || clip.absolutePositioned) return base;
+  const sx = Math.abs(img.scaleX ?? 1);
+  const sy = Math.abs(img.scaleY ?? 1);
+  const c = img.getCenterPoint();
+  const w = base.circle ? clip.radius * 2 * sx : clip.width * sx;
+  const h = base.circle ? clip.radius * 2 * sy : clip.height * sy;
+  return { ...base, x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2), w: Math.round(w), h: Math.round(h), r: base.circle ? undefined : Math.round((clip.rx ?? 0) * sx) };
+}
+
 // fabric 7 은 기본 기준점이 가운데라, 템플릿 좌표(왼쪽 위 기준)에 맞게 왼쪽 위로
 const TL = { originX: "left", originY: "top" } as const;
 
@@ -147,7 +173,7 @@ export async function buildPage(f: typeof F, input: PageInput, theme: Theme, siz
   const bgCanvas = await drawBg(page.bg, theme, size.w, size.h, page.bg.kind === "photo" ? photos.shift() : undefined);
   const base = new f.FabricImage(bgCanvas, { originX: "center", originY: "center", left: size.w / 2, top: size.h / 2, selectable: false, evented: false }) as unknown as WithTk;
   base.name = "base";
-  base.tk = { bg: page.bg };
+  base.tk = { bg: page.bg, theme };
   c.add(base);
   for (const el of page.els) c.add(await buildEl(f, el, theme, input, photos));
   c.renderAll();
@@ -240,8 +266,9 @@ export async function applyTheme(f: typeof F, c: F.StaticCanvas | F.Canvas, them
     const o = raw as WithTk;
     const tk = o.tk;
     if (!tk) continue;
-    if (o.name === "base" && tk.bg && tk.bg.kind !== "photo") {
-      (o as unknown as F.FabricImage).setElement(await drawBg(tk.bg, theme, size.w, size.h));
+    if (o.name === "base") {
+      o.tk = { ...tk, theme };
+      if (tk.bg && tk.bg.kind !== "photo") (o as unknown as F.FabricImage).setElement(await drawBg(tk.bg, theme, size.w, size.h));
       continue;
     }
     if (tk.fill) o.set({ fill: colorOf(theme, tk.fill) });

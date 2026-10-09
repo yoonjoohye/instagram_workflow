@@ -11,7 +11,8 @@
  *  - 오른쪽(넓은 화면)·미리보기 버튼(휴대폰)에 올라갈 모습을 편집할 때마다 보여 줍니다.
  */
 import type { MessageKey } from "@/i18n/core";
-import { applyTheme, exportPage, fitToSlot, type Tk } from "@/lib/design/render";
+import { applyTheme, currentSlot, drawBg, exportPage, fitToSlot, placeholder, slotToMovable, type Tk } from "@/lib/design/render";
+import type { Bg } from "@/lib/design/templates";
 import { BUILTIN_THEMES, type Theme } from "@/lib/design/themes";
 import { fontFamily, fontKeyOf, loadFont } from "@/lib/fonts";
 import { toBrowserImage } from "@/lib/heic";
@@ -700,6 +701,21 @@ export function ImageEditor({
 
   async function addText() {
     const f = fab.current!;
+    // 템플릿(디자인) 장: 테마의 글자 색·제목 글꼴로, 테마를 바꾸면 같이 바뀌게 토큰도 남김
+    const theme = designTheme();
+    if (theme) {
+      await loadFont(theme.fonts.heading);
+      const o = new f.IText(t("editor.defaultText"), {
+        ...center(),
+        fontFamily: fontFamily(theme.fonts.heading),
+        fontSize: Math.round(size.current.w * 0.075),
+        fill: theme.colors.text,
+        textAlign: "center",
+      }) as F.IText & { tk?: Tk };
+      o.tk = { fill: "text", font: "heading" };
+      add(o);
+      return;
+    }
     await loadFont("pretendard");
     add(
       new f.IText(t("editor.defaultText"), {
@@ -1117,6 +1133,72 @@ export function ImageEditor({
   const [tplName, setTplName] = useState("");
   const [tplSaved, setTplSaved] = useState(false);
   const slotInput = useRef<HTMLInputElement>(null);
+  // 템플릿을 고칠 때: 저장된 사진 칸도 틀째 옮길 수 있게
+  useEffect(() => {
+    const f = fab.current;
+    const c = canvas.current;
+    if (!templateMode || !ready || !f || !c) return;
+    for (const o of c.getObjects() as (F.FabricImage & { tk?: Tk })[]) {
+      if (o.tk?.slot && (o.clipPath as F.Rect | undefined)?.absolutePositioned) slotToMovable(f, o, o.tk.slot);
+    }
+    c.requestRenderAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
+  /** 템플릿(디자인)으로 만든 장인지, 그 테마 (아니면 null) */
+  function designTheme(): Theme | null {
+    const tk = (base() as (F.FabricObject & { tk?: Tk }) | undefined)?.tk;
+    if (tk?.theme) return tk.theme;
+    return templateMode || tk?.bg ? BUILTIN_THEMES[0] : null;
+  }
+  const isDesign = !!templateMode || !!(ready && (base() as (F.FabricObject & { tk?: Tk }) | undefined)?.tk);
+  const backdropInput = useRef<HTMLInputElement>(null);
+  /** 바탕을 테마 색·그라데이션·무늬로 */
+  async function changeBackdrop(spec: Bg) {
+    const img = base() as (F.FabricImage & { tk?: Tk }) | undefined;
+    const theme = designTheme() ?? BUILTIN_THEMES[0];
+    if (!img) return;
+    const { w, h } = size.current;
+    img.setElement(await drawBg(spec, theme, w, h));
+    img.set({ originX: "center", originY: "center", left: w / 2, top: h / 2, scaleX: 1, scaleY: 1, angle: 0, flipX: false });
+    img.tk = { ...img.tk, bg: spec, theme };
+    cropRef.current = NO_CROP;
+    setCropState(NO_CROP);
+    syncBackdrop(NO_CROP);
+    canvas.current!.requestRenderAll();
+    snapshot();
+  }
+  /** 바탕을 고른 사진으로 (틀을 꽉 채우게) */
+  async function backdropFromPhoto(file: File) {
+    const img = base() as (F.FabricImage & { tk?: Tk }) | undefined;
+    if (!img) return;
+    setAiBusy({ label: t("editor.applying") });
+    try {
+      const url = await uploadLayer(await toBrowserImage(file));
+      await img.setSrc(mediaSrc(url), { crossOrigin: "anonymous" });
+      img.tk = { ...img.tk, bg: { kind: "photo" } };
+      applyCrop({ ...NO_CROP }, true);
+      snapshot();
+    } catch (e) {
+      setError(t("editor.stickerFailed", { e: toApiError(e).message }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+  /** 사진 칸 넣기 (템플릿을 쓸 때 '사진 바꾸기'로 채움) */
+  async function addPhotoSlot() {
+    const f = fab.current;
+    if (!f) return;
+    const { w, h } = size.current;
+    const side = Math.round(w * 0.6);
+    const slot = { x: Math.round((w - side) / 2), y: Math.round((h - side) / 2), w: side, h: side, r: 24 };
+    const img = (await f.FabricImage.fromURL(placeholder(), { crossOrigin: "anonymous" })) as F.FabricImage & { tk?: Tk; name?: string };
+    slotToMovable(f, img, slot); // 틀째 옮기고 크기를 바꿀 수 있게 (저장할 때 그 자리에 고정)
+    img.name = "slot";
+    img.tk = { slot };
+    add(img);
+  }
+
   async function themeThisPage(th: Theme) {
     const c = canvas.current;
     if (!c || !fab.current) return;
@@ -1130,9 +1212,24 @@ export function ImageEditor({
     }
   }
   /** 템플릿 만들기 모드의 저장: 이름을 정해 내 템플릿으로 (고치는 중이면 덮어씀) */
+  /** 틀째 옮긴 사진 칸을 그 자리에 고정 (쓸 때는 틀 안에서 사진만 움직이게) */
+  function pinSlots() {
+    const f = fab.current;
+    const c = canvas.current;
+    if (!f || !c) return;
+    for (const o of c.getObjects() as (F.FabricImage & { tk?: Tk })[]) {
+      const slot = o.tk?.slot && currentSlot(o);
+      if (slot && !(o.clipPath as F.Rect | undefined)?.absolutePositioned) {
+        o.tk = { ...o.tk, slot };
+        fitToSlot(f, o, slot);
+      }
+    }
+  }
+
   async function saveTemplate() {
     const c = canvas.current;
     if (!c || !templateMode) return;
+    pinSlots();
     const name = (tplName.trim() || templateMode.name || window.prompt(t("design.templateName"), t("design.newTemplateName")) || "").trim();
     if (!name) return;
     setSaving(true);
@@ -1199,9 +1296,11 @@ export function ImageEditor({
     if (!o?.tk?.slot || !f) return;
     setAiBusy({ label: t("editor.applying") });
     try {
+      const slot = currentSlot(o) ?? o.tk.slot;
       const url = await uploadLayer(await toBrowserImage(file));
       await o.setSrc(mediaSrc(url), { crossOrigin: "anonymous" });
-      fitToSlot(f, o, o.tk.slot);
+      o.tk = { ...o.tk, slot };
+      fitToSlot(f, o, slot);
       canvas.current!.requestRenderAll();
       snapshot();
     } catch (e) {
@@ -1925,6 +2024,7 @@ export function ImageEditor({
     const c = canvas.current;
     if (!c) return;
     if (templateMode) return saveTemplate();
+    pinSlots();
     setSaving(true);
     setError(undefined);
     try {
@@ -2420,6 +2520,7 @@ export function ImageEditor({
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="mr-1 text-[12px] font-semibold text-white/80">⭐ {t("editor.myStickers")}</span>
                       <Chip onClick={() => photoFile.current?.click()}>🖼 {t("editor.placePhoto")}</Chip>
+                      {isDesign && <Chip onClick={addPhotoSlot}>▢ {t("design.addSlot")}</Chip>}
                       <Chip onClick={() => stickerFile.current?.click()}>✂ {t("editor.stickerFromPhoto")}</Chip>
                       {selected && !SPECIAL.has(selected.name ?? "") && <Chip onClick={saveSelectionAsSticker}>{t("editor.saveSelection")}</Chip>}
                       <input
@@ -2708,6 +2809,43 @@ export function ImageEditor({
 
               {tab === "bg" && (
                 <div className="space-y-2.5">
+                  {/* 템플릿(디자인) 장: 바탕을 테마 색·무늬·사진으로 */}
+                  {isDesign && (
+                    <div className="space-y-2 border-b border-white/10 pb-3">
+                      <p className="text-[12px] font-semibold text-white/80">{t("design.changeBg")}</p>
+                      <Row>
+                        {(
+                          [
+                            ["design.bgSolid", { kind: "solid", color: "bg" }],
+                            ["design.bgPrimary", { kind: "solid", color: "primary" }],
+                            ["design.bgGradient", { kind: "gradient", from: "primary", to: "accent", angle: 160 }],
+                            ["design.bgDots", { kind: "pattern", pattern: "dots", color: "bg", ink: "primary", alpha: 0.2 }],
+                            ["design.bgGrid", { kind: "pattern", pattern: "grid", color: "bg", ink: "primary", alpha: 0.18 }],
+                            ["design.bgChecker", { kind: "pattern", pattern: "checker", color: "bg", ink: "accent", alpha: 0.45 }],
+                            ["design.bgLines", { kind: "pattern", pattern: "lines", color: "surface", ink: "primary", alpha: 0.25 }],
+                            ["design.bgStripes", { kind: "pattern", pattern: "stripes", color: "bg", ink: "primary", alpha: 0.12 }],
+                          ] as [MessageKey, Bg][]
+                        ).map(([label, spec]) => (
+                          <Chip key={label} onClick={() => changeBackdrop(spec)}>
+                            {t(label)}
+                          </Chip>
+                        ))}
+                        <Chip onClick={() => backdropInput.current?.click()}>📷 {t("design.bgFromPhoto")}</Chip>
+                      </Row>
+                      <input
+                        ref={backdropInput}
+                        type="file"
+                        accept="image/*,.heic,.heif"
+                        hidden
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (file) void backdropFromPhoto(file);
+                        }}
+                      />
+                      <p className="text-[11px] text-white/45">{t("design.changeBgHint")}</p>
+                    </div>
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
