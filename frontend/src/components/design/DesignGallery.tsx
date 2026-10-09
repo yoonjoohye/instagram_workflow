@@ -13,14 +13,15 @@ import { useT } from "@/i18n/client";
 import type { MessageKey } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
 import { applyTheme, buildPage, exportPage, thumbOf } from "@/lib/design/render";
-import { CATEGORIES, pageSize, pagesOf, photoSlots, TEMPLATES, type Category, type Template } from "@/lib/design/templates";
-import { BUILTIN_THEMES, type Theme } from "@/lib/design/themes";
+import { CATEGORIES, pageSize, pagesOf, photoSlots, TEMPLATE_KEYWORDS, TEMPLATES, type Category, type Template } from "@/lib/design/templates";
+import { BUILTIN_THEMES, THEME_KEYWORDS, type Theme } from "@/lib/design/themes";
 import { loadFont } from "@/lib/fonts";
 import { uploadPhoto } from "@/lib/uploads";
 import type { Job } from "@/lib/types";
 
-type Mine = { id: string; name: string; post_type: "feed" | "story"; pages: number; thumb_url: string };
-type Cat = "all" | Category | "mine";
+/** 내 템플릿 또는 모두의 템플릿 (community: 다른 회원이 공개한 것 — 장은 /community 에서, 만들면 사용 수 +1) */
+type Mine = { id: string; name: string; post_type: "feed" | "story"; pages: number; thumb_url: string; community?: boolean; author?: { name: string } };
+type Cat = "all" | Category | "mine" | "community";
 
 const loadFabric = () => import("fabric");
 const themeLabel = (t: ReturnType<typeof useT>, th: Theme) => (th.mine ? th.name : t(`design.th_${th.id}` as MessageKey));
@@ -43,22 +44,40 @@ async function thumbFor(f: typeof F, tpl: Template, theme: Theme, photos: string
 export function DesignGallery({
   story,
   initialMineId,
+  initialCommunityId,
   onCreated,
   onClose,
 }: {
   story: boolean;
   /** 내 템플릿 하나를 골라 둔 채로 열기 (템플릿 화면의 '이걸로 게시물 만들기') */
   initialMineId?: string;
+  /** 모두의 템플릿 하나를 골라 둔 채로 열기 */
+  initialCommunityId?: string;
   onCreated: (job: Job) => void;
   onClose: () => void;
 }) {
   const t = useT();
   const router = useRouter();
-  const [cat, setCat] = useState<Cat>(initialMineId ? "mine" : story ? "story" : "all");
+  const [cat, setCat] = useState<Cat>(initialMineId ? "mine" : initialCommunityId ? "community" : story ? "story" : "all");
   const myThemes = useApi<{ data: { id: string; name: string; colors: Theme["colors"]; fonts: Theme["fonts"] }[] }>("/studio/themes");
   const mine = useApi<{ data: Mine[] }>(cat === "mine" ? "/studio/templates" : null);
+  // 검색 (템플릿 이름·종류·관련 낱말, 테마 이름·색·분위기, 모두의 템플릿은 서버에서)
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setQuery(search.trim().toLowerCase()), 250);
+    return () => clearTimeout(id);
+  }, [search]);
+  const words = query.split(/\s+/).filter(Boolean);
+  const hits = (hay: string) => !words.length || words.every((w) => hay.toLowerCase().includes(w.replace(/^#/, "")));
+  const community = useApi<{ data: (Mine & { author: { name: string } })[] }>(
+    cat === "community" ? `/community/templates?sort=popular${query ? `&q=${encodeURIComponent(query)}` : ""}` : null,
+  );
+  const listed: Mine[] =
+    cat === "community" ? (community.data?.data ?? []).map((x) => ({ ...x, community: true })) : (mine.data?.data ?? []).filter((m) => hits(m.name));
+  const listLoading = cat === "community" ? community.loading : mine.loading;
   const themes: Theme[] = useMemo(() => [...(myThemes.data?.data ?? []).map((x) => ({ ...x, mine: true })), ...BUILTIN_THEMES], [myThemes.data]);
-  const [themeId, setThemeId] = useState<string | null>(initialMineId ? null : BUILTIN_THEMES[0].id);
+  const [themeId, setThemeId] = useState<string | null>(initialMineId || initialCommunityId ? null : BUILTIN_THEMES[0].id);
   const theme = themes.find((x) => x.id === themeId) ?? null;
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Template | null>(null);
@@ -71,11 +90,19 @@ export function DesignGallery({
   const [editingTheme, setEditingTheme] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    const m = initialMineId && mine.data?.data.find((x) => x.id === initialMineId);
+    const id = initialMineId || initialCommunityId;
+    const m = id && listed.find((x) => x.id === id);
     if (m && !pickedMine) setPickedMine(m);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mine.data]);
-  const visible = cat === "all" ? TEMPLATES : cat === "mine" ? [] : TEMPLATES.filter((x) => x.category === cat);
+  }, [mine.data, community.data]);
+  const tplName = (tpl: Template) => t(`design.tpl_${tpl.id.replace("-", "_")}` as MessageKey);
+  // 테마도 같은 검색어로 (맞는 테마가 하나도 없으면 다 보여 줌 — 템플릿을 찾는 중일 수 있어서)
+  const themeHits = themes.filter((th) => hits(`${th.name} ${th.mine ? "" : t(`design.th_${th.id}` as MessageKey)} ${THEME_KEYWORDS[th.id] ?? ""}`));
+  const inCat = cat === "all" ? TEMPLATES : cat === "mine" || cat === "community" ? [] : TEMPLATES.filter((x) => x.category === cat);
+  const tplHits = inCat.filter((tpl) => hits(`${tplName(tpl)} ${tpl.name} ${t(`design.${tpl.category}` as MessageKey)} ${TEMPLATE_KEYWORDS[tpl.id] ?? ""}`));
+  // 테마 이름으로 찾은 거면(템플릿은 안 맞고 테마만 맞음) 템플릿은 다 보여 줌
+  const visible = words.length && !tplHits.length && themeHits.length ? inCat : tplHits;
+  const shownThemes = words.length && themeHits.length ? themes.filter((th) => themeHits.includes(th) || th.id === themeId) : themes;
   const shown = theme ?? BUILTIN_THEMES[0];
 
   // 화면을 연 동안 뒤 페이지가 스크롤되지 않게, Esc 로 닫기
@@ -164,7 +191,7 @@ export function DesignGallery({
       } else if (pickedMine) {
         post = pickedMine.post_type;
         name = pickedMine.name;
-        const full = await api<{ pages: string[] }>(`/studio/templates/${pickedMine.id}`);
+        const full = await api<{ pages: string[] }>(pickedMine.community ? `/community/templates/${pickedMine.id}` : `/studio/templates/${pickedMine.id}`);
         setBusy({ done: 0, total: full.pages.length });
         for (let i = 0; i < full.pages.length; i++) {
           const saved = JSON.parse(full.pages[i]) as { w: number; h: number; canvas: { objects?: unknown[] } };
@@ -189,6 +216,8 @@ export function DesignGallery({
       const res = await fetch("/api/py/studio/designs", { method: "POST", body: form, credentials: "include" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.detail || res.status);
+      // 모두의 템플릿으로 만들었으면 사용 수 +1 (인기순에 반영)
+      if (pickedMine?.community) void api(`/community/templates/${pickedMine.id}/use`, { method: "POST" }).catch(() => undefined);
       onCreated(data as Job);
     } catch (e) {
       setError(t("design.failed", { e: e instanceof Error ? e.message : toApiError(e).message }));
@@ -213,6 +242,7 @@ export function DesignGallery({
   const cats: { key: Cat; label: string }[] = [
     { key: "all", label: t("design.all") },
     ...CATEGORIES.map((c) => ({ key: c.key as Cat, label: t(`design.${c.key}` as MessageKey) })),
+    { key: "community", label: t("design.community") },
     { key: "mine", label: t("design.mine") },
   ];
   const chosen = picked || pickedMine;
@@ -221,7 +251,16 @@ export function DesignGallery({
   return createPortal(
     <div className="fixed inset-0 z-[90] flex flex-col bg-surface-0" role="dialog" aria-modal="true" aria-label={t("design.title")}>
       <header className="flex items-center gap-2 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <h2 className="flex-1 text-[16px] font-semibold">{t("design.title")}</h2>
+        <h2 className="shrink-0 text-[16px] font-semibold">{t("design.title")}</h2>
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          maxLength={40}
+          placeholder={t("design.searchAll")}
+          aria-label={t("design.searchAll")}
+          className="ml-2 min-w-0 flex-1 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[13px] sm:max-w-sm"
+        />
         <button type="button" onClick={onClose} disabled={!!busy} className="rounded-md px-2 py-1.5 text-[14px] text-fg-2 hover:bg-surface-2">
           {t("design.close")}
         </button>
@@ -237,7 +276,7 @@ export function DesignGallery({
               setCat(c.key);
               setPicked(null);
               setPickedMine(null);
-              if (c.key === "mine") setThemeId(null);
+              if (c.key === "mine" || c.key === "community") setThemeId(null);
               else if (!themeId) setThemeId(BUILTIN_THEMES[0].id);
             }}
             className={cx("shrink-0 rounded-full border px-3 py-1.5 text-[13px]", cat === c.key ? "border-fg bg-fg text-surface-0" : "border-line text-fg-2")}
@@ -250,7 +289,7 @@ export function DesignGallery({
       {/* 테마 */}
       <div className="flex items-center gap-2 overflow-x-auto px-4 py-2.5">
         <span className="shrink-0 text-[12px] text-fg-3">{t("design.theme")}</span>
-        {cat === "mine" && (
+        {(cat === "mine" || cat === "community") && (
           <button
             type="button"
             onClick={() => setThemeId(null)}
@@ -259,7 +298,7 @@ export function DesignGallery({
             {t("design.keepColors")}
           </button>
         )}
-        {themes.map((th) => (
+        {shownThemes.map((th) => (
           <span key={th.id} className="relative shrink-0">
             <button
               type="button"
@@ -294,24 +333,26 @@ export function DesignGallery({
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* 템플릿 목록 */}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-          {cat === "mine" ? (
-            mine.loading ? (
+          {cat === "mine" || cat === "community" ? (
+            listLoading ? (
               <Spinner className="mx-auto mt-10 size-6" />
-            ) : !mine.data?.data.length ? (
+            ) : !listed.length ? (
               <div className="mt-8 space-y-3 text-center">
-                <p className="text-[13px] text-fg-3">{t("design.noMine")}</p>
+                <p className="text-[13px] text-fg-3">{cat === "community" ? t("design.noCommunity") : t("design.noMine")}</p>
                 <Button onClick={() => router.push("/admin/templates?new=1")}>{t("design.newTemplate")}</Button>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                <button
-                  type="button"
-                  onClick={() => router.push("/admin/templates?new=1")}
-                  className="flex aspect-[4/5] items-center justify-center rounded-lg border-2 border-dashed border-line text-[13px] text-fg-2 hover:border-line-strong"
-                >
-                  {t("design.newTemplate")}
-                </button>
-                {mine.data.data.map((m) => (
+                {cat === "mine" && (
+                  <button
+                    type="button"
+                    onClick={() => router.push("/admin/templates?new=1")}
+                    className="flex aspect-[4/5] items-center justify-center rounded-lg border-2 border-dashed border-line text-[13px] text-fg-2 hover:border-line-strong"
+                  >
+                    {t("design.newTemplate")}
+                  </button>
+                )}
+                {listed.map((m) => (
                   <div key={m.id} className="relative">
                     <button
                       type="button"
@@ -325,17 +366,25 @@ export function DesignGallery({
                       <img src={m.thumb_url.replace(/^https?:\/\/[^/]+/, "")} alt="" className={cx("w-full object-cover", m.post_type === "story" ? "aspect-[9/16]" : "aspect-[4/5]")} />
                     </button>
                     <div className="mt-1 flex items-center gap-1 text-[12px]">
-                      <span className="flex-1 truncate">{m.name}</span>
+                      <span className="flex-1 truncate">
+                        {m.name}
+                        {m.author && <span className="text-fg-3"> · {m.author.name}</span>}
+                      </span>
                       <span className="text-fg-3">{m.pages}{t("design.pages")}</span>
-                      <button type="button" onClick={() => removeMine(m)} className="px-1 text-fg-3 hover:text-fg" aria-label={t("design.deleteTemplate", { name: m.name })}>
-                        ×
-                      </button>
+                      {!m.community && (
+                        <button type="button" onClick={() => removeMine(m)} className="px-1 text-fg-3 hover:text-fg" aria-label={t("design.deleteTemplate", { name: m.name })}>
+                          ×
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
             )
           ) : (
+            !visible.length ? (
+              <p className="mt-8 text-center text-[13px] text-fg-3">{t("design.noResult", { q: search.trim() })}</p>
+            ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {visible.map((tpl) => {
                 const url = thumbs[`${tpl.id}|${shown.id}`];
@@ -374,6 +423,7 @@ export function DesignGallery({
                 );
               })}
             </div>
+            )
           )}
         </div>
 

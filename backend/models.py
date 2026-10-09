@@ -65,6 +65,33 @@ class DesignTemplate(Base):
     bg_ids: Mapped[Any] = mapped_column(JSON, default=list)
     thumb_id: Mapped[str] = mapped_column(String(40), default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # ── 모두의 템플릿 (공개하면 다른 회원이 둘러보고 쓰고, 가져와 고쳐 다시 공개할 수 있음) ──
+    is_public: Mapped[int] = mapped_column(Integer, default=0)
+    hidden: Mapped[int] = mapped_column(Integer, default=0)  # 신고가 쌓여 숨김
+    published_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    category: Mapped[str] = mapped_column(String(20), default="")
+    tags: Mapped[Any] = mapped_column(JSON, default=list)
+    description: Mapped[str] = mapped_column(Text, default="")
+    author_name: Mapped[str] = mapped_column(String(40), default="")  # 공개할 때 정한 제작자 표시 이름 (실명 대신)
+    remix_of: Mapped[str] = mapped_column(String(24), default="")  # 가져와 고친 원본 템플릿
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    saves: Mapped[int] = mapped_column(Integer, default=0)
+    reports: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TemplateReaction(Base):
+    """모두의 템플릿에 남긴 좋아요·보관·신고 (회원마다 템플릿당 하나씩)"""
+
+    __tablename__ = "template_reactions"
+    __table_args__ = (UniqueConstraint("user_id", "template_id", "kind", name="uq_template_reaction"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    template_id: Mapped[str] = mapped_column(String(24), index=True)
+    kind: Mapped[str] = mapped_column(String(10))  # like | save | report
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class EmailCode(Base):

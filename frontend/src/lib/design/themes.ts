@@ -43,6 +43,30 @@ export const BUILTIN_THEMES: Theme[] = [
   t("peach", "피치", { bg: "#fff0e6", surface: "#ffffff", text: "#4a2c1d", primary: "#ff9a76", on_primary: "#ffffff", accent: "#ffd6c2" }, "gaegu"),
 ];
 
+/** 검색용 낱말 (색·분위기로 찾기) */
+export const THEME_KEYWORDS: Record<string, string> = {
+  cream: "크림 베이지 주황 오렌지 따뜻 밝은 cream",
+  midnight: "미드나잇 남색 네이비 어두운 다크 하늘 dark navy",
+  mint: "민트 초록 그린 상큼 산뜻 green",
+  pink: "핑크 분홍 러블리 귀여운 pink",
+  classic: "클래식 갈색 브라운 고급 명조 classic",
+  mono: "모노 흑백 검정 하양 미니멀 심플 black white",
+  vivid: "비비드 파랑 블루 노랑 쨍한 강렬 blue",
+  retro: "레트로 빨강 레드 복고 retro",
+  natural: "내추럴 초록 베이지 자연 차분 natural",
+  neon: "네온 형광 어두운 다크 연두 neon",
+  butter: "버터 노랑 옐로 귀여운 yellow",
+  lavender: "라벤더 보라 연보라 퍼플 purple",
+  olive: "올리브 카키 초록 차분 olive",
+  coral: "코랄 산호 주황 핑크 분홍 coral",
+  babyblue: "베이비블루 하늘 파랑 블루 산뜻 blue",
+  burgundy: "버건디 와인 자주 고급 burgundy",
+  goldblack: "블랙골드 금색 검정 고급 럭셔리 gold",
+  y2k: "y2k 핑크 분홍 하늘 형광 레트로",
+  forest: "포레스트 숲 초록 어두운 다크 green",
+  peach: "피치 복숭아 살구 분홍 주황 따뜻 peach",
+};
+
 /** 토큰 → 실제 색 */
 export function colorOf(theme: Theme, token: ColorToken | undefined): string {
   if (!token) return "transparent";

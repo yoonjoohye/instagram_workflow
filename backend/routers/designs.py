@@ -18,7 +18,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from ..db import get_db
 from ..deps import current_account, current_user
-from ..models import Account, DesignTemplate, GenerationJob, MediaBlob, User
+from ..models import Account, DesignTemplate, GenerationJob, MediaBlob, TemplateReaction, User
 from ..services import studio as svc
 from .studio import MAX_LAYERS_BYTES, MAX_UPLOAD_BYTES, UPLOAD_SIDE, _media_url, _save_blob, _sync_kind
 from .workflow import _job_dict
@@ -171,6 +171,13 @@ def _template_item(t: DesignTemplate, full: bool = False) -> dict:
     return item
 
 
+def _mine(t: DesignTemplate) -> dict:
+    """내 템플릿 목록용: 공개 여부·반응까지"""
+    return {**_template_item(t), "is_public": bool(t.is_public), "hidden": bool(t.hidden), "category": t.category,
+            "tags": list(t.tags or []), "description": t.description, "author_name": t.author_name,
+            "uses": t.uses or 0, "likes": t.likes or 0, "saves": t.saves or 0, "remix_of": t.remix_of}
+
+
 def _own_template(db: Session, user: User, template_id: str) -> DesignTemplate:
     t = db.get(DesignTemplate, template_id)
     if t is None or t.user_id != user.id:
@@ -181,7 +188,7 @@ def _own_template(db: Session, user: User, template_id: str) -> DesignTemplate:
 @router.get("/studio/templates")
 def list_templates(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     rows = db.query(DesignTemplate).filter(DesignTemplate.user_id == user.id).order_by(DesignTemplate.created_at.desc()).all()
-    return {"data": [_template_item(t) for t in rows]}
+    return {"data": [_mine(t) for t in rows]}
 
 
 @router.get("/studio/templates/{template_id}")
@@ -249,6 +256,7 @@ def delete_template(template_id: str, user: User = Depends(current_user), db: Se
         blob = db.get(MediaBlob, blob_id) if blob_id else None
         if blob is not None and blob.kind == "template":
             db.delete(blob)
+    db.query(TemplateReaction).filter(TemplateReaction.template_id == t.id).delete()  # 모두의 템플릿 좋아요·보관·신고
     db.delete(t)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
