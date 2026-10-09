@@ -2079,7 +2079,8 @@ export function ImageEditor({
             ref={holder}
             className={cx(
               "relative flex min-h-0 flex-1 items-center justify-center bg-[repeating-conic-gradient(#18181b_0_25%,#111113_0_50%)] bg-[length:18px_18px] [&_.canvas-container]:outline [&_.canvas-container]:outline-1 [&_.canvas-container]:outline-white/35",
-              clip ? "max-lg:h-[42dvh]" : "max-lg:h-[54dvh]",
+              // svh: 주소창이 숨었다 나타나도 그대로인 화면 높이
+              clip ? "max-lg:h-[42svh]" : "max-lg:h-[54svh]",
               "max-lg:flex-none",
             )}
           >
@@ -2279,7 +2280,8 @@ export function ImageEditor({
 
           {/* 도구 패널 */}
           <div className="flex flex-col border-t border-white/10 bg-[#141416] px-3 pt-3 max-lg:min-h-0 max-lg:flex-1">
-            <div className="min-h-[104px] text-[13px] max-lg:min-h-0 max-lg:flex-1 max-lg:overflow-y-auto">
+            {/* 도구 칸 높이를 고정해 (글자를 고르면 버튼이 늘어나도) 편집 화면 크기가 바뀌지 않게 — 넘치면 이 안에서만 스크롤 */}
+            <div className="text-[13px] max-lg:min-h-0 max-lg:flex-1 max-lg:overflow-y-auto lg:h-[min(250px,28vh)] lg:overflow-y-auto lg:pr-1">
               {tab === "text" && (
                 <div className="space-y-2.5">
                   <div>
