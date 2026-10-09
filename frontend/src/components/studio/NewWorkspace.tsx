@@ -144,6 +144,8 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="min-w-0 space-y-6">
+        {/* 휴대폰·태블릿: 올라갈 모습(게시물·스토리 미리보기)을 맨 위에 (넓은 화면은 오른쪽에 고정) */}
+        <div className="lg:hidden">{preview}</div>
         <WorkspaceSettings settings={settings} locked={false} onSave={saveLocal} defaultOpen />
 
         <Card title={t("studio.mediaTitle")} subtitle={t("studio.newMediaHint")}>
@@ -186,8 +188,6 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
           />
         )}
 
-        {/* 휴대폰·태블릿: 미리보기를 편집 사이에 */}
-        <div className="lg:hidden">{preview}</div>
 
         {!story && (
           <Card title={t("studio.captionTitle")}>

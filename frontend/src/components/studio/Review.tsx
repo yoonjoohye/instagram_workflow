@@ -257,6 +257,8 @@ export function Review({
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       {/* ── 왼쪽: 편집 ── */}
       <div className="min-w-0 space-y-6">
+        {/* 휴대폰·태블릿: 올라갈 모습(게시물·스토리 미리보기)을 맨 위에 (넓은 화면은 오른쪽에 고정) */}
+        <div className="lg:hidden">{preview}</div>
         <WorkspaceSettings
           settings={job.settings ?? DEFAULT_SETTINGS}
           locked={locked}
@@ -352,8 +354,6 @@ export function Review({
           ))}
         </Card>
 
-        {/* 휴대폰·태블릿: 미리보기를 편집 사이에 (넓은 화면은 오른쪽에 고정) */}
-        <div className="lg:hidden">{preview}</div>
 
 
         {isStory ? (
