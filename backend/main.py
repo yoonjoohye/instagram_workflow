@@ -11,7 +11,7 @@ from starlette.requests import Request
 from .config import settings
 from .db import init_db
 from .i18n import lang_of, translate_payload
-from .routers import auth, autoreply, filters, members, stickers, insights, sentiment, video, studio, webhooks, workflow
+from .routers import auth, autoreply, designs, filters, members, stickers, insights, sentiment, video, studio, webhooks, workflow
 from .services.meta_graph import GraphError
 
 
@@ -95,3 +95,4 @@ app.include_router(studio.router)
 app.include_router(video.router)
 app.include_router(stickers.router)
 app.include_router(filters.router)
+app.include_router(designs.router)

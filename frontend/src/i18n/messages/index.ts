@@ -2,6 +2,7 @@ import auth from "./auth";
 import autoreply from "./autoreply";
 import common from "./common";
 import dashboard from "./dashboard";
+import design from "./design";
 import editor from "./editor";
 import format from "./format";
 import jobs from "./jobs";
@@ -14,4 +15,4 @@ import studio from "./studio";
 import templates from "./templates";
 
 /** 네임스페이스별 문구. 키는 t("studio.title") 처럼 "네임스페이스.키" 로 씁니다. */
-export const messages = { common, auth, format, landing, shell, dashboard, studio, posts, jobs, autoreply, legal, templates, editor, media };
+export const messages = { common, auth, format, landing, shell, dashboard, studio, posts, jobs, autoreply, legal, templates, editor, media, design };

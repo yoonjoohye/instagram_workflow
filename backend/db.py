@@ -44,7 +44,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 _ADDED_COLUMNS = {
     "insight_snapshots": {"totals_synced": "INTEGER DEFAULT 0"},
     "generation_jobs": {"plan": "JSON"},
-    "users": {"birth_date": "DATE", "phone": "VARCHAR(20) DEFAULT ''", "filter_presets": "JSON"},
+    "users": {"birth_date": "DATE", "phone": "VARCHAR(20) DEFAULT ''", "filter_presets": "JSON", "design_themes": "JSON"},
     "accounts": {
         "user_id": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
         "provider": "VARCHAR(16) DEFAULT 'instagram'",

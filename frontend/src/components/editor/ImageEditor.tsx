@@ -10,6 +10,10 @@
  *    편집 전 원본(base)은 따로 남아 있어 몇 번을 고쳐도 화질이 떨어지지 않습니다.
  *  - 오른쪽(넓은 화면)·미리보기 버튼(휴대폰)에 올라갈 모습을 편집할 때마다 보여 줍니다.
  */
+import type { MessageKey } from "@/i18n/core";
+import { applyTheme, exportPage, fitToSlot, type Tk } from "@/lib/design/render";
+import { BUILTIN_THEMES, type Theme } from "@/lib/design/themes";
+import { fontFamily, fontKeyOf, loadFont } from "@/lib/fonts";
 import { toBrowserImage } from "@/lib/heic";
 import type * as F from "fabric";
 import { filmFilters } from "./filmFilters";
@@ -28,7 +32,7 @@ import { api, toApiError, useApi } from "@/lib/api";
 import { mediaSrc } from "@/lib/format";
 import type { Asset } from "@/lib/types";
 
-type Tab = "text" | "sticker" | "draw" | "adjust" | "bg" | "crop" | `x:${string}`;
+type Tab = "text" | "sticker" | "draw" | "adjust" | "bg" | "crop" | "theme" | `x:${string}`;
 type Brush = "pen" | "marker" | "neon" | "eraser";
 type Layers = { v: 1; w: number; h: number; canvas: object; adjust?: Adjust; crop?: Crop };
 type HslKey = `hsl${"H" | "S" | "L"}_${Band}`;
@@ -82,7 +86,8 @@ type FontItem = { key: string; label: string; preview: string };
 type Named = F.FabricObject & { name?: string; isEditing?: boolean; orig?: string; tStart?: number; tEnd?: number };
 type Sticker = { id: string; url: string; width: number; height: number };
 // 편집 기록·저장에 함께 남길 우리 속성 (orig: 배경을 바꾸기 전 원본 사진 주소)
-const KEEP = ["name", "selectable", "evented", "link", "orig", "tStart", "tEnd"];
+// tk: 디자인 템플릿의 테마 토큰 (테마를 바꾸면 이걸 보고 다시 칠함)
+const KEEP = ["name", "selectable", "evented", "link", "orig", "tStart", "tEnd", "tk"];
 // 편집기 복사·붙여넣기 (다른 사진 편집기를 열어도 남음 — 같은 페이지 안에서)
 let clipboard: F.FabricObject | null = null;
 let pasteCount = 0;
@@ -251,21 +256,6 @@ const GRADES = [
   { label: "editor.gradeMidtones", hue: "gradeMidHue", sat: "gradeMidSat" },
   { label: "editor.gradeHighlights", hue: "gradeHighHue", sat: "gradeHighSat" },
 ] as const;
-
-const faceName = (key: string) => `ffont-${key}`;
-// 글씨체에 없는 이모지는 기기의 이모지 글꼴로 그립니다 (없으면 빈칸·네모로 보임)
-const fontFamily = (key: string) => `"${faceName(key)}", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-const fontKeyOf = (family: string | undefined) => family?.match(/ffont-([a-z_]+)/)?.[1];
-const loadedFonts = new Map<string, Promise<void>>();
-
-/** 서버 글씨체를 브라우저에 등록 (한 번만) */
-function loadFont(key: string): Promise<void> {
-  if (!loadedFonts.has(key)) {
-    const face = new FontFace(faceName(key), `url(/api/py/studio/fonts/${key}.font)`);
-    loadedFonts.set(key, face.load().then((f) => void document.fonts.add(f)).catch(() => undefined));
-  }
-  return loadedFonts.get(key)!;
-}
 
 const blobIdOf = (url: string) => url.split("/media/").pop()!.replace(/\.jpg$/, "");
 const SPECIAL = new Set(["base", "vignette", "backdrop"]);
@@ -1108,6 +1098,69 @@ export function ImageEditor({
     await pasteClipboard();
   }
 
+  // ── 디자인 템플릿: 테마 다시 입히기 · 내 템플릿으로 저장 · 사진 칸 바꾸기 ─────────────
+  const myThemes = useApi<{ data: Theme[] }>(overlay ? null : "/studio/themes");
+  const [tplName, setTplName] = useState("");
+  const [tplSaved, setTplSaved] = useState(false);
+  const slotInput = useRef<HTMLInputElement>(null);
+  async function themeThisPage(th: Theme) {
+    const c = canvas.current;
+    if (!c || !fab.current) return;
+    setAiBusy({ label: t("editor.applying") });
+    try {
+      await applyTheme(fab.current, c, th, size.current);
+      c.requestRenderAll();
+      snapshot();
+    } finally {
+      setAiBusy(null);
+    }
+  }
+  async function saveAsTemplate() {
+    const c = canvas.current;
+    if (!c || !tplName.trim()) return;
+    setAiBusy({ label: t("design.saving") });
+    setError(undefined);
+    try {
+      c.discardActiveObject();
+      c.renderAll();
+      const out = await exportPage(c, size.current, zoom.current);
+      const thumb = await (await fetch(c.toDataURL({ format: "jpeg", quality: 0.82, multiplier: 270 / size.current.w / zoom.current }))).blob();
+      const body = new FormData();
+      body.append("pages", JSON.stringify([out.layers]));
+      body.append("bgs", out.bg, "bg.jpg");
+      body.append("thumb", thumb, "thumb.jpg");
+      body.append("name", tplName.trim());
+      body.append("post_type", preview?.kind === "story" ? "story" : "feed");
+      const res = await fetch("/api/py/studio/templates", { method: "POST", body, credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || res.status);
+      setTplSaved(true);
+      setTplName("");
+      setTimeout(() => setTplSaved(false), 3000);
+    } catch (e) {
+      setError(t("editor.saveFailed", { e: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+  async function replaceSlotPhoto(file: File) {
+    const o = canvas.current?.getActiveObject() as (F.FabricImage & { tk?: Tk }) | undefined;
+    const f = fab.current;
+    if (!o?.tk?.slot || !f) return;
+    setAiBusy({ label: t("editor.applying") });
+    try {
+      const url = await uploadLayer(await toBrowserImage(file));
+      await o.setSrc(mediaSrc(url), { crossOrigin: "anonymous" });
+      fitToSlot(f, o, o.tk.slot);
+      canvas.current!.requestRenderAll();
+      snapshot();
+    } catch (e) {
+      setError(t("editor.stickerFailed", { e: toApiError(e).message }));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
   async function uploadLayer(blob: Blob): Promise<string> {
     const body = new FormData();
     body.append("file", blob, "layer.png");
@@ -1914,6 +1967,7 @@ export function ImageEditor({
     { key: "adjust", label: t("editor.tabAdjust"), icon: "◐" },
     { key: "bg", label: t("editor.tabBackground"), icon: "✂" },
     { key: "crop", label: t("editor.tabCrop"), icon: "⤢" },
+    { key: "theme", label: t("design.tabTheme"), icon: "🎨" },
   ]
     .filter((x) => !overlay || x.key === "text" || x.key === "sticker" || x.key === "draw")
     .concat((extras?.tabs ?? []).map((x) => ({ key: `x:${x.key}` as Tab, label: x.label, icon: x.icon }))) as { key: Tab; label: string; icon: string }[];
@@ -1995,6 +2049,17 @@ export function ImageEditor({
               />
             )}
             <canvas ref={canvasEl} />
+            <input
+              ref={slotInput}
+              type="file"
+              accept="image/*,.heic,.heif"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void replaceSlotPhoto(file);
+              }}
+            />
             {ready && (guides || snap.warn) && guideKind && view.w > 0 && <SizeGuides kind={guideKind} w={view.w} h={view.h} warn={snap.warn} />}
             {/* 가운데에 맞았을 때 선 (인스타 스토리처럼) */}
             {(snap.v || snap.h) && view.w > 0 && (
@@ -2045,7 +2110,12 @@ export function ImageEditor({
               </div>
             )}
             {selected && !SPECIAL.has(selected.name ?? "") && (
-              <div className="absolute top-3 right-3 flex gap-1">
+              <div className="absolute top-3 right-3 flex flex-wrap justify-end gap-1">
+                {(selected as Named & { tk?: Tk }).tk?.slot && (
+                  <button type="button" onClick={() => slotInput.current?.click()} className="rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-black">
+                    {t("design.replacePhoto")}
+                  </button>
+                )}
                 <button type="button" onClick={duplicateSelected} className="rounded-full bg-black/60 px-3 py-1.5 text-[12px]" title="Ctrl/⌘ + C · V">
                   {t("editor.duplicate")}
                 </button>
@@ -2613,6 +2683,44 @@ export function ImageEditor({
               )}
 
               {extraPanel}
+              {tab === "theme" && (
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <p className="text-[12px] font-semibold text-white/80">{t("design.applyTheme")}</p>
+                    <p className="text-[11px] text-white/45">{t("design.applyThemeHint")}</p>
+                    <Row>
+                      {[...(myThemes.data?.data ?? []).map((x) => ({ ...x, mine: true })), ...BUILTIN_THEMES].map((th) => (
+                        <Chip key={th.id} onClick={() => themeThisPage(th)}>
+                          <span className="mr-1.5 inline-flex overflow-hidden rounded-full align-[-2px]">
+                            {[th.colors.bg, th.colors.primary, th.colors.accent].map((c, i) => (
+                              <span key={i} className="size-3" style={{ background: c }} />
+                            ))}
+                          </span>
+                          {"mine" in th ? th.name : t(`design.th_${th.id}` as MessageKey)}
+                        </Chip>
+                      ))}
+                    </Row>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 border-t border-white/10 pt-3">
+                    <input
+                      value={tplName}
+                      onChange={(e) => setTplName(e.target.value)}
+                      maxLength={40}
+                      placeholder={t("design.templateName")}
+                      className="min-w-0 flex-1 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-[13px] text-white placeholder:text-white/35"
+                    />
+                    <button
+                      type="button"
+                      onClick={saveAsTemplate}
+                      disabled={!tplName.trim() || !!aiBusy}
+                      className="rounded-lg bg-white px-3 py-1.5 text-[13px] font-semibold text-black disabled:opacity-50"
+                    >
+                      {t("design.saveAsTemplate")}
+                    </button>
+                  </div>
+                  {tplSaved && <p className="text-[12px] text-emerald-300">✓ {t("design.savedTemplate")}</p>}
+                </div>
+              )}
               {tab === "crop" && (
                 <div className="space-y-2">
                   <p className="text-[11px] text-white/50">{t("editor.cropHint")}</p>

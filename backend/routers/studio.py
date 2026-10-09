@@ -779,11 +779,11 @@ def reorder(job_id: int, body: ReorderIn, account: Account = Depends(current_acc
 
 
 @router.get("/studio/fonts/{key}.font")
-def font_file(key: str) -> Response:
-    """편집기(브라우저)에서 같은 글씨체를 쓰도록 제목용 글꼴 파일을 줍니다."""
+def font_file(key: str, variant: str = "title") -> Response:
+    """편집기(브라우저)에서 같은 글씨체를 쓰도록 글꼴 파일을 줍니다 (variant=body 면 본문용 — 굵기가 두 가지인 글씨체)."""
     if key not in svc.FONTS:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "없는 글씨체입니다.")
-    path = svc.fonts.FONT_DIR / svc.FONTS[key]["title"]
+    path = svc.fonts.FONT_DIR / svc.FONTS[key]["body" if variant == "body" else "title"]
     media = "font/otf" if path.suffix == ".otf" else "font/ttf"
     return Response(path.read_bytes(), media_type=media, headers={"Cache-Control": "public, max-age=2592000, immutable"})
 

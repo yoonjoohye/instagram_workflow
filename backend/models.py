@@ -39,6 +39,8 @@ class User(Base):
     phone: Mapped[str] = mapped_column(String(20), default="")  # 숫자만 (예: 01012345678)
     # 사진 편집기 '내 필터' — [{id, name, values{보정 항목: 값}}] (모든 Instagram 계정에서 같이 씀)
     filter_presets: Mapped[Any] = mapped_column(JSON, default=list)
+    # 디자인 템플릿 '내 테마' — [{id, name, colors{bg,surface,text,primary,on_primary,accent}, fonts{heading,body}}]
+    design_themes: Mapped[Any] = mapped_column(JSON, default=list)
     email_verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     # 비밀번호를 바꾸면 1 올려 다른 기기의 로그인(세션)을 끊습니다.
     session_version: Mapped[int] = mapped_column(Integer, default=1)
@@ -47,6 +49,22 @@ class User(Base):
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class DesignTemplate(Base):
+    """디자인 템플릿 '내 템플릿': 사진 편집기에서 꾸민 장을 저장해 두고 다시 씀 (회원별).
+    pages 는 편집기 상태(JSON 문자열) 목록 — 바탕 그림 주소 자리는 __BG{i}__ 로 두고 bg_ids 의 그림으로 채움."""
+
+    __tablename__ = "design_templates"
+
+    id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(40), default="")
+    post_type: Mapped[str] = mapped_column(String(10), default="feed")  # feed | story
+    pages: Mapped[Any] = mapped_column(JSON, default=list)
+    bg_ids: Mapped[Any] = mapped_column(JSON, default=list)
+    thumb_id: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class EmailCode(Base):

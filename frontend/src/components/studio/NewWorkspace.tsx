@@ -4,6 +4,7 @@
  *  컨셉·주제·캡션·해시태그는 화면에만 두었다가(사진 없이도 ✨ AI 로 쓸 수 있음), 사진·동영상을 넣거나
  *  AI 로 이미지를 만드는 순간 그 내용과 함께 작업을 만들고 그 작업 공간으로 이어집니다. */
 
+import { DesignGallery } from "@/components/design/DesignGallery";
 import { useState } from "react";
 import { useMe } from "@/components/AdminShell";
 import { CaptionAiPanel, type CaptionPrefs, type CaptionWritten } from "@/components/studio/CaptionAiPanel";
@@ -37,6 +38,7 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
   const [hashtags, setHashtags] = useState<string[]>([]);
   const [prefs, setPrefs] = useState<CaptionPrefs>({ caption_tone: "casual", caption_length: "auto", caption_requests: [] });
   const story = settings.post_type === "story";
+  const [designing, setDesigning] = useState(false);
   const finalCaption = composeCaption(caption, hashtags);
 
   const saveLocal = (patch: SettingsPatch) => {
@@ -145,6 +147,18 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
         <WorkspaceSettings settings={settings} locked={false} onSave={saveLocal} defaultOpen />
 
         <Card title={t("studio.mediaTitle")} subtitle={t("studio.newMediaHint")}>
+          {/* 망고보드처럼 디자인된 틀을 골라 시작 */}
+          <button
+            type="button"
+            onClick={() => setDesigning(true)}
+            className="mb-3 flex w-full items-center gap-3 rounded-lg border border-line bg-surface-2 px-4 py-3 text-left hover:border-line-strong"
+          >
+            <span className="flex-1">
+              <span className="block text-[14px] font-semibold">{t("design.open")}</span>
+              <span className="block text-[12px] text-fg-3">{t("design.openHint")}</span>
+            </span>
+            <span className="text-fg-3">›</span>
+          </button>
           <MediaStrip assets={[]} onAdd={addFiles} onGenerate={generate} />
           <div className="mt-4">
             <PhotoLibraryPanel busy={finding} canFind={settings.topic.trim().length >= 2} onReadyChange={() => {}} onFind={findFromLibrary} />
@@ -160,6 +174,17 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
             </div>
           )}
         </Card>
+
+        {designing && (
+          <DesignGallery
+            story={story}
+            onClose={() => setDesigning(false)}
+            onCreated={(job) => {
+              setDesigning(false);
+              onCreated(job);
+            }}
+          />
+        )}
 
         {/* 휴대폰·태블릿: 미리보기를 편집 사이에 */}
         <div className="lg:hidden">{preview}</div>
