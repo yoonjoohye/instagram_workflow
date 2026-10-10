@@ -1,7 +1,7 @@
 // 백엔드(FastAPI) 응답 형태. backend/routers/* 와 1:1 로 맞춥니다.
 
 export type MediaKind = "IMAGE" | "CAROUSEL" | "REELS" | "STORIES";
-export type JobStatus = "draft" | "generating" | "ready" | "publishing" | "published" | "failed" | "deleted" | "expired"; // deleted = Instagram 에서 지움, expired = 스토리 24시간 끝남
+export type JobStatus = "draft" | "generating" | "ready" | "scheduled" | "publishing" | "published" | "failed" | "deleted" | "expired"; // deleted = Instagram 에서 지움, expired = 스토리 24시간 끝남
 
 export type Me = {
   id: number;
@@ -85,7 +85,19 @@ export type Job = {
   story_progress?: { done: number; total: number } | null;
   /** 작업 공간의 컨셉·주제 메모 (AI 버튼들이 참고) */
   settings?: JobSettings;
+  /** 예약 게시 시각 (status=scheduled) · 매주 반복 */
+  scheduled_at?: string | null;
+  repeat_weekly?: boolean;
+  /** 매주 반복으로 만들어 둔 다음 주 초안 */
+  repeat?: { of: number; suggest_at: string } | null;
+  /** 게시 후 성과 (매일 갱신) */
+  perf?: PostPerf | null;
+  template?: { kind: "builtin" | "design"; id: string } | null;
 };
+
+export type PostPerf = { reach: number; likes: number; comments: number; saved: number; shares: number };
+/** 템플릿으로 올린 게시물들의 평균 성과 (rate = 도달 대비 반응 %) */
+export type TemplatePerf = PostPerf & { posts: number; rate: number };
 
 export type CaptionTone = "casual" | "polite";
 export type CaptionLength = "auto" | "short" | "medium" | "long";

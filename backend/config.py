@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     threads_app_secret: str = ""
 
     cron_secret: str = ""
+    # 예약 게시 확인용 (GitHub Actions 가 10분마다 /cron/publish-due 를 부를 때 — Vercel 무료 요금제 크론은 하루 한 번뿐이라)
+    scheduler_secret: str = ""
 
     # 이메일 인증번호 발송 (Resend: https://resend.com → API Keys). 비워 두면 로컬에서는 화면·서버 로그에 번호를 보여 줍니다.
     resend_api_key: str = ""

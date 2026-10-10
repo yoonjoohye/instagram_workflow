@@ -2,7 +2,7 @@
 
 - 공개는 바로 (신고가 REPORT_HIDE 번 쌓이면 자동으로 숨김)
 - 제작자는 공개할 때 정한 이름으로 표시 (회원 실명은 보이지 않음)
-- 인기순 = 사용 수 + 좋아요·보관 가중치, 최신순 = 공개한 순서
+- 인기순 = 사용 수 + 좋아요·보관 가중치, 최신순 = 공개한 순서, 성과순 = 이 템플릿으로 실제 게시한 글의 반응률
 - 리믹스: 원본을 내 템플릿으로 복사(그림도 복사) — 다시 공개하면 '원본: OO님의 템플릿'이 따라붙음
 """
 from __future__ import annotations
@@ -18,11 +18,13 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import current_account, current_user
 from ..models import Account, DesignTemplate, MediaBlob, TemplateReaction, User
+from ..services import perf
 from .designs import _mine, _own_template, _template_item
 
 router = APIRouter(tags=["community"])
 
 REPORT_HIDE = 3
+PERF_MIN = 2  # 성과순에서 앞에 세우려면 이만큼 게시물이 모여야
 PAGE = 24
 CATEGORIES = {"cardnews", "photo", "notice", "promo", "story", "etc"}
 
@@ -47,8 +49,9 @@ def _card(t: DesignTemplate, mine: dict[str, set[str]], origins: dict[str, Desig
     }
 
 
-def _cards(db: Session, user: User, rows: list[DesignTemplate]) -> list[dict]:
+def _cards(db: Session, user: User, rows: list[DesignTemplate], perfs: dict[str, dict] | None = None) -> list[dict]:
     ids = [t.id for t in rows]
+    perfs = perf.summary(db, "design", ids) if perfs is None else perfs
     mine: dict[str, set[str]] = {}
     if ids:
         for r in db.query(TemplateReaction).filter(TemplateReaction.user_id == user.id, TemplateReaction.template_id.in_(ids)):
@@ -59,13 +62,14 @@ def _cards(db: Session, user: User, rows: list[DesignTemplate]) -> list[dict]:
     for t in rows:
         card = _card(t, mine, origins)
         card["is_mine"] = t.user_id == user.id
+        card["perf"] = perfs.get(t.id)  # 이 템플릿으로 실제 게시한 글의 평균 성과 (모인 게 없으면 None)
         out.append(card)
     return out
 
 
 @router.get("/community/templates")
 def browse(
-    sort: str = Query(default="popular", pattern=r"^(popular|new)$"),
+    sort: str = Query(default="popular", pattern=r"^(popular|new|perf)$"),  # perf: 실제 게시 성과순
     category: str = Query(default="", max_length=20),
     q: str = Query(default="", max_length=40),  # 이름·태그·설명
     author: int | None = Query(default=None),
@@ -90,8 +94,15 @@ def browse(
         d = t.published_at or t.created_at or dt.datetime(2000, 1, 1)
         return d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)  # SQLite 는 시간대를 빼고 돌려줌
 
+    perfs = perf.summary(db, "design", [t.id for t in rows])
     if sort == "new":
         rows.sort(key=when, reverse=True)
+    elif sort == "perf":
+        # 반응률(도달 대비 반응) 순, 게시물이 적으면 덜 믿을 만해서 PERF_MIN 개 미만은 뒤로
+        def score(t: DesignTemplate) -> tuple:
+            p = perfs.get(t.id)
+            return (bool(p and p["posts"] >= PERF_MIN), p["rate"] if p else -1, p["posts"] if p else 0, when(t))
+        rows.sort(key=score, reverse=True)
     else:
         rows.sort(key=lambda t: (t.uses + t.likes * 3 + t.saves * 2, when(t)), reverse=True)
     total = len(rows)
@@ -100,7 +111,7 @@ def browse(
     if author is not None:
         any_t = db.query(DesignTemplate).filter(DesignTemplate.user_id == author, DesignTemplate.is_public == 1).order_by(DesignTemplate.published_at.desc()).first()
         author_name = any_t.author_name if any_t else ""
-    return {"data": _cards(db, user, rows), "total": total, "page": page, "has_more": page * PAGE < total,
+    return {"data": _cards(db, user, rows, perfs), "total": total, "page": page, "has_more": page * PAGE < total,
             "author": {"id": author, "name": author_name} if author is not None else None}
 
 

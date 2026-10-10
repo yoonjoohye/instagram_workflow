@@ -76,7 +76,21 @@ def _job_dict(job: GenerationJob) -> dict:
         "story_progress": _story_progress(job),
         # 작업 공간의 컨셉·주제 메모 (AI 버튼들이 참고)
         "settings": _settings(job),
+        # 예약 게시 (status=scheduled) · 매주 반복
+        "scheduled_at": _iso(job.scheduled_at),
+        "repeat_weekly": bool(job.repeat_weekly),
+        # 매주 반복으로 만들어 둔 다음 주 초안이면 {of: 지난 작업, suggest_at: 권하는 예약 시각}
+        "repeat": (job.plan or {}).get("repeat") if isinstance(job.plan, dict) else None,
+        # 게시 후 성과 (크론이 매일 갱신)
+        "perf": job.perf or None,
+        "template": {"kind": job.template_kind, "id": job.template_id} if job.template_id else None,
     }
+
+
+def _iso(t: dt.datetime | None) -> str | None:
+    if t is None:
+        return None
+    return (t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)).isoformat()
 
 
 @router.get("/jobs")

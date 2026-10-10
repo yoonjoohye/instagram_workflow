@@ -5,7 +5,9 @@
  *  AI 로 이미지를 만드는 순간 그 내용과 함께 작업을 만들고 그 작업 공간으로 이어집니다. */
 
 import { DesignGallery } from "@/components/design/DesignGallery";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import type { MessageKey } from "@/i18n/core";
+import { upcoming } from "@/lib/seasons";
 import { useMe } from "@/components/AdminShell";
 import { CaptionAiPanel, type CaptionPrefs, type CaptionWritten } from "@/components/studio/CaptionAiPanel";
 import { CaptionField } from "@/components/studio/CaptionField";
@@ -39,6 +41,9 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
   const [prefs, setPrefs] = useState<CaptionPrefs>({ caption_tone: "casual", caption_length: "auto", caption_requests: [] });
   const story = settings.post_type === "story";
   const [designing, setDesigning] = useState(false);
+  // 시즌 캘린더에서 고른 날 → 그 검색어로 템플릿 고르기를 엶
+  const [designSearch, setDesignSearch] = useState<string>();
+  const seasons = useMemo(() => upcoming(), []);
   const finalCaption = composeCaption(caption, hashtags);
 
   const saveLocal = (patch: SettingsPatch) => {
@@ -151,10 +156,42 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
         <WorkspaceSettings settings={settings} locked={false} onSave={saveLocal} defaultOpen />
 
         <Card title={t("studio.mediaTitle")} subtitle={t("studio.newMediaHint")}>
+          {/* 다가오는 기념일·시즌: 눌러서 어울리는 템플릿으로 시작 */}
+          {seasons.length > 0 && (
+            <div className="mb-3">
+              <p className="mb-1.5 text-[12px] text-fg-3">
+                <span className="font-semibold text-fg-2">{t("growth.seasonTitle")}</span> · {t("growth.seasonHint")}
+              </p>
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                {seasons.map((s) => {
+                  const name = t(`growth.s_${s.key}` as MessageKey);
+                  return (
+                    <button
+                      key={`${s.key}${s.date}`}
+                      type="button"
+                      onClick={() => {
+                        if (!settings.topic.trim()) setSettings((x) => ({ ...x, topic: t("growth.seasonTopic", { name }) }));
+                        setDesignSearch(s.search);
+                        setDesigning(true);
+                      }}
+                      className="flex shrink-0 items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-[12px] hover:border-line-strong"
+                    >
+                      <span>{s.emoji}</span>
+                      <span className="font-medium">{name}</span>
+                      <span className="tnum text-fg-3">{s.days === 0 ? t("growth.ddayToday") : t("growth.dday", { n: s.days })}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {/* 망고보드처럼 디자인된 틀을 골라 시작 */}
           <button
             type="button"
-            onClick={() => setDesigning(true)}
+            onClick={() => {
+              setDesignSearch(undefined);
+              setDesigning(true);
+            }}
             className="mb-3 flex w-full items-center gap-3 rounded-lg border border-line bg-surface-2 px-4 py-3 text-left hover:border-line-strong"
           >
             <span className="flex-1">
@@ -182,6 +219,7 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
         {designing && (
           <DesignGallery
             story={story}
+            initialSearch={designSearch}
             onClose={() => setDesigning(false)}
             onCreated={(job) => {
               setDesigning(false);

@@ -19,7 +19,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from ..db import get_db
 from ..deps import current_account, current_user
 from ..models import Account, DesignTemplate, GenerationJob, MediaBlob, TemplateReaction, User
+from ..services import perf
 from ..services import studio as svc
+from ..services.studio import outline
 from .studio import MAX_LAYERS_BYTES, MAX_UPLOAD_BYTES, UPLOAD_SIDE, _media_url, _save_blob, _sync_kind
 from .workflow import _job_dict
 
@@ -30,6 +32,7 @@ MAX_THEMES = 20
 MAX_TEMPLATES = 40
 _COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _FONT = re.compile(r"^[a-z_]{2,30}$")
+_TPL_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 BG = "__BG__"
 
 
@@ -70,11 +73,21 @@ async def create_design(
     imgs: list[UploadFile] = File(...),  # 장마다 완성 그림
     post_type: str = Form(default="feed", pattern=r"^(feed|story)$"),
     name: str = Form(default="", max_length=40),  # 고른 템플릿 이름 (작업 제목)
+    template_kind: str = Form(default="", pattern=r"^(builtin|design)?$"),  # 성과를 템플릿별로 모으려고
+    template_id: str = Form(default="", max_length=40),
+    caption: str = Form(default="", max_length=2200),  # 글로 카드뉴스를 만들 때 함께 쓴 캡션
+    hashtags: str = Form(default="[]", max_length=2000),
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ) -> dict:
     """템플릿으로 만든 장들로 작업 공간을 엽니다. 장마다 사진 편집기에서 바로 이어서 고칠 수 있습니다."""
     layers = _pages(pages, len(imgs))
+    if not template_kind or not _TPL_ID.match(template_id) or (template_kind == "design" and db.get(DesignTemplate, template_id) is None):
+        template_kind, template_id = "", ""
+    try:
+        tags = [str(x).lstrip("#")[:60] for x in json.loads(hashtags) if str(x).strip()][:30]
+    except (ValueError, TypeError):
+        tags = []
     if len(bgs) != len(imgs):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "장마다 그림이 필요합니다.")
     assets = []
@@ -92,7 +105,8 @@ async def create_design(
     story = post_type == "story"
     job = GenerationJob(
         account_id=account.id, prompt=name.strip() or "디자인 템플릿", media_kind="STORIES" if story else "IMAGE",
-        tone="", status="ready", provider="original/design", error="", caption="", hashtags=[],
+        tone="", status="ready", provider="original/design", error="", caption="" if story else caption.strip(), hashtags=[] if story else tags,
+        template_kind=template_kind, template_id=template_id,
         plan={"slides": [{"role": "photo"} for _ in assets], "original": True, "post_type": post_type, "design": name.strip()},
         assets=assets,
     )
@@ -188,7 +202,15 @@ def _own_template(db: Session, user: User, template_id: str) -> DesignTemplate:
 @router.get("/studio/templates")
 def list_templates(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     rows = db.query(DesignTemplate).filter(DesignTemplate.user_id == user.id).order_by(DesignTemplate.created_at.desc()).all()
-    return {"data": [_mine(t) for t in rows]}
+    perfs = perf.summary(db, "design", [t.id for t in rows])
+    return {"data": [{**_mine(t), "perf": perfs.get(t.id)} for t in rows]}
+
+
+@router.get("/studio/templates/performance")
+def template_performance(account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """템플릿 고르기에서 보여 줄 성과: 내 계정 평균과 비교(mine) + 기본 템플릿을 쓴 모든 게시물 평균(builtin)"""
+    used = {tid for (tid,) in db.query(GenerationJob.template_id).filter(GenerationJob.template_kind == "builtin").distinct()}
+    return {"mine": perf.versus_account(db, account), "builtin": perf.summary(db, "builtin", used)}
 
 
 @router.get("/studio/templates/{template_id}")
@@ -260,3 +282,15 @@ def delete_template(template_id: str, user: User = Depends(current_user), db: Se
     db.delete(t)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── 글 → 카드뉴스 ──────────────────────────────────────────
+class OutlineIn(BaseModel):
+    text: str = Field(min_length=10, max_length=6000)
+    pages: int = Field(default=4, ge=1, le=MAX_PAGES - 2)  # 본문 장 수 (표지·마무리 빼고)
+
+
+@router.post("/studio/cardnews/outline")
+def cardnews_outline(body: OutlineIn, account: Account = Depends(current_account)) -> dict:
+    """붙여 넣은 글을 표지·본문·마무리로 나눔 (+ 캡션·해시태그). AI 가 안 되면 문단 그대로 나눔."""
+    return outline.outline(body.text, body.pages)

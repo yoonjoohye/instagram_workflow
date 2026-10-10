@@ -43,7 +43,15 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 # create_all 은 기존 테이블에 컬럼을 추가하지 않으므로, 나중에 생긴 컬럼은 여기서 보강합니다.
 _ADDED_COLUMNS = {
     "insight_snapshots": {"totals_synced": "INTEGER DEFAULT 0"},
-    "generation_jobs": {"plan": "JSON"},
+    "generation_jobs": {
+        "plan": "JSON",
+        "template_kind": "VARCHAR(12) DEFAULT ''",
+        "template_id": "VARCHAR(40) DEFAULT ''",
+        "perf": "JSON",
+        "perf_synced_at": "TIMESTAMP WITH TIME ZONE",
+        "scheduled_at": "TIMESTAMP WITH TIME ZONE",
+        "repeat_weekly": "INTEGER DEFAULT 0",
+    },
     "users": {"birth_date": "DATE", "phone": "VARCHAR(20) DEFAULT ''", "filter_presets": "JSON", "design_themes": "JSON"},
     "accounts": {
         "user_id": "INTEGER REFERENCES users(id) ON DELETE SET NULL",

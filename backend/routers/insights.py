@@ -16,6 +16,7 @@ from ..schemas import CommentsToggle
 from ..security import encrypt
 from ..services import insights as svc
 from ..services import media_sync
+from ..services import perf as perf_svc
 from ..services import sentiment as sentiment_svc
 from ..services.meta_graph import GraphError
 
@@ -313,6 +314,7 @@ def cron_sync(request: Request, db: Session = Depends(get_db)) -> dict:
                 _persist_reach(db, account, series)
                 _backfill_day_totals(db, account, client, days=30, limit=10)
                 sentiment_svc.sync(db, account, client, media_limit=12)
+                perf_svc.sync(db, account, client)  # 템플릿별 성과 (게시 후 30일)
             synced += 1
         except Exception as exc:  # 한 계정 실패가 전체를 막지 않도록
             failed.append({"account": account.username, "error": str(exc)})

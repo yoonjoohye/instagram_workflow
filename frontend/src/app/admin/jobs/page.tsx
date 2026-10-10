@@ -7,15 +7,16 @@ import { Badge, Button, Empty, Notice, PageHeader, Segmented, Skeleton, StatusDo
 import { useT } from "@/i18n/client";
 import type { MessageKey } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
-import { fmtRelative, KIND_LABEL, mediaSrc, STATUS_LABEL } from "@/lib/format";
+import { fmtDateTime, fmtRelative, KIND_LABEL, mediaSrc, STATUS_LABEL } from "@/lib/format";
 import { statusTone } from "@/lib/status";
 import type { Job, JobStatus, ListOf } from "@/lib/types";
 
-type Filter = "all" | "ready" | "published" | "failed" | "deleted" | "expired";
+type Filter = "all" | "ready" | "scheduled" | "published" | "failed" | "deleted" | "expired";
 
 const FILTERS: { value: Filter; label: MessageKey }[] = [
   { value: "all", label: "jobs.filterAll" },
   { value: "ready", label: "jobs.filterReady" },
+  { value: "scheduled", label: "format.status.scheduled" },
   { value: "published", label: "jobs.filterPublished" },
   { value: "failed", label: "jobs.filterFailed" },
   { value: "deleted", label: "format.status.deleted" },
@@ -129,6 +130,13 @@ function JobCard({ job, onDelete }: { job: Job; onDelete: () => void }) {
           </Badge>
           <span className="text-[12px] text-fg-3">{fmtRelative(job.published_at ?? job.created_at)}</span>
         </div>
+        {job.status === "scheduled" && job.scheduled_at && (
+          <p className="mt-2 text-[12px] font-medium text-accent">
+            ⏰ {t("growth.scheduledAt", { when: fmtDateTime(job.scheduled_at) })}
+            {job.repeat_weekly && " · 🔁"}
+          </p>
+        )}
+        {job.repeat && job.status === "ready" && <p className="mt-2 text-[12px] font-medium text-warn">🔁 {t("growth.repeatScheduleAt", { when: fmtDateTime(job.repeat.suggest_at) })}</p>}
         <p className="mt-2 line-clamp-2 text-[13px] font-medium">{job.prompt}</p>
         <p className="mt-1 line-clamp-2 text-[12px] text-fg-3">{job.caption}</p>
         {job.status === "failed" && job.error && <p className="mt-2 line-clamp-2 text-[12px] text-bad">{job.error}</p>}

@@ -15,12 +15,12 @@ import { Button, cx, Empty, inputClass, Notice, PageHeader, Skeleton } from "@/c
 import { useT } from "@/i18n/client";
 import type { MessageKey } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
-import type { Asset } from "@/lib/types";
+import type { Asset, TemplatePerf } from "@/lib/types";
 
 const ImageEditor = dynamic(() => import("@/components/editor/ImageEditor").then((m) => m.ImageEditor), { ssr: false });
 
 type Base = { id: string; name: string; post_type: "feed" | "story"; pages: number; thumb_url: string };
-type Mine = Base & { is_public: boolean; hidden: boolean; category: string; tags: string[]; description: string; author_name: string; uses: number; likes: number; saves: number; remix_of: string };
+type Mine = Base & { is_public: boolean; hidden: boolean; category: string; tags: string[]; description: string; author_name: string; uses: number; likes: number; saves: number; remix_of: string; perf?: TemplatePerf | null };
 type Card = Base & {
   category: string;
   tags: string[];
@@ -33,6 +33,8 @@ type Card = Base & {
   saved: boolean;
   is_mine: boolean;
   remix_of: { id: string; name: string; author: string } | null;
+  /** 이 템플릿으로 실제 게시한 글의 평균 성과 */
+  perf?: TemplatePerf | null;
 };
 type Session = { mode: TemplateMode; layers: string };
 type Tab = "community" | "mine" | "saved";
@@ -195,7 +197,7 @@ function Community({
   onError: (e: string) => void;
 }) {
   const t = useT();
-  const [sort, setSort] = useState<"popular" | "new">("popular");
+  const [sort, setSort] = useState<"popular" | "new" | "perf">("popular");
   const [cat, setCat] = useState("");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
@@ -253,6 +255,10 @@ function Community({
           <button type="button" onClick={() => setSort("new")} className={chip(sort === "new")}>
             {t("design.sortNew")}
           </button>
+          <button type="button" onClick={() => setSort("perf")} className={chip(sort === "perf")} title={t("growth.perfExplain")}>
+            📈 {t("growth.sortPerf")}
+          </button>
+          {sort === "perf" && <p className="order-last basis-full text-[11px] text-fg-3">{t("growth.perfExplain")}</p>}
           <span className="mx-1 h-4 w-px bg-line" />
           <button type="button" onClick={() => setCat("")} className={chip(cat === "")}>
             {t("design.all")}
@@ -361,6 +367,7 @@ function CardGrid({
           </button>
           {c.remix_of && <p className="truncate text-[11px] text-fg-3">↻ {t("design.remixFrom", { name: c.remix_of.name, author: c.remix_of.author })}</p>}
           <p className="text-[11px] text-fg-3">{t("design.stats", { likes: c.likes, uses: c.uses })}</p>
+          {c.perf && <p className="text-[11px] font-medium text-accent">📈 {t("growth.tplPerf", { n: c.perf.posts, rate: c.perf.rate })}</p>}
           <div className="flex flex-wrap items-center gap-1">
             <Button size="sm" variant="primary" onClick={() => onUse(c.id)}>
               {t("design.use")}
@@ -467,6 +474,7 @@ function MineList({
               {m.pages > 1 && <span className="text-fg-3"> · {m.pages}{t("design.pages")}</span>}
             </p>
             {m.is_public && <p className="text-[11px] text-fg-3">{t("design.stats", { likes: m.likes, uses: m.uses })}</p>}
+            {m.perf && <p className="text-[11px] font-medium text-accent">📈 {t("growth.tplPerf", { n: m.perf.posts, rate: m.perf.rate })}</p>}
             <div className="flex flex-wrap gap-1">
               <Button size="sm" variant="primary" onClick={() => onUse(m.id)}>
                 {t("design.use")}

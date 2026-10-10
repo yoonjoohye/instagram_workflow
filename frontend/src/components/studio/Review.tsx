@@ -12,6 +12,8 @@ import { AutoReplyFields, autoReplyDirty, autoReplyForm, autoReplyOn, autoReplyS
 import { IconExternal, IconSpark } from "@/components/icons";
 import { AudioTrack, MediaStrip } from "@/components/studio/MediaStrip";
 import { InstagramPreview } from "@/components/studio/InstagramPreview";
+import { FeedGrid, PerfStats } from "@/components/studio/FeedGrid";
+import { ScheduleDialog } from "@/components/studio/ScheduleDialog";
 import { StoryPreview } from "@/components/studio/StoryPreview";
 import { HashtagField } from "@/components/studio/HashtagField";
 import { CaptionAiPanel } from "@/components/studio/CaptionAiPanel";
@@ -53,6 +55,10 @@ export function Review({
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
   const [editingVideo, setEditingVideo] = useState<number | null>(null);
+  // 예약 창 (initial: 처음 고를 시각 — 다음 주 초안이면 권하는 시각)
+  const [scheduling, setScheduling] = useState<{ initial?: string | null } | null>(null);
+  // 미리보기: 게시물 하나 / 내 피드(프로필 격자)에 넣어 보기
+  const [view, setView] = useState<"post" | "feed">("post");
   // 댓글 자동 응답은 게시 흐름의 일부로 함께 저장합니다 (스토리는 댓글이 없어 제외).
   const supportsAutoReply = Boolean(job) && job!.media_kind !== "STORIES";
   const arRule = useApi<AutoReplyRule>(job && supportsAutoReply ? `/autoreply/jobs/${job.id}` : null);
@@ -151,19 +157,40 @@ export function Review({
     }
   }
 
+  /** 예약 전에: 고친 캡션·자동 응답 저장, 뒤에서 올리는 동영상 기다리기 */
+  async function beforeSchedule(): Promise<boolean> {
+    if ((dirty || arDirty) && !(await save())) return false;
+    await waitForUploads(job!.assets.map((a) => a.url));
+    return true;
+  }
+
+  async function unschedule() {
+    if (!window.confirm(t("growth.unscheduleConfirm"))) return;
+    try {
+      onChange(await api<Job>(`/workflow/jobs/${job!.id}/schedule`, { method: "DELETE" }));
+    } catch (e) {
+      setError(toApiError(e).message);
+    }
+  }
+
   // ── 오른쪽: 올라갈 모습 + 임시저장 / 게시 ───────────────────────
   const canPublish =
     !locked || (isStory && job.status === "publishing" && !!progress && progress.done < progress.total);
+  const scheduled = job.status === "scheduled" && !!job.scheduled_at;
+  const blocked = overCaption || overTags || !arValid || visual.length === 0;
   const actionButtons = (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-[1fr_auto_1fr] gap-2">
       <Button onClick={save} disabled={!(dirty || arDirty) || !arValid || publishing} loading={saving}>
         {saved ? t("studio.draftSaved") : t("studio.saveDraft")}
+      </Button>
+      <Button onClick={() => setScheduling({ initial: job.scheduled_at ?? job.repeat?.suggest_at })} disabled={blocked || publishing || job.status === "publishing"}>
+        {t("growth.schedule")}
       </Button>
       <Button
         variant="primary"
         onClick={publish}
         loading={publishing}
-        disabled={overCaption || overTags || !arValid || visual.length === 0 || quota.data?.remaining === 0}
+        disabled={blocked || quota.data?.remaining === 0}
       >
         {isStory
           ? publishing && progress
@@ -198,11 +225,54 @@ export function Review({
         }
         subtitle={t("studio.livePreviewHint")}
       >
+        {scheduled && (
+          <div className="mb-3">
+            <Notice tone="accent" title={`⏰ ${t("growth.scheduledFor", { when: fmtDateTime(job.scheduled_at!) })}`}>
+              {job.repeat_weekly && <span className="mr-2">🔁 {t("growth.scheduledRepeat")}</span>}
+              <span className="mt-1 flex gap-3">
+                <button type="button" className="underline" onClick={() => setScheduling({ initial: job.scheduled_at })}>
+                  {t("growth.changeTime")}
+                </button>
+                <button type="button" className="underline" onClick={unschedule}>
+                  {t("growth.unschedule")}
+                </button>
+              </span>
+            </Notice>
+          </div>
+        )}
+        {job.repeat && !scheduled && job.status !== "published" && (
+          <div className="mb-3">
+            <Notice tone="warn" title={`🔁 ${t("growth.repeatDraft")}`}>
+              <button type="button" className="underline" onClick={() => setScheduling({ initial: job.repeat!.suggest_at })}>
+                {t("growth.repeatScheduleAt", { when: fmtDateTime(job.repeat.suggest_at) })}
+              </button>
+            </Notice>
+          </div>
+        )}
+
+        {!isStory && (
+          <div className="mb-3 grid grid-cols-2 rounded-lg bg-surface-2 p-0.5 text-[12px]" role="tablist">
+            {(["post", "feed"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={view === v}
+                onClick={() => setView(v)}
+                className={cx("rounded-md py-1.5 font-medium", view === v ? "bg-surface-0 text-fg shadow-sm" : "text-fg-3")}
+              >
+                {v === "post" ? t("growth.tabPost") : t("growth.tabFeed")}
+              </button>
+            ))}
+          </div>
+        )}
         {isStory ? (
           <>
             <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={visual} />
             <StoryLinks assets={visual} published={job.status === "published"} />
           </>
+        ) : view === "feed" ? (
+          <FeedGrid cover={visual[0]} />
         ) : (
           <InstagramPreview
             username={me.username}
@@ -223,6 +293,11 @@ export function Review({
                 t("studio.publishedLater")
               )}
             </Notice>
+            {!isStory && (
+              <div className="mt-3">
+                <PerfStats perf={job.perf} />
+              </div>
+            )}
           </div>
         )}
 
@@ -433,6 +508,18 @@ export function Review({
           }}
           onClose={() => setEditing(null)}
           onSaved={reload}
+        />
+      )}
+      {scheduling && (
+        <ScheduleDialog
+          job={job}
+          initial={scheduling.initial}
+          beforeSchedule={beforeSchedule}
+          onClose={() => setScheduling(null)}
+          onDone={(j) => {
+            setScheduling(null);
+            onChange(j);
+          }}
         />
       )}
       {editingVideo !== null && visual[editingVideo]?.type === "video" && (

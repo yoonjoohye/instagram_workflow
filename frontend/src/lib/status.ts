@@ -11,6 +11,7 @@ export function statusTone(status: JobStatus): Tone {
     case "expired":
       return "neutral";
     case "ready":
+    case "scheduled":
       return "accent";
     case "generating":
     case "publishing":

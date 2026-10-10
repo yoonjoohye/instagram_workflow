@@ -193,6 +193,16 @@ class GenerationJob(Base):
     permalink: Mapped[str] = mapped_column(Text, default="")
     published_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # 디자인 템플릿으로 만들었으면 그 템플릿 (builtin: 기본 템플릿 id, design: 회원 템플릿 id) — 게시 후 성과를 템플릿별로 모음
+    template_kind: Mapped[str] = mapped_column(String(12), default="")
+    template_id: Mapped[str] = mapped_column(String(40), default="", index=True)
+    # 게시물 성과 (도달·좋아요·댓글·저장·공유) — 매일 크론이 게시 후 30일 동안 갱신
+    perf: Mapped[Any] = mapped_column(JSON, default=dict)
+    perf_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # 예약 게시 (status=scheduled) · 매주 반복이면 올린 뒤 다음 주 초안을 만들어 둠
+    scheduled_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    repeat_weekly: Mapped[int] = mapped_column(Integer, default=0)
+
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

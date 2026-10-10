@@ -1006,6 +1006,45 @@ export function pagesOf(tpl: Template, bodyCount = 3): { page: Page; n?: number 
   ];
 }
 
+/** 글로 채우기 (글 → 카드뉴스): 표지 제목·부제목, 본문 장마다 제목·설명, 마무리 한 줄 */
+export type TextFill = {
+  cover: { title: string; sub: string };
+  pages: { title: string; body: string }[];
+  end: { title: string };
+};
+
+/** 장의 글자 자리 중 바꿔 넣을 곳: 번호·쪽수·계정·짧은 꼬리표(CARD NEWS, Q 등)는 빼고 큰 글자부터 (제목 → 설명) */
+function textSlots(page: Page): number[] {
+  return page.els
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => e.t === "text" && e.size >= 36 && !/\{n\}|\{page\}|^@/.test(e.text) && e.text.replace(/\s/g, "").length > 3)
+    .sort((a, b) => (b.e as { size: number }).size - (a.e as { size: number }).size || (a.e as { y: number }).y - (b.e as { y: number }).y)
+    .map(({ i }) => i);
+}
+
+function withTexts(page: Page, texts: string[]): Page {
+  const slots = textSlots(page);
+  const els = page.els.map((e, i) => {
+    const k = slots.indexOf(i);
+    const v = k >= 0 ? texts[k]?.trim() : "";
+    return v && e.t === "text" ? { ...e, text: v } : e;
+  });
+  return { ...page, els };
+}
+
+/** pagesOf 결과에 글을 채움 (표지·본문·마무리 순서대로, 비어 있는 칸은 템플릿 글 그대로) */
+export function fillPages(pages: { page: Page; n?: number }[], fill: TextFill | null): { page: Page; n?: number }[] {
+  if (!fill) return pages;
+  return pages.map((p, i) => {
+    if (i === 0) return { ...p, page: withTexts(p.page, [fill.cover.title, fill.cover.sub]) };
+    if (p.n) {
+      const body = fill.pages[p.n - 1];
+      return body ? { ...p, page: withTexts(p.page, [body.title, body.body]) } : p;
+    }
+    return { ...p, page: withTexts(p.page, [fill.end.title]) };
+  });
+}
+
 /** 사진 칸 수 (바탕 사진 포함) */
 export const photoSlots = (page: Page) => (page.bg.kind === "photo" ? 1 : 0) + page.els.filter((e) => e.t === "photo").length;
 

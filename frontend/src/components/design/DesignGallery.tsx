@@ -13,14 +13,28 @@ import { useT } from "@/i18n/client";
 import type { MessageKey } from "@/i18n/core";
 import { api, toApiError, useApi } from "@/lib/api";
 import { applyTheme, buildPage, exportPage, thumbOf } from "@/lib/design/render";
-import { CATEGORIES, pageSize, pagesOf, photoSlots, TEMPLATE_KEYWORDS, TEMPLATES, type Category, type Template } from "@/lib/design/templates";
+import { CATEGORIES, fillPages, pageSize, pagesOf, photoSlots, TEMPLATE_KEYWORDS, TEMPLATES, type Category, type Template, type TextFill } from "@/lib/design/templates";
 import { BUILTIN_THEMES, THEME_KEYWORDS, type Theme } from "@/lib/design/themes";
 import { loadFont } from "@/lib/fonts";
 import { uploadPhoto } from "@/lib/uploads";
-import type { Job } from "@/lib/types";
+import type { Job, TemplatePerf } from "@/lib/types";
 
 /** 내 템플릿 또는 모두의 템플릿 (community: 다른 회원이 공개한 것 — 장은 /community 에서, 만들면 사용 수 +1) */
-type Mine = { id: string; name: string; post_type: "feed" | "story"; pages: number; thumb_url: string; community?: boolean; author?: { name: string } };
+type Mine = {
+  id: string;
+  name: string;
+  post_type: "feed" | "story";
+  pages: number;
+  thumb_url: string;
+  community?: boolean;
+  author?: { name: string };
+  /** 이 템플릿으로 실제 게시한 글의 평균 성과 */
+  perf?: TemplatePerf | null;
+};
+/** 템플릿 성과: 내 평균과 비교(mine, 'builtin:id'·'design:id') · 기본 템플릿 전체 평균(builtin) */
+type Perf = { mine: Record<string, { posts: number; saved_x: number | null; reach_x: number | null; rate: number }>; builtin: Record<string, TemplatePerf> };
+/** 글 → 카드뉴스 결과 (+ 캡션·해시태그, ai: AI 로 다듬었는지) */
+type Outline = TextFill & { caption: string; hashtags: string[]; ai: boolean };
 type Cat = "all" | Category | "mine" | "community";
 
 const loadFabric = () => import("fabric");
@@ -28,9 +42,9 @@ const themeLabel = (t: ReturnType<typeof useT>, th: Theme) => (th.mine ? th.name
 
 /** 템플릿 표지를 그 테마로 작게 그림 (같은 조합은 다시 그리지 않음) */
 const thumbCache = new Map<string, string>();
-async function thumbFor(f: typeof F, tpl: Template, theme: Theme, photos: string[] = [], page = 0, bodyCount = 3): Promise<string> {
-  const pages = pagesOf(tpl, bodyCount);
-  const key = `${tpl.id}|${page}|${JSON.stringify(theme)}|${photos.join(",")}`;
+async function thumbFor(f: typeof F, tpl: Template, theme: Theme, photos: string[] = [], page = 0, bodyCount = 3, fill: TextFill | null = null): Promise<string> {
+  const pages = fillPages(pagesOf(tpl, bodyCount), fill);
+  const key = `${tpl.id}|${page}|${JSON.stringify(theme)}|${photos.join(",")}|${fill ? JSON.stringify(pages[page].page) : ""}`;
   const hit = thumbCache.get(key);
   if (hit) return hit;
   const { page: p, n } = pages[page];
@@ -45,6 +59,7 @@ export function DesignGallery({
   story,
   initialMineId,
   initialCommunityId,
+  initialSearch,
   onCreated,
   onClose,
 }: {
@@ -53,6 +68,8 @@ export function DesignGallery({
   initialMineId?: string;
   /** 모두의 템플릿 하나를 골라 둔 채로 열기 */
   initialCommunityId?: string;
+  /** 이 검색어로 열기 (시즌 캘린더에서) */
+  initialSearch?: string;
   onCreated: (job: Job) => void;
   onClose: () => void;
 }) {
@@ -62,8 +79,9 @@ export function DesignGallery({
   const myThemes = useApi<{ data: { id: string; name: string; colors: Theme["colors"]; fonts: Theme["fonts"] }[] }>("/studio/themes");
   const mine = useApi<{ data: Mine[] }>(cat === "mine" ? "/studio/templates" : null);
   // 검색 (템플릿 이름·종류·관련 낱말, 테마 이름·색·분위기, 모두의 템플릿은 서버에서)
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState(initialSearch ?? "");
+  const [query, setQuery] = useState((initialSearch ?? "").trim().toLowerCase());
+  const perf = useApi<Perf>("/studio/templates/performance");
   useEffect(() => {
     const id = setTimeout(() => setQuery(search.trim().toLowerCase()), 250);
     return () => clearTimeout(id);
@@ -88,6 +106,13 @@ export function DesignGallery({
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string>();
   const [editingTheme, setEditingTheme] = useState(false);
+  // 내 피드 색으로 만든 테마 (저장 전 — 테마 편집 창에서 이름을 정해 저장)
+  const [feedTheme, setFeedTheme] = useState<Theme | null>(null);
+  const [readingFeed, setReadingFeed] = useState(false);
+  // 글 → 카드뉴스
+  const [fillText, setFillText] = useState("");
+  const [fill, setFill] = useState<Outline | null>(null);
+  const [filling, setFilling] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const id = initialMineId || initialCommunityId;
@@ -148,14 +173,14 @@ export function DesignGallery({
       const out: string[] = [];
       for (let i = 0; i < pages.length && alive; i++) {
         const need = photoSlots(pages[i].page);
-        out.push(await thumbFor(f, picked, shown, queue.splice(0, need), i, bodyCount));
+        out.push(await thumbFor(f, picked, shown, queue.splice(0, need), i, bodyCount, fill));
         if (alive) setPagePreviews([...out]);
       }
     })().catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [picked, shown, bodyCount, photoUrls]);
+  }, [picked, shown, bodyCount, photoUrls, fill]);
 
   const slots = picked ? pagesOf(picked, bodyCount).reduce((n, p) => n + photoSlots(p.page), 0) : 0;
 
@@ -171,7 +196,7 @@ export function DesignGallery({
       if (picked) {
         post = picked.post;
         name = t(`design.tpl_${picked.id.replace("-", "_")}` as MessageKey);
-        const pages = pagesOf(picked, bodyCount);
+        const pages = fillPages(pagesOf(picked, bodyCount), fill);
         setBusy({ done: 0, total: pages.length + files.length });
         const urls: string[] = [];
         for (const file of files) {
@@ -213,6 +238,13 @@ export function DesignGallery({
       form.append("pages", JSON.stringify(layers));
       form.append("post_type", post);
       form.append("name", name);
+      // 어떤 템플릿으로 만들었는지 (게시 후 성과를 템플릿별로 모음)
+      form.append("template_kind", picked ? "builtin" : "design");
+      form.append("template_id", picked ? picked.id : pickedMine!.id);
+      if (picked && fill) {
+        form.append("caption", fill.caption);
+        form.append("hashtags", JSON.stringify(fill.hashtags));
+      }
       const res = await fetch("/api/py/studio/designs", { method: "POST", body: form, credentials: "include" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.detail || res.status);
@@ -224,6 +256,44 @@ export function DesignGallery({
     } finally {
       setBusy(null);
     }
+  }
+
+  /** 내 피드(최근 게시물) 사진 색으로 테마 만들기 → 테마 편집 창에서 다듬어 저장 */
+  async function themeFromFeed() {
+    setError(undefined);
+    setReadingFeed(true);
+    try {
+      const r = await api<{ colors: Theme["colors"] }>("/studio/themes/from-feed", { method: "POST" });
+      setFeedTheme({ id: "feed", name: t("growth.fromFeedName"), mine: true, colors: r.colors, fonts: { heading: "pretendard", body: "pretendard" } });
+    } catch (e) {
+      setError(t("growth.fromFeedFail", { e: toApiError(e).message }));
+    } finally {
+      setReadingFeed(false);
+    }
+  }
+
+  /** 붙여 넣은 글을 표지·본문·마무리로 나눠 템플릿 글자 자리에 넣음 */
+  async function runFill() {
+    setError(undefined);
+    setFilling(true);
+    try {
+      const r = await api<Outline>("/studio/cardnews/outline", { method: "POST", json: { text: fillText, pages: bodyCount } });
+      setFill(r);
+      setBodyCount(Math.max(1, r.pages.length));
+    } catch (e) {
+      setError(toApiError(e).message);
+    } finally {
+      setFilling(false);
+    }
+  }
+
+  /** 템플릿 카드 아래 성과 한 줄 (내 평균과 비교가 되면 그것, 아니면 모두의 평균) */
+  function perfLine(kind: "builtin" | "design", id: string, own?: TemplatePerf | null): string | null {
+    const vs = perf.data?.mine[`${kind}:${id}`];
+    if (vs?.saved_x && vs.saved_x >= 1.2) return t("growth.tplVsMine", { x: vs.saved_x });
+    if (vs?.reach_x && vs.reach_x >= 1.2) return t("growth.tplVsMineReach", { x: vs.reach_x });
+    const all = own ?? (kind === "builtin" ? perf.data?.builtin[id] : null);
+    return all && all.posts >= 2 ? t("growth.tplPerf", { n: all.posts, rate: all.rate }) : null;
   }
 
   async function removeTheme(th: Theme) {
@@ -325,6 +395,9 @@ export function DesignGallery({
             )}
           </span>
         ))}
+        <button type="button" onClick={themeFromFeed} disabled={readingFeed} className="shrink-0 rounded-full border border-accent/50 bg-accent/5 px-3 py-1 text-[12px] text-fg">
+          {readingFeed ? t("growth.fromFeedBusy") : t("growth.fromFeed")}
+        </button>
         <button type="button" onClick={() => setEditingTheme(true)} className="shrink-0 rounded-full border border-dashed border-line px-3 py-1 text-[12px] text-fg-2">
           {t("design.newTheme")}
         </button>
@@ -377,6 +450,7 @@ export function DesignGallery({
                         </button>
                       )}
                     </div>
+                    {perfLine("design", m.id, m.perf) && <p className="truncate text-[11px] font-medium text-accent">📈 {perfLine("design", m.id, m.perf)}</p>}
                   </div>
                 ))}
               </div>
@@ -393,6 +467,7 @@ export function DesignGallery({
                     key={tpl.id}
                     type="button"
                     onClick={() => {
+                      if (picked?.id !== tpl.id) setFill(null);
                       setPicked(tpl);
                       setPickedMine(null);
                       setFiles([]);
@@ -419,6 +494,7 @@ export function DesignGallery({
                       {t(`design.tpl_${tpl.id.replace("-", "_")}` as MessageKey)}
                       {tpl.category === "cardnews" && <span className="text-fg-3"> · {t("design.cardnews")}</span>}
                     </span>
+                    {perfLine("builtin", tpl.id) && <span className="block truncate text-[11px] font-medium text-accent">📈 {perfLine("builtin", tpl.id)}</span>}
                   </button>
                 );
               })}
@@ -450,6 +526,31 @@ export function DesignGallery({
                       {t("design.pages")}
                     </span>
                   </label>
+                )}
+                {picked.category === "cardnews" && picked.body && (
+                  <div className="space-y-1.5 rounded-lg border border-line p-3">
+                    <p className="text-[13px] font-semibold">{t("growth.fillTitle")}</p>
+                    <p className="text-[12px] leading-relaxed text-fg-3">{t("growth.fillHint")}</p>
+                    <textarea
+                      value={fillText}
+                      onChange={(e) => setFillText(e.target.value)}
+                      maxLength={6000}
+                      rows={4}
+                      placeholder={t("growth.fillPlaceholder")}
+                      className="w-full resize-y rounded-md border border-line bg-surface-1 px-2.5 py-2 text-[13px]"
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" onClick={runFill} loading={filling} disabled={filling || fillText.trim().length < 10 || !!busy}>
+                        {filling ? t("growth.fillRunning") : t("growth.fillRun")}
+                      </Button>
+                      {fill && (
+                        <button type="button" onClick={() => setFill(null)} className="text-[12px] text-fg-3 underline">
+                          {t("growth.fillClear")}
+                        </button>
+                      )}
+                    </div>
+                    {fill && <p className="text-[12px] text-good">{fill.ai ? t("growth.fillDone", { n: fill.pages.length }) : t("growth.fillDoneNoAi", { n: fill.pages.length })}</p>}
+                  </div>
                 )}
                 {slots > 0 && (
                   <div className="space-y-1.5">
@@ -493,6 +594,17 @@ export function DesignGallery({
         )}
       </div>
 
+      {feedTheme && (
+        <ThemeEditor
+          base={feedTheme}
+          onClose={() => setFeedTheme(null)}
+          onSaved={(saved) => {
+            myThemes.reload();
+            setThemeId(saved.id);
+            setFeedTheme(null);
+          }}
+        />
+      )}
       {editingTheme && (
         <ThemeEditor
           base={shown}

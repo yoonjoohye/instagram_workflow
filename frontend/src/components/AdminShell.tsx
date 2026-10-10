@@ -53,6 +53,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     void fetch("/api/py/health?warm=1", { cache: "no-store" }).catch(() => undefined);
   }, []);
+  // 시각이 지난 내 예약 게시물을 올림 (10분마다 도는 확인보다 먼저 화면을 열었을 때)
+  const loggedIn = Boolean(session.data);
+  useEffect(() => {
+    if (loggedIn) void fetch("/api/py/workflow/scheduled/run", { method: "POST", credentials: "include" }).catch(() => undefined);
+  }, [loggedIn]);
 
   // 로그인하지 않았으면 로그인 화면으로 (끝나면 이 화면으로 돌아옴)
   useEffect(() => {
