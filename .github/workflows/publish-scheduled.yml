@@ -1,0 +1,22 @@
+# 예약 게시: 10분마다 시각이 된 예약 게시물을 올리게 서버를 부릅니다.
+# (Vercel 무료 요금제의 크론은 하루 한 번뿐이라 GitHub Actions 로 — GitHub 사정에 따라 몇 분 늦을 수 있음)
+# 저장소 Secrets 의 SCHEDULER_SECRET 은 Vercel 환경 변수 SCHEDULER_SECRET 과 같은 값이어야 합니다.
+name: publish-scheduled
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Publish due posts
+        env:
+          SECRET: ${{ secrets.SCHEDULER_SECRET }}
+        run: |
+          curl -fsS --max-time 70 -H "Authorization: Bearer $SECRET" https://juiceisfizzio.site/api/py/cron/publish-due
