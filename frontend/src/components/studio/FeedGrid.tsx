@@ -5,29 +5,33 @@
 
 import { useT } from "@/i18n/client";
 import { useApi } from "@/lib/api";
-import type { Asset } from "@/lib/types";
-import { Skeleton } from "@/components/ui";
+import { cx, Skeleton } from "@/components/ui";
 
 type FeedItem = { id: string; thumb: string; permalink: string; media_type: string };
 
-export function FeedGrid({ cover }: { cover?: Asset }) {
+/** covers: 새로 올릴 게시물 그림 (프로필에 보이는 순서, 왼쪽 위부터 — 그리드 분할이면 여러 장) */
+export function FeedGrid({ covers, rows = 4, compact }: { covers: string[]; rows?: number; compact?: boolean }) {
   const t = useT();
-  const feed = useApi<{ data: FeedItem[] }>("/studio/feed?limit=11");
-  const src = cover ? cover.thumbnail_url || cover.url : "";
+  const shown = Math.max(rows * 3, covers.length + 3);
+  const feed = useApi<{ data: FeedItem[] }>(`/studio/feed?limit=${Math.min(24, Math.max(3, shown - covers.length))}`);
   if (feed.error) return <p className="py-6 text-center text-[12px] text-fg-3">{t("growth.feedFail", { e: feed.error.message })}</p>;
   return (
     <div>
-      <p className="mb-2 text-[12px] text-fg-3">{feed.data && !feed.data.data.length ? t("growth.feedEmpty") : t("growth.feedHint")}</p>
-      <div className="grid grid-cols-3 gap-0.5 overflow-hidden rounded-md">
-        <div className="relative aspect-[3/4] bg-surface-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {src && <img src={src} alt="" className="h-full w-full object-cover" />}
-          <span className="absolute inset-0 ring-2 ring-inset ring-accent" aria-hidden />
-          <span className="absolute top-1 left-1 rounded bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-white">{t("growth.feedNew")}</span>
-        </div>
+      {!compact && <p className="mb-2 text-[12px] text-fg-3">{feed.data && !feed.data.data.length ? t("growth.feedEmpty") : t("growth.feedHint")}</p>}
+      {/* 칸 사이 간격은 인스타 프로필처럼 아주 얇게 (조각을 이어 붙였을 때 실제처럼 보이게) */}
+      <div className={cx("grid grid-cols-3 gap-px overflow-hidden rounded-md", covers.length > 1 ? "bg-black" : "bg-transparent")}>
+        {(covers.length ? covers : [""]).map((src, i) => (
+          <div key={`new${i}`} className="relative aspect-[3/4] bg-surface-2">
+            {/* 4:5 게시물은 프로필에서 가운데 3:4 만 보임 — object-cover 가 같은 부분을 보여 줌 */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {src && <img src={src} alt="" className="h-full w-full object-cover" />}
+            {covers.length <= 1 && <span className="absolute inset-0 ring-2 ring-inset ring-accent" aria-hidden />}
+            {i === 0 && <span className="absolute top-1 left-1 rounded bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-white">{t("growth.feedNew")}</span>}
+          </div>
+        ))}
         {feed.loading && !feed.data
-          ? Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="aspect-[3/4] rounded-none" />)
-          : (feed.data?.data ?? []).map((m) => (
+          ? Array.from({ length: shown - Math.max(1, covers.length) }, (_, i) => <Skeleton key={i} className="aspect-[3/4] rounded-none" />)
+          : (feed.data?.data ?? []).slice(0, shown - Math.max(1, covers.length)).map((m) => (
               <a key={m.id} href={m.permalink} target="_blank" rel="noreferrer" className="relative block aspect-[3/4] bg-surface-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={m.thumb} alt="" loading="lazy" className="h-full w-full object-cover" />

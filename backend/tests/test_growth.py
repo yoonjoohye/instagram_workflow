@@ -226,3 +226,45 @@ def test_cron_publish_due_needs_secret(monkeypatch, client):
     monkeypatch.setattr(schedule.settings, "scheduler_secret", "s3cret")
     assert client.get("/cron/publish-due").status_code == 401
     assert client.get("/cron/publish-due", headers={"authorization": "Bearer s3cret"}).status_code == 200
+
+
+# ── 그리드 분할 (퍼즐 피드) ───────────────────────────────
+def _uploads(db, account, n):
+    ids = []
+    for i in range(n):
+        b = MediaBlob(id=f"tile{i}{account.id}", account_id=account.id, kind="upload", data=_jpg("red", (108, 135)), width=108, height=135)
+        db.add(b)
+        ids.append(b.id)
+    db.commit()
+    return ids
+
+
+def test_grid_split_creates_posts_in_publish_order(client, login, account, db):
+    login(account)
+    ids = _uploads(db, account, 6)
+    assert client.post("/studio/grid", json={"upload_ids": ids[:4]}).status_code == 422  # 3의 배수만
+    r = client.post("/studio/grid", json={"upload_ids": ids, "caption": "큰 그림", "hashtags": ["#퍼즐피드"]})
+    assert r.status_code == 201, r.text
+    jobs = r.json()["jobs"]
+    # 오른쪽 아래(격자 자리 5)부터 올리고, 왼쪽 위(0)가 마지막 — 캡션은 왼쪽 위에만
+    assert [j["grid"]["index"] for j in jobs] == [5, 4, 3, 2, 1, 0]
+    assert [j["grid"]["order"] for j in jobs] == list(range(6)) and jobs[0]["grid"]["rows"] == 2
+    assert jobs[-1]["caption"] == "큰 그림" and jobs[-1]["hashtags"] == ["퍼즐피드"] and jobs[0]["caption"] == ""
+    assert all(j["media_kind"] == "IMAGE" and len(j["assets"]) == 1 for j in jobs)
+    same = client.post("/studio/grid", json={"upload_ids": ids[:3], "caption": "c", "caption_all": True}).json()["jobs"]
+    assert all(j["caption"] == "c" for j in same)
+
+
+def test_scheduled_grid_keeps_order(monkeypatch, client, login, account, db):
+    login(account)
+    jobs = client.post("/studio/grid", json={"upload_ids": _uploads(db, account, 3)}).json()["jobs"]
+    # 시각을 거꾸로 걸어도(나중 조각이 먼저) 올릴 순서대로만 올라감
+    for k, j in enumerate(jobs):
+        client.post(f"/workflow/jobs/{j['id']}/schedule", json={"at": (NOW + dt.timedelta(hours=1)).isoformat()})
+        row = db.get(GenerationJob, j["id"])
+        row.scheduled_at = NOW - dt.timedelta(minutes=10 - k) if k else NOW - dt.timedelta(minutes=1)
+    db.commit()
+    fake, calls = _fake_publish()
+    monkeypatch.setattr(schedule, "publish_job", fake)
+    schedule.run_due(db)
+    assert calls == [j["id"] for j in jobs]

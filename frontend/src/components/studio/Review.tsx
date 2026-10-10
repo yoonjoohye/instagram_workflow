@@ -59,6 +59,9 @@ export function Review({
   const [scheduling, setScheduling] = useState<{ initial?: string | null } | null>(null);
   // 미리보기: 게시물 하나 / 내 피드(프로필 격자)에 넣어 보기
   const [view, setView] = useState<"post" | "feed">("post");
+  // 그리드 분할 조각이면 같은 묶음에서 아직 안 올린 조각들을 함께 프로필 미리보기에
+  const group = job?.grid?.group;
+  const siblings = useApi<{ data: Job[] }>(group ? "/workflow/jobs?limit=100" : null);
   // 댓글 자동 응답은 게시 흐름의 일부로 함께 저장합니다 (스토리는 댓글이 없어 제외).
   const supportsAutoReply = Boolean(job) && job!.media_kind !== "STORIES";
   const arRule = useApi<AutoReplyRule>(job && supportsAutoReply ? `/autoreply/jobs/${job.id}` : null);
@@ -177,6 +180,17 @@ export function Review({
   const canPublish =
     !locked || (isStory && job.status === "publishing" && !!progress && progress.done < progress.total);
   const scheduled = job.status === "scheduled" && !!job.scheduled_at;
+  const thumbOf = (a?: Asset) => (a ? a.thumbnail_url || a.url : "");
+  const gridCovers = group
+    ? (siblings.data?.data ?? [job])
+        .filter((j) => j.grid?.group === group && (j.id === job.id || j.status !== "published"))
+        .sort((a, b) => a.grid!.index - b.grid!.index)
+        .map((j) => thumbOf(j.id === job.id ? visual[0] : j.assets[0]))
+    : [thumbOf(visual[0])];
+  // 퍼즐 피드 조각: 먼저 올려야 할 조각이 아직 남았으면 경고 (순서가 틀리면 그림이 어긋남)
+  const gridBefore = group && job.status !== "published"
+    ? (siblings.data?.data ?? []).filter((j) => j.grid?.group === group && j.grid.order < job.grid!.order && j.status !== "published").length
+    : 0;
   const blocked = overCaption || overTags || !arValid || visual.length === 0;
   const actionButtons = (
     <div className="grid grid-cols-[1fr_auto_1fr] gap-2">
@@ -225,6 +239,15 @@ export function Review({
         }
         subtitle={t("studio.livePreviewHint")}
       >
+        {gridBefore > 0 && (
+          <div className="mb-3">
+            <Notice tone="warn" title={`🧩 ${t("growth.gridNotYet", { n: job.grid!.order + 1, k: gridBefore })}`}>
+              <Link href="/admin/jobs" className="underline">
+                {t("growth.gridToJobs")}
+              </Link>
+            </Notice>
+          </div>
+        )}
         {scheduled && (
           <div className="mb-3">
             <Notice tone="accent" title={`⏰ ${t("growth.scheduledFor", { when: fmtDateTime(job.scheduled_at!) })}`}>
@@ -251,7 +274,7 @@ export function Review({
         )}
 
         {!isStory && (
-          <div className="mb-3 grid grid-cols-2 rounded-lg bg-surface-2 p-0.5 text-[12px]" role="tablist">
+          <div className="mb-3 grid grid-cols-2 rounded-lg bg-surface-2 p-0.5 text-[12px] xl:hidden" role="tablist">
             {(["post", "feed"] as const).map((v) => (
               <button
                 key={v}
@@ -271,15 +294,17 @@ export function Review({
             <StoryPreview username={me.username} avatar={me.profile_picture_url} assets={visual} />
             <StoryLinks assets={visual} published={job.status === "published"} />
           </>
-        ) : view === "feed" ? (
-          <FeedGrid cover={visual[0]} />
         ) : (
-          <InstagramPreview
-            username={me.username}
-            avatar={me.profile_picture_url}
-            assets={visual}
-            caption={finalCaption}
-          />
+          // 넓은 화면: 게시물과 프로필(전체 게시물)을 나란히 / 좁은 화면: 위 탭으로 바꿔 보기
+          <div className="xl:grid xl:grid-cols-2 xl:gap-4">
+            <div className={cx(view === "feed" && "hidden xl:block")}>
+              <InstagramPreview username={me.username} avatar={me.profile_picture_url} assets={visual} caption={finalCaption} />
+            </div>
+            <div className={cx(view === "post" && "hidden xl:block")}>
+              <p className="mb-1.5 hidden text-[12px] font-medium text-fg-2 xl:block">{t("growth.tabFeed")}</p>
+              <FeedGrid covers={gridCovers} />
+            </div>
+          </div>
         )}
 
         {job.status === "published" && (
@@ -341,7 +366,7 @@ export function Review({
   );
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+    <div className={cx("grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_380px]", !isStory && "xl:grid-cols-[minmax(0,1fr)_640px]")}>
       {/* ── 왼쪽: 편집 ── */}
       <div className="min-w-0 space-y-6">
         {/* 휴대폰·태블릿: 올라갈 모습(게시물·스토리 미리보기)을 맨 위에 (넓은 화면은 오른쪽에 고정) */}

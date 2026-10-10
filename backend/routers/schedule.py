@@ -145,6 +145,20 @@ def _next_week_draft(db: Session, job: GenerationJob) -> GenerationJob:
     return draft
 
 
+def _grid_waiting(db: Session, job: GenerationJob) -> bool:
+    """그리드 분할 조각은 순서대로만: 같은 묶음에서 먼저 올릴 조각이 아직 안 올라갔으면 기다림
+    (크론과 화면 열기가 동시에 돌아도 순서가 뒤섞이지 않게)"""
+    grid = (job.plan or {}).get("grid") if isinstance(job.plan, dict) else None
+    if not grid:
+        return False
+    for other in db.scalars(select(GenerationJob).where(GenerationJob.account_id == job.account_id, GenerationJob.id != job.id,
+                                                        GenerationJob.status.in_(("scheduled", "publishing", "ready", "failed")))):
+        g = (other.plan or {}).get("grid") if isinstance(other.plan, dict) else None
+        if g and g.get("group") == grid.get("group") and g.get("order", 0) < grid.get("order", 0):
+            return True
+    return False
+
+
 def _claim(db: Session, job_id: int) -> bool:
     """여러 곳에서 동시에 불러도 한 곳만 올리게: scheduled 인 것만 publishing 으로 바꿈"""
     res = db.execute(update(GenerationJob).where(GenerationJob.id == job_id, GenerationJob.status == "scheduled").values(status="publishing"))
@@ -189,22 +203,31 @@ def run_due(db: Session, account_id: int | None = None, budget: float = RUN_BUDG
         q = q.where(GenerationJob.account_id == account_id)
     ids = list(db.scalars(q.order_by(GenerationJob.scheduled_at)))
     out: dict[str, int] = {}
-    for job_id in ids:
-        if time.monotonic() - start > budget:
-            break
-        if not _claim(db, job_id):
-            continue
-        job = db.get(GenerationJob, job_id)
-        try:
-            result = _publish_one(db, job)
-        except Exception as exc:  # noqa: BLE001 — 하나가 실패해도 나머지는 계속
-            log.exception("scheduled publish crashed job=%s", job_id)
-            db.rollback()
+    pending = list(ids)
+    # 그리드 조각은 앞 조각이 올라가야 다음 차례라, 하나라도 올라가면 남은 것을 다시 훑음
+    progressed = True
+    while pending and progressed:
+        progressed = False
+        for job_id in list(pending):
+            if time.monotonic() - start > budget:
+                return {"due": len(ids), **out}
+            if _grid_waiting(db, db.get(GenerationJob, job_id)):
+                continue
+            pending.remove(job_id)
+            if not _claim(db, job_id):
+                continue
             job = db.get(GenerationJob, job_id)
-            job.status, job.error = "failed", f"예약 게시 실패: {exc}"
-            db.commit()
-            result = "failed"
-        out[result] = out.get(result, 0) + 1
+            try:
+                result = _publish_one(db, job)
+            except Exception as exc:  # noqa: BLE001 — 하나가 실패해도 나머지는 계속
+                log.exception("scheduled publish crashed job=%s", job_id)
+                db.rollback()
+                job = db.get(GenerationJob, job_id)
+                job.status, job.error = "failed", f"예약 게시 실패: {exc}"
+                db.commit()
+                result = "failed"
+            out[result] = out.get(result, 0) + 1
+            progressed = progressed or result == "published"
     return {"due": len(ids), **out}
 
 

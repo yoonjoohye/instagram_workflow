@@ -5,6 +5,7 @@
  *  AI 로 이미지를 만드는 순간 그 내용과 함께 작업을 만들고 그 작업 공간으로 이어집니다. */
 
 import { DesignGallery } from "@/components/design/DesignGallery";
+import { GridSplit } from "@/components/studio/GridSplit";
 import { useMemo, useState } from "react";
 import type { MessageKey } from "@/i18n/core";
 import { upcoming } from "@/lib/seasons";
@@ -41,6 +42,7 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
   const [prefs, setPrefs] = useState<CaptionPrefs>({ caption_tone: "casual", caption_length: "auto", caption_requests: [] });
   const story = settings.post_type === "story";
   const [designing, setDesigning] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   // 시즌 캘린더에서 고른 날 → 그 검색어로 템플릿 고르기를 엶
   const [designSearch, setDesignSearch] = useState<string>();
   const seasons = useMemo(() => upcoming(), []);
@@ -200,6 +202,20 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
             </span>
             <span className="text-fg-3">›</span>
           </button>
+          {/* 큰 사진을 3열로 잘라 프로필에서 하나로 보이게 (퍼즐 피드) — 피드 게시물만 */}
+          {!story && (
+            <button
+              type="button"
+              onClick={() => setSplitting(true)}
+              className="mb-3 flex w-full items-center gap-3 rounded-lg border border-line bg-surface-2 px-4 py-3 text-left hover:border-line-strong"
+            >
+              <span className="flex-1">
+                <span className="block text-[14px] font-semibold">{t("growth.gridOpen")}</span>
+                <span className="block text-[12px] text-fg-3">{t("growth.gridOpenHint")}</span>
+              </span>
+              <span className="text-fg-3">›</span>
+            </button>
+          )}
           <MediaStrip assets={[]} onAdd={addFiles} onGenerate={generate} />
           <div className="mt-4">
             <PhotoLibraryPanel busy={finding} canFind={settings.topic.trim().length >= 2} onReadyChange={() => {}} onFind={findFromLibrary} />
@@ -216,6 +232,7 @@ export function NewWorkspace({ onCreated }: { onCreated: (job: Job) => void }) {
           )}
         </Card>
 
+        {splitting && <GridSplit onClose={() => setSplitting(false)} />}
         {designing && (
           <DesignGallery
             story={story}

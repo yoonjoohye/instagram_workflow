@@ -21,7 +21,7 @@ from fastapi import (
 )
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -970,3 +970,48 @@ def finalize(job_id: int, account: Account = Depends(current_account), db: Sessi
     db.commit()
     db.refresh(job)
     return _job_dict(job)
+
+
+# ── 그리드 분할 (퍼즐 피드) ─────────────────────────────────
+class GridIn(BaseModel):
+    upload_ids: list[str] = Field(min_length=3, max_length=12)  # 조각 사진 — 프로필에 보이는 순서 (왼쪽 위부터)
+    caption: str = Field(default="", max_length=2200)
+    hashtags: list[Annotated[str, Field(max_length=100)]] = Field(default_factory=list, max_length=30)
+    caption_all: bool = False  # 모든 조각에 같은 캡션 (아니면 마지막에 올라가는 왼쪽 위 조각에만)
+
+    @field_validator("upload_ids")
+    @classmethod
+    def _whole_rows(cls, v: list[str]) -> list[str]:
+        if len(v) % 3:  # 프로필은 3열 — 3의 배수여야 기존 게시물과 줄이 맞음
+            raise ValueError("3의 배수만큼 나눠야 합니다.")
+        return v
+
+
+@router.post("/studio/grid", status_code=status.HTTP_201_CREATED)
+def grid_split(body: GridIn, account: Account = Depends(current_account), db: Session = Depends(get_db)) -> dict:
+    """큰 사진을 나눈 조각마다 게시물(작업)을 만듭니다. 프로필 격자는 최신 글이 왼쪽 위라서
+    오른쪽 아래 조각부터 올려야 하므로, 올릴 순서(order)대로 돌려줍니다."""
+    blobs = _blobs(db, account, body.upload_ids)
+    if len(blobs) != len(body.upload_ids) or any(b.kind == "video" for b in blobs):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "조각 사진을 찾을 수 없습니다.")
+    group = secrets.token_urlsafe(8)
+    total = len(blobs)
+    tags = [h.lstrip("#").strip() for h in body.hashtags if h.strip()]
+    jobs = []
+    for index, blob in enumerate(blobs):
+        order = total - 1 - index  # 0 = 가장 먼저 올림 (오른쪽 아래)
+        first_in_grid = index == 0
+        job = GenerationJob(
+            account_id=account.id, prompt=f"그리드 분할 {index + 1}/{total}", media_kind="IMAGE", tone="", status="ready",
+            provider="original/grid", error="",
+            caption=body.caption.strip() if (first_in_grid or body.caption_all) else "",
+            hashtags=tags if (first_in_grid or body.caption_all) else [],
+            plan={"slides": [{"role": "photo"}], "original": True, "post_type": "feed",
+                  "grid": {"group": group, "index": index, "order": order, "total": total, "rows": total // 3}},
+            assets=[_original_asset(blob)],
+        )
+        db.add(job)
+        jobs.append(job)
+    db.commit()
+    jobs.sort(key=lambda j: j.plan["grid"]["order"])
+    return {"group": group, "jobs": [_job_dict(j) for j in jobs]}

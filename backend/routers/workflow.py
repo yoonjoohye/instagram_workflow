@@ -84,6 +84,8 @@ def _job_dict(job: GenerationJob) -> dict:
         # 게시 후 성과 (크론이 매일 갱신)
         "perf": job.perf or None,
         "template": {"kind": job.template_kind, "id": job.template_id} if job.template_id else None,
+        # 그리드 분할(퍼즐 피드) 조각이면 {group, index: 격자 자리(왼쪽 위 0), order: 올릴 순서, total, rows}
+        "grid": (job.plan or {}).get("grid") if isinstance(job.plan, dict) else None,
     }
 
 

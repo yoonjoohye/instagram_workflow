@@ -93,6 +93,8 @@ export type Job = {
   /** 게시 후 성과 (매일 갱신) */
   perf?: PostPerf | null;
   template?: { kind: "builtin" | "design"; id: string } | null;
+  /** 그리드 분할(퍼즐 피드) 조각: index = 프로필 자리(왼쪽 위 0), order = 올릴 순서(0 이 먼저) */
+  grid?: { group: string; index: number; order: number; total: number; rows: number } | null;
 };
 
 export type PostPerf = { reach: number; likes: number; comments: number; saved: number; shares: number };
